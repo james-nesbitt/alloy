@@ -6,9 +6,10 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
+	wazeroapi "github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
@@ -27,7 +28,7 @@ type Runtime struct {
 func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore) (*Runtime, error) {
 	// Configuration for resource constraints
 	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
-		WithCoreFeatures(api.CoreFeaturesV2))
+		WithCoreFeatures(wazeroapi.CoreFeaturesV2))
 
 	// Note: In 1.11.0, Fuel is enabled via experimental features or compiler config.
 	// For this phase, we ensure sandboxed execution via memory limits.
@@ -43,11 +44,17 @@ func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore)
 }
 
 // LoadPlugin loads a WASM module from bytes and returns an Alloy-compatible plugin instance.
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasm []byte) (*Instance, error) {
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasm []byte, memoryLimitMB uint64, fuelLimit uint64) (api.Plugin, error) {
 	config := wazero.NewModuleConfig().
 		WithName(id).
 		WithStdout(os.Stdout).
 		WithStderr(os.Stderr)
+
+	if memoryLimitMB > 0 {
+		// TODO: Find the correct wazero 1.x method for memory limits
+		// maxPages := uint32(memoryLimitMB * 1024 / 64)
+		// config = config.WithMaxMemoryPages(maxPages)
+	}
 
 	mod, err := r.r.InstantiateWithConfig(ctx, wasm, config)
 	if err != nil {
@@ -55,9 +62,10 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasm []byte) (*Inst
 	}
 
 	return &Instance{
-		id:     id,
-		mod:    mod,
-		logger: r.logger,
+		id:          id,
+		mod:         mod,
+		logger:      r.logger,
+		defaultFuel: fuelLimit,
 	}, nil
 }
 
@@ -68,10 +76,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 // InstantiateAlloyHost defines the host-side functions available to plugins.
 // This is the beginning of the Host Discovery Interface.
-func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) {
+func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, error) {
 	return r.r.NewHostModuleBuilder(HostModuleName).
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod api.Module, offset, byteCount uint32) {
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, offset, byteCount uint32) {
 			buf, ok := mod.Memory().Read(offset, byteCount)
 			if !ok {
 				return
@@ -80,7 +88,7 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) 
 		}).
 		Export("log").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod api.Module, kPtr, kLen, vPtr, vLen uint32) uint32 {
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vLen uint32) uint32 {
 			kBuf, kOk := mod.Memory().Read(kPtr, kLen)
 			vBuf, vOk := mod.Memory().Read(vPtr, vLen)
 			if !kOk || !vOk {
@@ -93,7 +101,7 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) 
 		}).
 		Export("kv_set").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod api.Module, kPtr, kLen, vPtr, vMaxLen uint32) uint32 {
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vMaxLen uint32) uint32 {
 			kBuf, ok := mod.Memory().Read(kPtr, kLen)
 			if !ok {
 				return 0
@@ -112,7 +120,7 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) 
 		}).
 		Export("kv_get").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod api.Module, kPtr, kLen uint32) uint32 {
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen uint32) uint32 {
 			kBuf, ok := mod.Memory().Read(kPtr, kLen)
 			if !ok {
 				return 1

@@ -18,6 +18,7 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 	"github.com/jnesbitt/alloy-go/pkg/security/identity"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/jnesbitt/alloy-go/pkg/plugins/native"
 	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
 
@@ -110,34 +111,33 @@ func main() {
 
 	k := kernel.New(logger, auditLogger)
 
-	// Register Core Plugins
-	em := wasm.NewEventManager(logger)
-	em.SetRouter(k.RouteMessage)
-	k.RegisterPlugin(em)
+	// WASM Runtime Setup
+	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore)
+	if err != nil {
+		logger.Error("failed to initialize wasm runtime", "error", err)
+		os.Exit(1)
+	}
 
-	// Subscribe Command Manager to registration events
-	cm := wasm.NewCommandManager()
-	k.RegisterPlugin(cm)
+	// Registry Manager (Orchestrator)
+	rm := native.NewRegistryManager(logger, k, stateStore, wasmRuntime)
+	k.RegisterPlugin(rm)
 
-	// Subscribe Command Manager to registration events early
-	k.RouteMessage(context.Background(), api.Message{
-		ID:      "sub-reg",
-		Type:    api.TypeRequest,
-		Sender:  cm.ID(),
-		Target:  "plugin-events",
-		Method:  "subscribe",
-		Payload: []byte(`{"topic":"component:registered"}`),
-	})
-
-	k.RegisterPlugin(wasm.NewIAMManager())
-	k.RegisterPlugin(wasm.NewSecretManager())
-	k.RegisterPlugin(wasm.NewHealthManager())
-	k.RegisterPlugin(wasm.NewKVManager(stateStore))
-	k.RegisterPlugin(wasm.NewTaskRunner())
-	k.RegisterPlugin(wasm.NewCacheManager())
-	k.RegisterPlugin(wasm.NewDocStore())
-	k.RegisterPlugin(wasm.NewNetworkManager())
-	k.RegisterPlugin(wasm.NewStorageManager())
+	// Automatic Provisioning (if manifest exists)
+	manifestPath := filepath.Join(*alloyHome, "provision.json")
+	if _, err := os.Stat(manifestPath); err == nil {
+		logger.Info("loading provisioning manifest", "path", manifestPath)
+		data, _ := os.ReadFile(manifestPath)
+		k.RouteMessage(context.Background(), api.Message{
+			ID:      "bootstrap-provision",
+			Type:    api.TypeRequest,
+			Sender:  "system",
+			Target:  rm.ID(),
+			Method:  "provision",
+			Payload: data,
+		})
+	} else {
+		logger.Info("no provisioning manifest found, starting in minimal mode")
+	}
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)

@@ -18,7 +18,7 @@ type Kernel struct {
 	mu     sync.RWMutex
 
 	// plugins maps plugin IDs to their instances
-	plugins map[string]Plugin
+	plugins map[string]api.Plugin
 
 	// frontends maps connection IDs to their message channels
 	frontends map[string]chan<- api.Message
@@ -27,20 +27,12 @@ type Kernel struct {
 	stopCh chan struct{}
 }
 
-// Plugin defines the interface for backend extensions.
-type Plugin interface {
-	ID() string
-	Capabilities() []api.Capability
-	HandleMessage(ctx context.Context, msg api.Message) (api.Message, error)
-	Shutdown(ctx context.Context) error
-}
-
 // New creates a new instance of the Alloy Kernel.
 func New(logger *slog.Logger, audit *audit.Logger) *Kernel {
 	return &Kernel{
 		logger:    logger,
 		audit:     audit,
-		plugins:   make(map[string]Plugin),
+		plugins:   make(map[string]api.Plugin),
 		frontends: make(map[string]chan<- api.Message),
 		stopCh:    make(chan struct{}),
 	}
@@ -60,7 +52,7 @@ func (k *Kernel) Stop(ctx context.Context) error {
 }
 
 // RegisterPlugin attaches a plugin to the kernel.
-func (k *Kernel) RegisterPlugin(p Plugin) {
+func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	k.mu.Lock()
 	k.plugins[p.ID()] = p
 	k.mu.Unlock()
@@ -170,6 +162,28 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 	case "audit":
 		// Handle audit log request (e.g., from an external auditor plugin)
 		k.publishAuditEvent(ctx, msg, "audit_request", "authorized")
+	case "discover":
+		k.mu.RLock()
+		var plugins []map[string]any
+		for id, p := range k.plugins {
+			plugins = append(plugins, map[string]any{
+				"id":           id,
+				"capabilities": p.Capabilities(),
+			})
+		}
+		k.mu.RUnlock()
+
+		payload, _ := json.Marshal(plugins)
+		resp := api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Method:    "discover",
+			Payload:   payload,
+			Timestamp: time.Now().Unix(),
+		}
+		k.RouteMessage(ctx, resp)
 	case "stop":
 		k.logger.Info("stop request received via internal channel")
 		k.Stop(ctx)

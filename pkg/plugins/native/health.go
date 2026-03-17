@@ -1,4 +1,4 @@
-package wasm
+package native
 
 import (
 	"context"
