@@ -26,6 +26,49 @@ func SetHandler(h MessageHandler) {
 	handler = h
 }
 
+//go:wasmimport alloy log
+func alloyLog(ptr uint32, size uint32)
+
+//go:wasmimport alloy kv_set
+func alloyKVSet(kPtr, kLen, vPtr, vLen uint32) uint32
+
+//go:wasmimport alloy kv_get
+func alloyKVGet(kPtr, kLen, vPtr, vMaxLen uint32) uint32
+
+// Log sends a string to the host's logger.
+func Log(msg string) {
+	ptr := uintptr(unsafe.Pointer(unsafe.StringData(msg)))
+	alloyLog(uint32(ptr), uint32(len(msg)))
+}
+
+// KVSet stores data in the host's durable KV store.
+func KVSet(key string, value []byte) bool {
+	kPtr := uintptr(unsafe.Pointer(unsafe.StringData(key)))
+	vPtr := uintptr(unsafe.Pointer(&value[0]))
+	return alloyKVSet(uint32(kPtr), uint32(len(key)), uint32(vPtr), uint32(len(value))) == 0
+}
+
+// KVGet retrieves data from the host's durable KV store.
+func KVGet(key string) []byte {
+	kPtr := uintptr(unsafe.Pointer(unsafe.StringData(key)))
+
+	// 1. Determine size
+	size := alloyKVGet(uint32(kPtr), uint32(len(key)), 0, 0)
+	if size == 0 {
+		return nil
+	}
+
+	// 2. Read into buffer
+	buf := make([]byte, size)
+	vPtr := uintptr(unsafe.Pointer(&buf[0]))
+	actual := alloyKVGet(uint32(kPtr), uint32(len(key)), uint32(vPtr), size)
+	if actual != size {
+		return nil
+	}
+
+	return buf
+}
+
 // export malloc for the host to allocate memory in guest
 //
 //go:export malloc

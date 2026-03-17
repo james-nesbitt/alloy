@@ -95,10 +95,17 @@ func main() {
 		}
 	}
 
+	// State Setup
+	stateStore, err := kernel.NewFileStateStore(filepath.Join(getAlloyDataDir(), "state"))
+	if err != nil {
+		logger.Error("failed to initialize state store", "error", err)
+		os.Exit(1)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	k := kernel.New(logger, auditLogger)
+	k := kernel.New(logger, auditLogger, stateStore)
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)

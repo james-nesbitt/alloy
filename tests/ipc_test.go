@@ -18,7 +18,7 @@ func TestIPCMessageFlow(t *testing.T) {
 	defer cancel()
 
 	// 1. Start Kernel
-	k := kernel.New(logger, nil)
+	k := kernel.New(logger, nil, kernel.NewMemoryStateStore())
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

@@ -15,6 +15,7 @@ import (
 type Kernel struct {
 	logger *slog.Logger
 	audit  *audit.Logger
+	state  StateStore
 	mu     sync.RWMutex
 
 	// plugins maps plugin IDs to their instances
@@ -36,10 +37,11 @@ type Plugin interface {
 }
 
 // New creates a new instance of the Alloy Kernel.
-func New(logger *slog.Logger, audit *audit.Logger) *Kernel {
+func New(logger *slog.Logger, audit *audit.Logger, state StateStore) *Kernel {
 	return &Kernel{
 		logger:    logger,
 		audit:     audit,
+		state:     state,
 		plugins:   make(map[string]Plugin),
 		frontends: make(map[string]chan<- api.Message),
 		stopCh:    make(chan struct{}),

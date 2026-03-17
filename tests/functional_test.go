@@ -44,7 +44,7 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// 1. Initialize Kernel
-	k := kernel.New(logger, nil)
+	k := kernel.New(logger, nil, kernel.NewMemoryStateStore())
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
