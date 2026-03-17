@@ -111,6 +111,7 @@ func main() {
 	// Register Core Plugins
 	k.RegisterPlugin(wasm.NewEventManager())
 	k.RegisterPlugin(wasm.NewIAMManager())
+	k.RegisterPlugin(wasm.NewSecretManager())
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)
