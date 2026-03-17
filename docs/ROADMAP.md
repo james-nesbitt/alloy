@@ -16,25 +16,29 @@ Establish the micro-kernel, secure communication, and basic orchestration.
 - [x] **Audit & Logging**:
     - [x] **Structured Audit Log**: Persistent, tamper-evident record of identity-verified events.
 
-## Phase 2: WASM Enablement
+## Phase 2: WASM Enablement (Complete)
 Transform the kernel into a true plugin host.
 
-- [ ] **WASM Runtime (`pkg/wasm`)**:
-    - [ ] Integrate `wazero` for high-performance, sandboxed execution.
-    - [ ] Implement the **Host Discovery Interface**: How WASM plugins "see" the outside world.
-    - [ ] Standardize the **Guest ABI**: How plugins receive and send `api.Message` payloads.
-- [ ] **Plugin Lifecycle**:
-    - [ ] Kernel logic to load, initialize, and monitor `.wasm` modules.
+- [x] **WASM Runtime (`pkg/wasm`)**:
+    - [x] Integrate `wazero` for high-performance, sandboxed execution.
+    - [x] Implement the **Host Discovery Interface**: How WASM plugins "see" the outside world.
+    - [x] Standardize the **Guest ABI**: How plugins receive and send `api.Message` payloads.
+- [x] **Plugin Lifecycle**:
+    - [x] Kernel logic to load, initialize, and monitor `.wasm` modules.
+- [x] **Initial Guest SDK**: Go libraries for building Alloy-compatible plugins.
+
+## Phase 3: Core Plugins & Lifecycle Persistence
+Establishing the "Standard Library" and durable plugin state.
+
+- [ ] **Plugin State Persistence**:
+    - [ ] Kernel-managed `Save/Load` mechanism for plugin-local state.
+    - [ ] Host-provided KV storage interface for WASM guests.
+- [ ] **Core Plugins**:
+    - [ ] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
+    - [ ] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
+    - [ ] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions and discovery.
+- [ ] **Resource Lifecycle**:
     - [ ] Resource constraints (CPU Fuel, Memory Limits).
-- [ ] **Initial Guest SDK**: Go/Rust libraries for building Alloy-compatible plugins.
-
-## Phase 3: Core Plugins (The "Standard Library")
-Implementing functional blocks as isolated plugins (see [Plugin Details](PLUGINS_ROADMAP.md)).
-
-1. **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) and Key-Value store.
-2. **Identity & Access (`plugin-iam`)**: Moving from "Verified Identity" to "Authorized Actions" (RBAC).
-3. **Command Manager (`plugin-command-manager`)**: Centralized registry for executable actions.
-4. **Registry Manager (`plugin-registry-manager`)**: Handling plugin downloads and hot-updates.
 
 ## Phase 4: Application Plugins
 Logic-heavy plugins that provide the user experience.

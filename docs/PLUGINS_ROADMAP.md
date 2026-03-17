@@ -75,8 +75,13 @@ Manages the lifecycle of plugin artifacts and handles the logistics of keeping t
 When implementing these or new plugins, follow these principles:
 - **Kernel-Managed Lifecycle**: Plugins are started and stopped by the Backend Kernel. They should be designed to handle clean shutdowns and rapid startups.
 - **Isolation**: Each plugin is a standalone WASM module. It cannot access the memory of the kernel or other plugins directly.
-- **Stateless where possible**: Try to keep state in dedicated managers (like the Buffer Manager) or persistent storage.
-- **Event-Driven**: Use the IPC `TypeEvent` to notify frontends or other plugins of state changes.
+- **Local State Management**:
+    - Plugins are the **sole source of truth** for their logic domain (e.g. the Git plugin owns "current branch").
+    - **Persistence**: The kernel manages plugin state for loading/initializing via `SaveState` and `LoadState`.
+    - **Host KV**: The kernel provides host functions for plugins to save, load, and cache their internal data blocks without managing physical files.
+- **Communication via Commands & Events**:
+    - **Pull**: External components query state by calling plugin-advertised commands.
+    - **Push**: Plugins broadcast state changes via the `TypeEvent` message type.
 - **Plugin Inter-dependency**:
     - **Explicit Dependencies**: A plugin can require the presence of another (e.g., Chat requires IAM for permissions; Project Manager requires Storage and Buffer Manager).
     - **Optional Capabilities**: Gracefully degrade or enhance functionality based on available plugins (e.g., AI Agent enables "save to project" only if the Project Manager is active).
