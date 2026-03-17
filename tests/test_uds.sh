@@ -19,7 +19,7 @@ if [ ! -S "$SOCK" ]; then
 fi
 
 echo "Running alloy-cli ping via Unix socket..."
-./bin/alloy-cli ping --socket "$SOCK" --timeout 5
+./bin/alloy-cli ping --socket "unix://$SOCK" --timeout 5
 
 RESULT=$?
 

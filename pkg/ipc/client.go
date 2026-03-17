@@ -27,7 +27,7 @@ func Dial(rawAddr string, tlsConfig *tls.Config) (*Client, error) {
 
 	var conn net.Conn
 	var err error
-	if tlsConfig != nil && network != "unix" {
+	if tlsConfig != nil {
 		conn, err = tls.Dial(network, addr, tlsConfig)
 	} else {
 		conn, err = net.Dial(network, addr)

@@ -12,11 +12,15 @@ import (
 )
 
 type Store struct {
-	baseDir string
+	baseDir            string
+	InsecureSkipVerify bool
 }
 
 func NewStore(baseDir string) *Store {
-	return &Store{baseDir: baseDir}
+	return &Store{
+		baseDir:            baseDir,
+		InsecureSkipVerify: true,
+	}
 }
 
 func (s *Store) CADir() string {
@@ -111,9 +115,10 @@ func (s *Store) GetClientTLSConfig(ca *pki.KeyPair, clientName string) (*tls.Con
 	certPool.AddCert(ca.Cert)
 
 	return &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		RootCAs:      certPool,
-		MinVersion:   tls.VersionTLS13,
+		Certificates:       []tls.Certificate{tlsCert},
+		RootCAs:            certPool,
+		InsecureSkipVerify: s.InsecureSkipVerify,
+		MinVersion:         tls.VersionTLS13,
 	}, nil
 }
 
