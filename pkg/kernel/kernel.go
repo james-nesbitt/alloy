@@ -64,9 +64,23 @@ func (k *Kernel) Stop(ctx context.Context) error {
 // RegisterPlugin attaches a plugin to the kernel.
 func (k *Kernel) RegisterPlugin(p Plugin) {
 	k.mu.Lock()
-	defer k.mu.Unlock()
 	k.plugins[p.ID()] = p
+	k.mu.Unlock()
+
 	k.logger.Info("plugin registered", "plugin_id", p.ID())
+
+	// Emit registration event
+	caps, _ := json.Marshal(p.Capabilities())
+	k.RouteMessage(context.Background(), api.Message{
+		ID:     "event-reg-" + p.ID(),
+		Type:   api.TypeEvent,
+		Sender: "kernel",
+		Target: "plugin-events",
+		Method: "publish",
+		Payload: []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(caps) + `}}`),
+		Timestamp: time.Now().Unix(),
+	})
+
 	if k.audit != nil {
 		k.audit.Log(audit.Entry{Actor: "system", Action: "plugin_register", Target: p.ID(), Status: "success"})
 	}
@@ -129,9 +143,21 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 // RegisterFrontend registers a frontend's response channel.
 func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 	k.mu.Lock()
-	defer k.mu.Unlock()
 	k.frontends[id] = ch
+	k.mu.Unlock()
+
 	k.logger.Info("frontend registered", "frontend_id", id)
+
+	// Emit registration event
+	k.RouteMessage(context.Background(), api.Message{
+		ID:     "event-reg-" + id,
+		Type:   api.TypeEvent,
+		Sender: "kernel",
+		Target: "plugin-events",
+		Method: "publish",
+		Payload: []byte(`{"topic":"component:registered","data":{"id":"` + id + `","type":"frontend"}}`),
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
@@ -146,42 +172,6 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 			Target:    msg.Sender,
 			Method:    "ping",
 			Payload:   []byte(`{"status":"pong"}`),
-			Timestamp: time.Now().Unix(),
-		}
-		k.RouteMessage(ctx, resp)
-	case "discover":
-		k.mu.RLock()
-		type registration struct {
-			ID           string           `json:"id"`
-			Capabilities []api.Capability `json:"capabilities,omitempty"`
-			Type         string           `json:"type"`
-		}
-		var targets []registration
-		for id, p := range k.plugins {
-			targets = append(targets, registration{
-				ID:           id,
-				Capabilities: p.Capabilities(),
-				Type:         "plugin",
-			})
-		}
-		for id := range k.frontends {
-			targets = append(targets, registration{
-				ID:   id,
-				Type: "frontend",
-			})
-		}
-		k.mu.RUnlock()
-
-		payload, _ := json.Marshal(map[string]any{
-			"targets": targets,
-		})
-		resp := api.Message{
-			ID:        msg.ID + "-resp",
-			Type:      api.TypeResponse,
-			Sender:    "kernel",
-			Target:    msg.Sender,
-			Method:    "discover",
-			Payload:   payload,
 			Timestamp: time.Now().Unix(),
 		}
 		k.RouteMessage(ctx, resp)

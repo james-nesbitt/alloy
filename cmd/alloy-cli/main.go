@@ -120,7 +120,7 @@ func discover(args []string) {
 		ID:        "discover-1",
 		Type:      api.TypeRequest,
 		Sender:    "cli-discover",
-		Target:    "kernel",
+		Target:    "plugin-command-manager",
 		Method:    "discover",
 		Timestamp: time.Now().Unix(),
 	}

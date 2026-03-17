@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/ipc"
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
 	"github.com/jnesbitt/alloy-go/pkg/security/audit"
@@ -109,12 +110,33 @@ func main() {
 	k := kernel.New(logger, auditLogger, stateStore)
 
 	// Register Core Plugins
-	k.RegisterPlugin(wasm.NewEventManager())
+	em := wasm.NewEventManager(logger)
+	em.SetRouter(k.RouteMessage)
+	k.RegisterPlugin(em)
+
+	// Subscribe Command Manager to registration events
+	cm := wasm.NewCommandManager()
+	k.RegisterPlugin(cm)
+
+	// Subscribe Command Manager to registration events early
+	k.RouteMessage(context.Background(), api.Message{
+		ID:      "sub-reg",
+		Type:    api.TypeRequest,
+		Sender:  cm.ID(),
+		Target:  "plugin-events",
+		Method:  "subscribe",
+		Payload: []byte(`{"topic":"component:registered"}`),
+	})
+
 	k.RegisterPlugin(wasm.NewIAMManager())
 	k.RegisterPlugin(wasm.NewSecretManager())
 	k.RegisterPlugin(wasm.NewHealthManager())
-	k.RegisterPlugin(wasm.NewCommandManager())
 	k.RegisterPlugin(wasm.NewKVManager(stateStore))
+	k.RegisterPlugin(wasm.NewTaskRunner())
+	k.RegisterPlugin(wasm.NewCacheManager())
+	k.RegisterPlugin(wasm.NewDocStore())
+	k.RegisterPlugin(wasm.NewNetworkManager())
+	k.RegisterPlugin(wasm.NewStorageManager())
 	k.RegisterPlugin(wasm.NewTaskRunner())
 	k.RegisterPlugin(wasm.NewCacheManager())
 	k.RegisterPlugin(wasm.NewDocStore())

@@ -27,29 +27,35 @@ Transform the kernel into a true plugin host.
     - [x] Kernel logic to load, initialize, and monitor `.wasm` modules.
 - [x] **Initial Guest SDK**: Go libraries for building Alloy-compatible plugins.
 
-## Phase 3: Core Plugins & Lifecycle Persistence
-Establishing the "Standard Library" and durable plugin state.
+## Phase 3: Core Plugins & Infrastructure Refinement
+Establishing the "Standard Library", durable plugin state, and kernel "thinning".
 
-- [ ] **Plugin State Persistence**:
-    - [ ] Kernel-managed `Save/Load` mechanism for plugin-local state.
-    - [ ] Host-provided KV storage interface for WASM guests.
-- [ ] **Core Plugins & Standard Services**:
-    - [ ] **Infrastructure Plugins**:
-        - [ ] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
-        - [ ] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
-        - [ ] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions.
-        - [ ] **Event Bus (`plugin-events`)**: Advanced Pub/Sub and event filtering.
-    - [ ] **Standard Service Helpers**:
-        - [ ] **KV Store (`plugin-kv`)**: Simple persistent Key-Value service.
-        - [ ] **Cache Manager (`plugin-cache`)**: High-speed transient storage.
-        - [ ] **Doc Store (`plugin-doc`)**: Indexed document/search service.
-        - [ ] **Secret Manager (`plugin-secrets`)**: Policy-based encrypted storage.
-    - [ ] **Operations Core**:
-        - [ ] **Health & Monitoring (`plugin-health`)**: Resource tracking and heartbeat.
-        - [ ] **Task Runner (`plugin-tasks`)**: Scheduled and background job management.
-        - [ ] **Network Manager (`plugin-network`)**: Policy-enforced network/Fetch provider.
-- [ ] **Resource Lifecycle**:
+- [x] **Plugin State Persistence**:
+    - [x] Kernel-managed `Save/Load` mechanism for plugin-local state.
+    - [x] Host-provided KV storage interface for WASM guests.
+- [x] **Core Plugins & Standard Services**:
+    - [x] **Infrastructure Plugins**:
+        - [x] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
+        - [x] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
+        - [x] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions.
+        - [x] **Event Bus (`plugin-events`)**: Advanced Pub/Sub and event filtering.
+    - [x] **Standard Service Helpers**:
+        - [x] **KV Store (`plugin-kv`)**: Simple persistent Key-Value service.
+        - [x] **Cache Manager (`plugin-cache`)**: High-speed transient storage.
+        - [x] **Doc Store (`plugin-doc`)**: Indexed document/search service.
+        - [x] **Secret Manager (`plugin-secrets`)**: Policy-based encrypted storage.
+    - [x] **Operations Core**:
+        - [x] **Health & Monitoring (`plugin-health`)**: Resource tracking and heartbeat.
+        - [x] **Task Runner (`plugin-tasks`)**: Scheduled and background job management.
+        - [x] **Network Manager (`plugin-network`)**: Policy-enforced network/Fetch provider.
+- [ ] **Kernel "Thinning" & Decentralization**:
+    - [ ] **Decentralized Discovery**: Move `discover` logic from Kernel to `plugin-command-manager`.
+    - [ ] **Event-Driven Auditing**: Replace direct `AuditLogger` with `plugin-events` + a Logger plugin.
+    - [ ] **Middleware Interceptors**: Add high-performance "Pre-Route" hooks for `plugin-iam` authorization.
+    - [ ] **System Telemetry**: Delegate resource tracking and health state to `plugin-health`.
+- [ ] **Resource Lifecycle & Sandboxing**:
     - [ ] Resource constraints (CPU Fuel, Memory Limits).
+    - [ ] Fine-grained WASI capability mapping (Restricted FS/Net access).
 
 ## Phase 4: Application Plugins
 Logic-heavy plugins that provide the user experience.
