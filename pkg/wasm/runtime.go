@@ -32,6 +32,9 @@ func NewRuntime(ctx context.Context, logger *slog.Logger, kv KVStore) (*Runtime,
 	// Configuration for resource constraints
 	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
 		WithCoreFeatures(api.CoreFeaturesV2))
+	
+	// Note: In 1.11.0, Fuel is enabled via experimental features or compiler config.
+	// For this phase, we ensure sandboxed execution via memory limits.
 
 	// Instantiate WASI
 	wasi_snapshot_preview1.MustInstantiate(ctx, r)

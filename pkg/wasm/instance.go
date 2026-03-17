@@ -12,16 +12,16 @@ import (
 
 // Instance represents a single loaded WASM plugin.
 type Instance struct {
-	id     string
-	mod    wazeroapi.Module
-	logger *slog.Logger
+	id          string
+	mod         wazeroapi.Module
+	logger      *slog.Logger
+	defaultFuel uint64
 }
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
-// It follows the ABI:
-// - Call `alloy_handle_message` with pointer to payload and length.
-// - Returns a 64-bit value: (offset << 32) | length of the response.
 func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	// If fuel is enabled, we could add it here if context-based fuel is used.
+	// For now, we will focus on memory constraints in LoadPlugin.
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return api.Message{}, err
