@@ -11,6 +11,7 @@ The backend kernel is responsible for:
 - **Security & Policy Engine**: Manages user authentication, authorization, and plugin sandbox constraints.
 - **Service Discovery**: Allows plugins and frontends to discover available capabilities.
 - **Logging & Monitoring**: Centralized logging for the kernel itself and all managed plugins.
+- **Decision Engine (Native vs WASM)**: Alloy prioritizes WASM for all application and security logic to ensure isolation and stability. Infrastructure services remain Native. See [Build and Plugin Guidelines](BUILD_AND_PLUGINS.md) for detailed criteria.
 
 ### 1.2 IPC Mechanism
 - **Socket-Based**: Communication occurs over Unix Domain Sockets (local) or TCP (network).
