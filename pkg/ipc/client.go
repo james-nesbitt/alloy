@@ -14,10 +14,10 @@ import (
 )
 
 type Client struct {
-	conn  net.Conn
-	enc   *json.Encoder
-	dec   *json.Decoder
-	
+	conn net.Conn
+	enc  *json.Encoder
+	dec  *json.Decoder
+
 	mu    sync.Mutex
 	resps map[string]chan api.Message
 }
@@ -32,7 +32,7 @@ func Dial(rawAddr string, tlsConfig *tls.Config) (*Client, error) {
 	} else {
 		conn, err = net.Dial(network, addr)
 	}
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (c *Client) Send(msg api.Message) error {
 
 func (c *Client) Call(ctx context.Context, msg api.Message) (api.Message, error) {
 	ch := make(chan api.Message, 1)
-	
+
 	c.mu.Lock()
 	c.resps[msg.ID+"-resp"] = ch
 	c.mu.Unlock()

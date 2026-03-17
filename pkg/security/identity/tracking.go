@@ -53,7 +53,7 @@ func (s *Store) ListInstances(runtimeDir string) ([]InstanceInfo, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		
+
 		path := filepath.Join(instancesDir, entry.Name(), "info.json")
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -64,7 +64,7 @@ func (s *Store) ListInstances(runtimeDir string) ([]InstanceInfo, error) {
 		if err := json.Unmarshal(data, &info); err != nil {
 			continue
 		}
-		
+
 		// Optional: check if PID is still alive
 		if process, err := os.FindProcess(info.PID); err == nil {
 			// On Unix, FindProcess always succeeds. Signal 0 checks if it's actually alive.

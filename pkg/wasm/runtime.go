@@ -3,7 +3,6 @@ package wasm
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 
@@ -23,7 +22,7 @@ func NewRuntime(ctx context.Context, logger *slog.Logger) (*Runtime, error) {
 	// Configuration for resource constraints
 	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
 		WithCoreFeatures(api.CoreFeaturesV2))
-	
+
 	// Instantiate WASI
 	wasi_snapshot_preview1.MustInstantiate(ctx, r)
 
@@ -61,7 +60,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 // This is the beginning of the Host Discovery Interface.
 func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) {
 	return r.r.NewHostModuleBuilder("alloy").
-		ExportFunction("log", func(ctx context.Context, mod api.Module, offset, byteCount uint32) {
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, mod api.Module, offset, byteCount uint32) {
 			buf, ok := mod.Memory().Read(offset, byteCount)
 			if !ok {
 				fmt.Printf("failed to read memory for log\n")
@@ -69,5 +69,6 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) 
 			}
 			r.logger.Info("wasm_log", "msg", string(buf))
 		}).
+		Export("log").
 		Instantiate(ctx)
 }

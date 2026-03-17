@@ -5,7 +5,7 @@ import (
 	"unsafe"
 )
 
-// Message is a copy of the api.Message to avoid circular dependencies if needed, 
+// Message is a copy of the api.Message to avoid circular dependencies if needed,
 // but usually the SDK is a standalone package.
 type Message struct {
 	ID        string          `json:"id"`
@@ -27,6 +27,7 @@ func SetHandler(h MessageHandler) {
 }
 
 // export malloc for the host to allocate memory in guest
+//
 //go:export malloc
 func malloc(size uint32) uintptr {
 	ptr := make([]byte, size)

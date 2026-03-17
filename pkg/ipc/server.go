@@ -43,11 +43,11 @@ type Server struct {
 	audit  *audit.Logger
 	router Router
 	config *tls.Config
-	
-	mu         sync.Mutex
-	conns      map[string]*connection
-	wg         sync.WaitGroup
-	listener   net.Listener
+
+	mu       sync.Mutex
+	conns    map[string]*connection
+	wg       sync.WaitGroup
+	listener net.Listener
 }
 
 type connection struct {
@@ -87,7 +87,7 @@ func (s *Server) ListenAndServe(rawAddr string) error {
 	} else {
 		l, err = net.Listen(network, addr)
 	}
-	
+
 	if err != nil {
 		return err
 	}
@@ -133,7 +133,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 	// Identity defaults to remote addr
 	clientID := netConn.RemoteAddr().String()
-	
+
 	// If TLS, extract identity from certificate
 	if tlsConn, ok := netConn.(*tls.Conn); ok {
 		if err := tlsConn.Handshake(); err != nil {

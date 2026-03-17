@@ -54,9 +54,10 @@ This document defines how AI agents, like yourselves, should interact with the A
     - Commit changes incrementally to the branch.
     - Branches must be merged to `main` only after approval.
 3.  **Validation**:
-    - **Format**: Run `just fmt` (or `go fmt`) before committing to ensure code consistency.
+    - **Format**: Always run `just fmt` (or `go fmt ./...`) before committing changes to ensure code consistency.
     - **Test**: 
-        - Run `just test` (or `go test ./...`) before committing to ensure no regressions were introduced.
+        - Always run `just test` (or `go test ./...`) before committing.
+        - **New and changed tests must be verified to pass.**
         - Ensure a minimum of 85% unit test coverage for new code in `pkg/`.
 4.  **Verify Assumptions**: If you aren't sure where a piece of logic should reside, ask for clarification.
 5.  **Iterative Development**: Start with small, verifiable pieces (e.g., the IPC message definitions) before building larger systems.

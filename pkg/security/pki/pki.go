@@ -25,10 +25,10 @@ type IssueRequest struct {
 
 // KeyPair represents a private key and its associated certificate
 type KeyPair struct {
-	Cert     *x509.Certificate
-	Key      *ecdsa.PrivateKey
-	CertPEM  []byte
-	KeyPEM   []byte
+	Cert    *x509.Certificate
+	Key     *ecdsa.PrivateKey
+	CertPEM []byte
+	KeyPEM  []byte
 }
 
 // GenerateKey generates a new P-256 ECDSA key
@@ -39,13 +39,13 @@ func GenerateKey() (*ecdsa.PrivateKey, error) {
 // EncodeToPEM converts certificate and key to PEM format
 func EncodeToPEM(certDer []byte, key *ecdsa.PrivateKey) ([]byte, []byte, error) {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDer})
-	
+
 	keyBytes, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return nil, nil, err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
-	
+
 	return certPEM, keyPEM, nil
 }
 
@@ -89,7 +89,7 @@ func SignCertificate(ca *KeyPair, req IssueRequest) (*KeyPair, error) {
 	}
 
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	
+
 	if req.Duration == 0 {
 		req.Duration = time.Hour * 24 * 365 // 1 year default
 	}

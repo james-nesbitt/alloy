@@ -136,7 +136,7 @@ func discover(args []string) {
 
 	fmt.Println("Active Targets:")
 	fmt.Printf("%-20s %-10s %-40s\n", "ID", "TYPE", "CAPABILITIES")
-	
+
 	var data struct {
 		Targets []struct {
 			ID           string `json:"id"`
@@ -147,17 +147,19 @@ func discover(args []string) {
 			} `json:"capabilities"`
 		} `json:"targets"`
 	}
-	
+
 	if err := json.Unmarshal(resp.Payload, &data); err != nil {
 		fmt.Printf("Failed to parse response: %v\n", err)
 		fmt.Printf("Raw: %s\n", string(resp.Payload))
 		os.Exit(1)
 	}
-	
+
 	for _, t := range data.Targets {
 		caps := ""
 		for i, c := range t.Capabilities {
-			if i > 0 { caps += ", " }
+			if i > 0 {
+				caps += ", "
+			}
 			caps += c.Method
 		}
 		fmt.Printf("%-20s %-10s %-40s\n", t.ID, t.Type, caps)
@@ -182,7 +184,7 @@ func list(args []string) {
 
 	fmt.Printf("%-20s %-10s %-30s %-20s\n", "NAME", "PID", "SOCKET", "STARTED")
 	for _, inst := range instances {
-		fmt.Printf("%-20s %-10d %-30s %-20s\n", 
+		fmt.Printf("%-20s %-10d %-30s %-20s\n",
 			inst.Name, inst.PID, inst.Socket, inst.StartTime.Format(time.Kitchen))
 	}
 }
@@ -192,11 +194,11 @@ func ping(args []string) {
 	name := fs.String("name", "cli-client", "Name of the component to use")
 	target := fs.String("target", "kernel", "Target component")
 	method := fs.String("method", "ping", "Method to call")
-	
+
 	defaultSocket := filepath.Join(getAlloyRuntimeDir(), "default.sock")
 	socket := fs.String("socket", defaultSocket, "Socket address of the core")
 	alloyHome := fs.String("home", getAlloyHome(), "Directory for alloy identities")
-	
+
 	timeoutSec := fs.Int("timeout", 5, "Timeout in seconds")
 	insecure := fs.Bool("insecure", false, "Disable mTLS")
 	fs.Parse(args)

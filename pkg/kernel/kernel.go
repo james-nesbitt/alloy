@@ -16,13 +16,13 @@ type Kernel struct {
 	logger *slog.Logger
 	audit  *audit.Logger
 	mu     sync.RWMutex
-	
+
 	// plugins maps plugin IDs to their instances
 	plugins map[string]Plugin
-	
+
 	// frontends maps connection IDs to their message channels
 	frontends map[string]chan<- api.Message
-	
+
 	// stopCh is used to signal the kernel to shut down
 	stopCh chan struct{}
 }
@@ -134,7 +134,7 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 
 func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 	k.logger.Debug("handling internal message", "method", msg.Method)
-	
+
 	switch msg.Method {
 	case "ping":
 		resp := api.Message{

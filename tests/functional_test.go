@@ -42,7 +42,7 @@ func (m *MockPlugin) Shutdown(ctx context.Context) error { return nil }
 func TestFunctionalMessageFlow(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	// 1. Initialize Kernel
 	k := kernel.New(logger, nil)
 	if err := k.Start(ctx); err != nil {

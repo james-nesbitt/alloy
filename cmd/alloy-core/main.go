@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
-	"path/filepath"
 
 	"github.com/jnesbitt/alloy-go/pkg/ipc"
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
@@ -45,10 +45,10 @@ func main() {
 	insecure := flag.Bool("insecure", false, "Disable mTLS")
 	alloyHome := flag.String("home", getAlloyHome(), "Directory for alloy config and identities")
 	instanceName := flag.String("name", "default", "Instance name")
-	
+
 	defaultSocket := filepath.Join(getAlloyRuntimeDir(), "default.sock")
 	socket := flag.String("socket", defaultSocket, "Socket address to listen for IPC connections (supports tcp://, unix://, or local path)")
-	
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
 		flag.PrintDefaults()

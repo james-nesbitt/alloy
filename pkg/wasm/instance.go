@@ -18,7 +18,7 @@ type Instance struct {
 }
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
-// It follows the ABI: 
+// It follows the ABI:
 // - Call `alloy_handle_message` with pointer to payload and length.
 // - Returns a 64-bit value: (offset << 32) | length of the response.
 func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
