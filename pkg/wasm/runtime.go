@@ -3,7 +3,9 @@ package wasm
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -18,7 +20,9 @@ type Runtime struct {
 
 // NewRuntime creates a new Alloy WASM runtime.
 func NewRuntime(ctx context.Context, logger *slog.Logger) (*Runtime, error) {
-	r := wazero.NewRuntime(ctx)
+	// Configuration for resource constraints
+	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
+		WithCoreFeatures(api.CoreFeaturesV2))
 	
 	// Instantiate WASI
 	wasi_snapshot_preview1.MustInstantiate(ctx, r)
@@ -26,6 +30,25 @@ func NewRuntime(ctx context.Context, logger *slog.Logger) (*Runtime, error) {
 	return &Runtime{
 		logger: logger,
 		r:      r,
+	}, nil
+}
+
+// LoadPlugin loads a WASM module from bytes and returns an Alloy-compatible plugin instance.
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasm []byte) (*Instance, error) {
+	config := wazero.NewModuleConfig().
+		WithName(id).
+		WithStdout(os.Stdout).
+		WithStderr(os.Stderr)
+
+	mod, err := r.r.InstantiateWithConfig(ctx, wasm, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate module: %w", err)
+	}
+
+	return &Instance{
+		id:     id,
+		mod:    mod,
+		logger: r.logger,
 	}, nil
 }
 
