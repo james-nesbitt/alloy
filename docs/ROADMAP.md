@@ -37,12 +37,17 @@ Establishing the "Standard Library" and durable plugin state.
     - [ ] **Infrastructure Plugins**:
         - [ ] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
         - [ ] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
-        - [ ] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions and discovery.
+        - [ ] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions.
+        - [ ] **Event Bus (`plugin-events`)**: Advanced Pub/Sub and event filtering.
     - [ ] **Standard Service Helpers**:
         - [ ] **KV Store (`plugin-kv`)**: Simple persistent Key-Value service.
-        - [ ] **Cache Manager (`plugin-cache`)**: High-speed transient storage (TTL-based).
+        - [ ] **Cache Manager (`plugin-cache`)**: High-speed transient storage.
         - [ ] **Doc Store (`plugin-doc`)**: Indexed document/search service.
         - [ ] **Secret Manager (`plugin-secrets`)**: Policy-based encrypted storage.
+    - [ ] **Operations Core**:
+        - [ ] **Health & Monitoring (`plugin-health`)**: Resource tracking and heartbeat.
+        - [ ] **Task Runner (`plugin-tasks`)**: Scheduled and background job management.
+        - [ ] **Network Manager (`plugin-network`)**: Policy-enforced network/Fetch provider.
 - [ ] **Resource Lifecycle**:
     - [ ] Resource constraints (CPU Fuel, Memory Limits).
 

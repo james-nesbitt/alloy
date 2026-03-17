@@ -82,6 +82,26 @@ A secure vault for sensitive data (API keys, certificates, passwords).
 - **Security**: Implements "Caller Policy" to ensure only authorized plugins can access specific secrets.
 - **Future-proofing**: Can be configured to bridge to HashiCorp Vault, AWS Secrets Manager, or Kubernetes Secrets.
 
+## 13. Event Bus (`plugin-events`)
+Advanced Pub/Sub logic for system-wide reactivity.
+- **Capabilities**: Topic-based filtering, event persistence/replay, and subscriber group management.
+- **Benefit**: Decouples the kernel from complex subscription logic.
+
+## 14. Health & Monitoring (`plugin-health`)
+The "watchdog" for the Alloy ecosystem.
+- **Responsibilities**: Tracking plugin resource usage (memory/CPU fuel), heartbeat monitoring, and emitting alerts.
+- **Dashboard**: Provides an API for frontends to visualize system health.
+
+## 15. Task Runner (`plugin-tasks`)
+Schedulers and background job management.
+- **Capabilities**: Cron-style interval triggers and asynchronous background task queuing.
+- **Integration**: Works with the Event Bus to trigger actions based on scheduled tasks.
+
+## 16. Network Manager (`plugin-network`)
+A policy-enforced proxy for all external communications.
+- **Fetch API**: Provides a standard HTTP/gRPC fetch capability to WASM guests.
+- **Policies**: Can restrict specific plugins to specific hostnames or CIDR blocks (e.g. "Git plugin can only talk to github.com").
+
 ---
 
 # Guidance for Plugin Development
