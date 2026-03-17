@@ -50,7 +50,7 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	defer auditLogger.Close()
 
 	// 1. Initialize Kernel
-	k := kernel.New(logger, auditLogger, kernel.NewMemoryStateStore())
+	k := kernel.New(logger, auditLogger)
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

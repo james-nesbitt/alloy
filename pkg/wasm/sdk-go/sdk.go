@@ -36,6 +36,9 @@ func alloyKVSet(kPtr, kLen, vPtr, vLen uint32) uint32
 //go:wasmimport alloy kv_get
 func alloyKVGet(kPtr, kLen, vPtr, vMaxLen uint32) uint32
 
+//go:wasmimport alloy kv_delete
+func alloyKVDelete(kPtr, kLen uint32) uint32
+
 // Log sends a string to the host's logger.
 func Log(msg string) {
 	ptr := uintptr(unsafe.Pointer(unsafe.StringData(msg)))
@@ -68,6 +71,12 @@ func KVGet(key string) []byte {
 	}
 
 	return buf
+}
+
+// KVDelete removes a key from the host's durable KV store.
+func KVDelete(key string) bool {
+	kPtr := uintptr(unsafe.Pointer(unsafe.StringData(key)))
+	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
 }
 
 // export malloc for the host to allocate memory in guest

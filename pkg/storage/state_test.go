@@ -1,4 +1,4 @@
-package kernel
+package storage
 
 import (
 	"bytes"

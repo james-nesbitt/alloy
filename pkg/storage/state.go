@@ -1,4 +1,4 @@
-package kernel
+package storage
 
 import (
 	"os"
@@ -64,7 +64,11 @@ func (s *FileStateStore) Delete(pluginID, key string) error {
 	defer s.mu.Unlock()
 
 	path := filepath.Join(s.pluginDir(pluginID), key+".bin")
-	return os.Remove(path)
+	err := os.Remove(path)
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // MemoryStateStore implements StateStore in-memory for testing.

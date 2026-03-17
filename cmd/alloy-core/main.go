@@ -17,6 +17,7 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
 	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 	"github.com/jnesbitt/alloy-go/pkg/security/identity"
+	"github.com/jnesbitt/alloy-go/pkg/storage"
 	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
 
@@ -98,7 +99,7 @@ func main() {
 	}
 
 	// State Setup
-	stateStore, err := kernel.NewFileStateStore(filepath.Join(getAlloyDataDir(), "state"))
+	stateStore, err := storage.NewFileStateStore(filepath.Join(getAlloyDataDir(), "state"))
 	if err != nil {
 		logger.Error("failed to initialize state store", "error", err)
 		os.Exit(1)
@@ -107,7 +108,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	k := kernel.New(logger, auditLogger, stateStore)
+	k := kernel.New(logger, auditLogger)
 
 	// Register Core Plugins
 	em := wasm.NewEventManager(logger)
@@ -164,7 +165,12 @@ func main() {
 
 	logger.Info("alloy-core started", "instance", *instanceName, "socket", *socket, "mtls", tlsConfig != nil)
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case <-k.StopCh():
+		logger.Info("received shutdown signal from kernel")
+	}
+
 	logger.Info("shutting down alloy-core")
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)

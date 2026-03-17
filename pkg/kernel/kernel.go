@@ -15,7 +15,6 @@ import (
 type Kernel struct {
 	logger *slog.Logger
 	audit  *audit.Logger
-	state  StateStore
 	mu     sync.RWMutex
 
 	// plugins maps plugin IDs to their instances
@@ -37,11 +36,10 @@ type Plugin interface {
 }
 
 // New creates a new instance of the Alloy Kernel.
-func New(logger *slog.Logger, audit *audit.Logger, state StateStore) *Kernel {
+func New(logger *slog.Logger, audit *audit.Logger) *Kernel {
 	return &Kernel{
 		logger:    logger,
 		audit:     audit,
-		state:     state,
 		plugins:   make(map[string]Plugin),
 		frontends: make(map[string]chan<- api.Message),
 		stopCh:    make(chan struct{}),
@@ -172,9 +170,17 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 	case "audit":
 		// Handle audit log request (e.g., from an external auditor plugin)
 		k.publishAuditEvent(ctx, msg, "audit_request", "authorized")
+	case "stop":
+		k.logger.Info("stop request received via internal channel")
+		k.Stop(ctx)
 	default:
 		k.logger.Warn("unknown internal method", "method", msg.Method)
 	}
+}
+
+// StopCh returns the shutdown signal channel.
+func (k *Kernel) StopCh() <-chan struct{} {
+	return k.stopCh
 }
 
 func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action, status string) {

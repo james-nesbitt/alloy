@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/jnesbitt/alloy-go/pkg/storage"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -15,20 +16,15 @@ const (
 	HostModuleName = "alloy"
 )
 
-type KVStore interface {
-	Get(pluginID, key string) ([]byte, error)
-	Set(pluginID, key string, value []byte) error
-}
-
 // Runtime manages the wazero WASM environment.
 type Runtime struct {
 	logger *slog.Logger
 	r      wazero.Runtime
-	kv     KVStore
+	kv     storage.StateStore
 }
 
 // NewRuntime creates a new Alloy WASM runtime.
-func NewRuntime(ctx context.Context, logger *slog.Logger, kv KVStore) (*Runtime, error) {
+func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore) (*Runtime, error) {
 	// Configuration for resource constraints
 	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
 		WithCoreFeatures(api.CoreFeaturesV2))
@@ -115,5 +111,17 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (api.Module, error) 
 			return uint32(len(val))
 		}).
 		Export("kv_get").
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, mod api.Module, kPtr, kLen uint32) uint32 {
+			kBuf, ok := mod.Memory().Read(kPtr, kLen)
+			if !ok {
+				return 1
+			}
+			if err := r.kv.Delete(mod.Name(), string(kBuf)); err != nil {
+				return 1
+			}
+			return 0
+		}).
+		Export("kv_delete").
 		Instantiate(ctx)
 }
