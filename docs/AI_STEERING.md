@@ -50,9 +50,10 @@ This document defines how AI agents, like yourselves, should interact with the A
 
 1.  **Read Before Writing**: Always read existing relevant files horizontally to ensure consistent style and approach.
 2.  **Git Flow**:
-    - Start all new feature work on a dedicated git branch (e.g., `feature/pki-implementation`).
-    - Commit changes incrementally to the branch.
-    - Branches must be merged to `main` only after approval.
+    - **Never commit changes directly to the `main` branch.**
+    - All changes must be made on a dedicated feature branch (e.g., `feature/pki-implementation`).
+    - Commit changes incrementally to the feature branch.
+    - Feature branches must be merged to `main` only after explicit review and approval from the user.
 3.  **Validation**:
     - **Format**: Always run `just fmt` (or `go fmt ./...`) before committing changes to ensure code consistency.
     - **Test**: 
