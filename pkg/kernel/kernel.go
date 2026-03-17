@@ -72,18 +72,16 @@ func (k *Kernel) RegisterPlugin(p Plugin) {
 	// Emit registration event
 	caps, _ := json.Marshal(p.Capabilities())
 	k.RouteMessage(context.Background(), api.Message{
-		ID:     "event-reg-" + p.ID(),
-		Type:   api.TypeEvent,
-		Sender: "kernel",
-		Target: "plugin-events",
-		Method: "publish",
-		Payload: []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(caps) + `}}`),
+		ID:        "event-reg-" + p.ID(),
+		Type:      api.TypeEvent,
+		Sender:    "kernel",
+		Target:    "plugin-events",
+		Method:    "publish",
+		Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(caps) + `}}`),
 		Timestamp: time.Now().Unix(),
 	})
 
-	if k.audit != nil {
-		k.audit.Log(audit.Entry{Actor: "system", Action: "plugin_register", Target: p.ID(), Status: "success"})
-	}
+	k.publishAuditEvent(context.Background(), api.Message{Sender: "system", Target: p.ID()}, "plugin_register", "success")
 }
 
 // RouteMessage handles the delivery of a message to its intended target.
@@ -95,18 +93,8 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	frontendChan, isFrontend := k.frontends[msg.Target]
 	k.mu.RUnlock()
 
-	if k.audit != nil {
-		k.audit.Log(audit.Entry{
-			Actor:  msg.Sender,
-			Action: "route",
-			Target: msg.Target,
-			Status: "processed",
-			Details: map[string]any{
-				"method": msg.Method,
-				"type":   msg.Type,
-			},
-		})
-	}
+	// Emit auditing event for core routing (if enabled)
+	k.publishAuditEvent(ctx, msg, "route", "processed")
 
 	if msg.Target == "kernel" || msg.Target == "system" {
 		k.handleInternalMessage(ctx, msg)
@@ -120,7 +108,9 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 				k.logger.Error("plugin error", "plugin_id", msg.Target, "error", err)
 				return
 			}
-			k.RouteMessage(ctx, resp)
+			if resp.ID != "" || resp.Target != "" {
+				k.RouteMessage(ctx, resp)
+			}
 		}()
 		return
 	}
@@ -150,17 +140,21 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 
 	// Emit registration event
 	k.RouteMessage(context.Background(), api.Message{
-		ID:     "event-reg-" + id,
-		Type:   api.TypeEvent,
-		Sender: "kernel",
-		Target: "plugin-events",
-		Method: "publish",
-		Payload: []byte(`{"topic":"component:registered","data":{"id":"` + id + `","type":"frontend"}}`),
+		ID:        "event-reg-" + id,
+		Type:      api.TypeEvent,
+		Sender:    "kernel",
+		Target:    "plugin-events",
+		Method:    "publish",
+		Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + id + `","type":"frontend"}}`),
 		Timestamp: time.Now().Unix(),
 	})
 }
 
 func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
+	if msg.Type != api.TypeRequest {
+		return
+	}
+
 	k.logger.Debug("handling internal message", "method", msg.Method)
 
 	switch msg.Method {
@@ -175,7 +169,55 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 			Timestamp: time.Now().Unix(),
 		}
 		k.RouteMessage(ctx, resp)
+	case "audit":
+		// Handle audit log request (e.g., from an external auditor plugin)
+		k.publishAuditEvent(ctx, msg, "audit_request", "authorized")
 	default:
 		k.logger.Warn("unknown internal method", "method", msg.Method)
 	}
+}
+
+func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action, status string) {
+	// Avoid recursive auditing:
+	// 1. Don't audit messages targeting the event/audit system itself
+	// 2. Don't audit messages sent by the kernel (internal events/responses)
+	if msg.Target == "plugin-events" || msg.Sender == "kernel" {
+		return
+	}
+
+	// Traditional structured audit log (if configured)
+	if k.audit != nil {
+		k.audit.Log(audit.Entry{
+			Actor:  msg.Sender,
+			Action: action,
+			Target: msg.Target,
+			Status: status,
+			Details: map[string]any{
+				"method": msg.Method,
+				"type":   msg.Type,
+			},
+		})
+	}
+
+	// Modern Event-driven audit log
+	// We use a non-blocking go-routine to avoid routing cycles or delays
+	go func() {
+		details, _ := json.Marshal(map[string]any{
+			"actor":  msg.Sender,
+			"action": action,
+			"target": msg.Target,
+			"status": status,
+			"method": msg.Method,
+		})
+
+		k.RouteMessage(context.Background(), api.Message{
+			ID:        "audit-" + time.Now().Format("150405.000"),
+			Type:      api.TypeEvent,
+			Sender:    "kernel",
+			Target:    "plugin-events",
+			Method:    "publish",
+			Payload:   []byte(`{"topic":"system:audit","data":` + string(details) + `}`),
+			Timestamp: time.Now().Unix(),
+		})
+	}()
 }

@@ -85,14 +85,8 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 			}
 		}
 
-		return api.Message{
-			ID:        msg.ID + "-resp",
-			Type:      api.TypeResponse,
-			Sender:    e.ID(),
-			Target:    msg.Sender,
-			Payload:   []byte(`{"status":"published"}`),
-			Timestamp: time.Now().Unix(),
-		}, nil
+		// Don't return a response message for event publishing to avoid bus noise
+		return api.Message{}, nil
 	}
 
 	return api.Message{}, nil

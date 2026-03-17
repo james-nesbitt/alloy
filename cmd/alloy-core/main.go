@@ -137,11 +137,6 @@ func main() {
 	k.RegisterPlugin(wasm.NewDocStore())
 	k.RegisterPlugin(wasm.NewNetworkManager())
 	k.RegisterPlugin(wasm.NewStorageManager())
-	k.RegisterPlugin(wasm.NewTaskRunner())
-	k.RegisterPlugin(wasm.NewCacheManager())
-	k.RegisterPlugin(wasm.NewDocStore())
-	k.RegisterPlugin(wasm.NewNetworkManager())
-	k.RegisterPlugin(wasm.NewStorageManager())
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
+	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 )
 
 // MockPlugin is a simple plugin for testing.
@@ -43,8 +44,13 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
+	tempDir, _ := os.MkdirTemp("", "audit-functest")
+	defer os.RemoveAll(tempDir)
+	auditLogger, _ := audit.NewLogger(tempDir)
+	defer auditLogger.Close()
+
 	// 1. Initialize Kernel
-	k := kernel.New(logger, nil, kernel.NewMemoryStateStore())
+	k := kernel.New(logger, auditLogger, kernel.NewMemoryStateStore())
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
@@ -82,4 +88,30 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for response from plugin")
 	}
+
+	// 5. Test internal kernel messages
+	k.RouteMessage(ctx, api.Message{
+		ID:     "ping-kernel",
+		Type:   api.TypeRequest,
+		Sender: "frontend-1",
+		Target: "kernel",
+		Method: "ping",
+	})
+	select {
+	case resp := <-respChan:
+		if resp.Sender != "kernel" {
+			t.Errorf("expected response from kernel, got %s", resp.Sender)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for kernel ping response")
+	}
+
+	k.RouteMessage(ctx, api.Message{
+		Target: "kernel",
+		Method: "audit",
+	})
+	k.RouteMessage(ctx, api.Message{
+		Target: "kernel",
+		Method: "invalid",
+	})
 }

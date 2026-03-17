@@ -6,23 +6,57 @@ just build-all
 
 PORT=9092
 ADDR="127.0.0.1:$PORT"
+INSTANCE="smoke-test"
 
-echo "Starting alloy-core on $ADDR..."
-./bin/alloy-core --socket "$ADDR" --debug &
+# Ensure no old data
+rm -rf ~/.local/share/alloy/audit.log
+
+echo "Starting alloy-core instance '$INSTANCE' on $ADDR..."
+./bin/alloy-core --socket "tcp://$ADDR" --name "$INSTANCE" --insecure --debug &
 CORE_PID=$!
 
-trap "kill $CORE_PID 2>/dev/null" EXIT
-sleep 2
+function cleanup {
+    echo "Cleaning up..."
+    kill $CORE_PID 2>/dev/null
+    wait $CORE_PID 2>/dev/null
+}
+
+trap cleanup EXIT
+
+# Wait for core to be ready
+MAX_WAIT=5
+WAIT_COUNT=0
+until ./bin/alloy-cli list | grep -q "$INSTANCE"; do
+    if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+        echo "ALARM: Core failed to start within $MAX_WAIT seconds"
+        exit 1
+    fi
+    sleep 1
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+done
 
 echo "Running alloy-cli ping..."
-./bin/alloy-cli ping --socket "$ADDR" --timeout 5
+./bin/alloy-cli ping --socket "tcp://$ADDR" --insecure --timeout 2
 
 RESULT=$?
 
 if [ $RESULT -eq 0 ]; then
-    echo "SUCCESS: Smoke test passed!"
+    echo "SUCCESS: Smoke test message flow passed!"
 else
-    echo "FAILURE: Smoke test failed!"
+    echo "FAILURE: Smoke test message flow failed!"
 fi
 
-exit $RESULT
+echo "Stopping core via CLI..."
+./bin/alloy-cli stop --name "$INSTANCE"
+STOP_RESULT=$?
+
+# Wait for process to actually exit
+wait $CORE_PID 2>/dev/null
+
+if [ $RESULT -eq 0 ] && [ $STOP_RESULT -eq 0 ]; then
+    echo "FULL SUCCESS: Smoke test completed fully."
+    exit 0
+else
+    echo "FAILURE: Smoke test did not complete successfully."
+    exit 1
+fi
