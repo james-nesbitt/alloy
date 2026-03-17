@@ -16,6 +16,7 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
 	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 	"github.com/jnesbitt/alloy-go/pkg/security/identity"
+	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
 
 func getAlloyDataDir() string {
@@ -106,6 +107,10 @@ func main() {
 	defer cancel()
 
 	k := kernel.New(logger, auditLogger, stateStore)
+
+	// Register Core Plugins
+	k.RegisterPlugin(wasm.NewEventManager())
+	k.RegisterPlugin(wasm.NewIAMManager())
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)
