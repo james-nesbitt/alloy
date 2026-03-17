@@ -91,13 +91,17 @@ func (s *Server) ListenAndServe(rawAddr string) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
 	s.listener = l
+	s.mu.Unlock()
 	s.logger.Info("IPC server listening", "network", network, "addr", addr, "mtls", s.config != nil)
 
 	return s.Serve()
 }
 
 func (s *Server) Addr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.listener == nil {
 		return nil
 	}
@@ -106,7 +110,13 @@ func (s *Server) Addr() net.Addr {
 
 func (s *Server) Serve() error {
 	for {
-		conn, err := s.listener.Accept()
+		s.mu.Lock()
+		l := s.listener
+		s.mu.Unlock()
+		if l == nil {
+			return net.ErrClosed
+		}
+		conn, err := l.Accept()
 		if err != nil {
 			return err
 		}
@@ -117,11 +127,14 @@ func (s *Server) Serve() error {
 }
 
 func (s *Server) Stop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.listener != nil {
 		err := s.listener.Close()
 		if s.listener.Addr().Network() == "unix" {
 			_ = os.Remove(s.listener.Addr().String())
 		}
+		s.listener = nil
 		return err
 	}
 	return nil

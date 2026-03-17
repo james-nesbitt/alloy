@@ -83,6 +83,9 @@ func CreateRootCA(org string) (*KeyPair, error) {
 
 // SignCertificate signs a new certificate using the CA KeyPair
 func SignCertificate(ca *KeyPair, req IssueRequest) (*KeyPair, error) {
+	if ca == nil || ca.Cert == nil || ca.Key == nil {
+		return nil, fmt.Errorf("invalid CA key pair")
+	}
 	key, err := GenerateKey()
 	if err != nil {
 		return nil, err

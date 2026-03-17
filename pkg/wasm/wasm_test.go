@@ -24,6 +24,14 @@ func TestWasmGoOrchestration(t *testing.T) {
 	if r == nil {
 		t.Fatal("runtime is nil")
 	}
+
+	hostMod, err := r.InstantiateAlloyHost(ctx)
+	if err != nil {
+		t.Fatalf("failed to instantiate host module: %v", err)
+	}
+	if hostMod == nil {
+		t.Fatal("host module is nil")
+	}
 }
 
 // MemoryStateStore satisfies the wasm.KVStore interface for testing.

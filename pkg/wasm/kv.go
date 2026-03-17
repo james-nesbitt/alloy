@@ -29,7 +29,7 @@ func (k *KVManager) HandleMessage(ctx context.Context, msg api.Message) (api.Mes
 	// Simple wrapper around host KV
 	switch msg.Method {
 	case "get":
-		// Payload would contain the key. 
+		// Payload would contain the key.
 		// For now, this is a simplified stub.
 		return api.Message{
 			ID:        msg.ID + "-resp",

@@ -69,8 +69,8 @@ func (s *FileStateStore) Delete(pluginID, key string) error {
 
 // MemoryStateStore implements StateStore in-memory for testing.
 type MemoryStateStore struct {
-	mu    sync.RWMutex
-	data  map[string]map[string][]byte
+	mu   sync.RWMutex
+	data map[string]map[string][]byte
 }
 
 func NewMemoryStateStore() *MemoryStateStore {

@@ -33,7 +33,7 @@ func (c *CacheManager) Shutdown(ctx context.Context) error { return nil }
 // DocStore handles indexed documents.
 type DocStore struct{}
 
-func NewDocStore() *DocStore { return &DocStore{} }
+func NewDocStore() *DocStore   { return &DocStore{} }
 func (d *DocStore) ID() string { return "plugin-doc" }
 func (d *DocStore) Capabilities() []api.Capability {
 	return []api.Capability{
