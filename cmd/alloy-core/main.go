@@ -113,6 +113,7 @@ func main() {
 	k.RegisterPlugin(wasm.NewIAMManager())
 	k.RegisterPlugin(wasm.NewSecretManager())
 	k.RegisterPlugin(wasm.NewHealthManager())
+	k.RegisterPlugin(wasm.NewCommandManager())
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)
