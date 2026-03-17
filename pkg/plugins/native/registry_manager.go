@@ -124,6 +124,15 @@ func (r *RegistryManager) loadPlugin(ctx context.Context, def PluginDef) error {
 		if em, ok := p.(*EventManager); ok {
 			em.SetRouter(r.kernel.RouteMessage)
 		}
+		if bm, ok := p.(*BufferManager); ok {
+			bm.SetRouter(r.kernel.RouteMessage)
+		}
+		if cm, ok := p.(*ChatManager); ok {
+			cm.SetRouter(r.kernel.RouteMessage)
+		}
+		if ai, ok := p.(*AIManager); ok {
+			ai.SetRouter(r.kernel.RouteMessage)
+		}
 
 		r.kernel.RegisterPlugin(p.(api.Plugin))
 		return nil
