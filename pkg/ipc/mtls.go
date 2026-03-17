@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// NewServerTLSConfig creates a TLS configuration for the IPC server.
+// NewServerTLSConfig creates an mTLS config for the server
 func NewServerTLSConfig(caCertPEM, serverCertPEM, serverKeyPEM []byte) (*tls.Config, error) {
 	cert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
 	if err != nil {
@@ -26,7 +26,7 @@ func NewServerTLSConfig(caCertPEM, serverCertPEM, serverKeyPEM []byte) (*tls.Con
 	}, nil
 }
 
-// NewClientTLSConfig creates a TLS configuration for the IPC client.
+// NewClientTLSConfig creates an mTLS config for the client
 func NewClientTLSConfig(caCertPEM, clientCertPEM, clientKeyPEM []byte) (*tls.Config, error) {
 	cert, err := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
 	if err != nil {

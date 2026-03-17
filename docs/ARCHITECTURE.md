@@ -13,12 +13,12 @@ The backend kernel is responsible for:
 - **Logging & Monitoring**: Centralized logging for the kernel itself and all managed plugins.
 
 ### 1.2 IPC Mechanism
-- **Socket-Based**: Communication occurs over Unix Domain Sockets (local) or TCP/UDP (remote).
-- **mTLS Secured**: All IPC connections require mutual TLS authentication using the project's internal CA.
+- **Socket-Based**: Communication occurs over Unix Domain Sockets (local) or TCP (network).
+- **Transport**: Plain TCP/Unix sockets are used for transport (encryption and authentication are currently deferred).
 - **Message & Event Bus**: 
     - Supports **Request/Response** patterns for direct interactions.
     - Acts as an **Event System (Pub/Sub)**, allowing components to emit events (`TypeEvent`) and others to subscribe to them.
-- **Message Format**: Encoded messages (likely Protocol Buffers or JSON) passing through the message bus, wrapped in secure envelopes where required.
+- **Message Format**: Encoded as newline-delimited JSON (JSON-seq) passing through the message bus.
 - **Multi-user/Multi-tenant**: Supports multiple users with distinct contexts and permissions.
 
 ## 2. Plugins (WASM)
@@ -68,7 +68,7 @@ Alloy follows a "Frontend-Driven" bootstrapping model for new backend instances.
     - **Components**: Definitions and paths for core kernel modules and WASM plugins.
     - **Security Policies**: MAC (Mandatory Access Control) rules for plugins and users.
     - **IPC Settings**: Port/Socket definitions for the message bus.
-5. **Connection**: Once the backend is ready, the frontend completes the mTLS handshake and registers itself.
+5. **Connection**: Once the backend is ready, the frontend connects and registers itself by providing its identity in the `Sender` field of its initial messages.
 
 ### 4.2 Configuration Ownership
 While the initiating frontend provides the initial state to a backend, that backend then becomes a shared resource. Subsequent frontends connecting to it must adhere to the policy established during the initial provision.

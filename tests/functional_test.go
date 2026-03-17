@@ -19,6 +19,10 @@ type MockPlugin struct {
 
 func (m *MockPlugin) ID() string { return m.id }
 
+func (m *MockPlugin) Capabilities() []api.Capability {
+	return []api.Capability{{Method: "ping", Description: "Standard echo test"}}
+}
+
 func (m *MockPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	// Simple echo response for testing
 	respPayload, _ := json.Marshal(map[string]string{"status": "ok", "echo": string(msg.Payload)})
@@ -40,7 +44,7 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	
 	// 1. Initialize Kernel
-	k := kernel.New(logger)
+	k := kernel.New(logger, nil)
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

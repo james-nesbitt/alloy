@@ -27,9 +27,22 @@ test:
 build-core:
     go build -o bin/alloy-core cmd/alloy-core/main.go
 
+# Run the insecure test script
+test-smoke:
+    chmod +x tests/test_smoke.sh
+    ./tests/test_smoke.sh
+
+# Run the UDS test script
+test-uds:
+    chmod +x tests/test_uds.sh
+    ./tests/test_uds.sh
+
 # Build the CLI
 build-cli:
     go build -o bin/alloy-cli cmd/alloy-cli/main.go
 
+# Build everything
+build-all: build-core build-cli
+
 # Run everything (format, lint, test, build)
-all: fmt lint test build-core build-cli
+all: fmt lint test build-all

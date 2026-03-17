@@ -9,110 +9,140 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
-	"os"
+	"net"
 	"time"
 )
 
-// CertificateAuthority represents a simple internal PKI.
-type CertificateAuthority struct {
-	Cert *x509.Certificate
-	Key  *ecdsa.PrivateKey
+// IssueRequest carries the parameters for creating a new certificate
+type IssueRequest struct {
+	CommonName   string
+	Organization string
+	IsCA         bool
+	DNSNames     []string
+	IPAddresses  []net.IP
+	Duration     time.Duration
 }
 
-// NewCA creates a new Root Certificate Authority.
-func NewCA(organization string) (*CertificateAuthority, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// KeyPair represents a private key and its associated certificate
+type KeyPair struct {
+	Cert     *x509.Certificate
+	Key      *ecdsa.PrivateKey
+	CertPEM  []byte
+	KeyPEM   []byte
+}
+
+// GenerateKey generates a new P-256 ECDSA key
+func GenerateKey() (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+}
+
+// EncodeToPEM converts certificate and key to PEM format
+func EncodeToPEM(certDer []byte, key *ecdsa.PrivateKey) ([]byte, []byte, error) {
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDer})
+	
+	keyBytes, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate private key: %w", err)
+		return nil, nil, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+	
+	return certPEM, keyPEM, nil
+}
+
+// CreateRootCA generates a new self-signed Root CA
+func CreateRootCA(org string) (*KeyPair, error) {
+	key, err := GenerateKey()
+	if err != nil {
+		return nil, err
 	}
 
-	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate serial number: %w", err)
-	}
-
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	template := &x509.Certificate{
-		SerialNumber: serialNumber,
+		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{organization},
-			CommonName:   "Alloy Root CA",
+			Organization: []string{org},
+			CommonName:   "Alloy Machine Root",
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0), // 10 years
+		NotAfter:              time.Now().AddDate(10, 0, 0),
 		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 	}
 
-	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create certificate: %w", err)
+		return nil, err
 	}
 
-	cert, err := x509.ParseCertificate(certBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %w", err)
-	}
+	cert, _ := x509.ParseCertificate(der)
+	certPEM, keyPEM, _ := EncodeToPEM(der, key)
 
-	return &CertificateAuthority{
-		Cert: cert,
-		Key:  key,
-	}, nil
+	return &KeyPair{Cert: cert, Key: key, CertPEM: certPEM, KeyPEM: keyPEM}, nil
 }
 
-// GenerateCertificate creates a signed certificate for a component.
-func (ca *CertificateAuthority) GenerateCertificate(commonName string, organization string, isServer bool) ([]byte, []byte, error) {
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// SignCertificate signs a new certificate using the CA KeyPair
+func SignCertificate(ca *KeyPair, req IssueRequest) (*KeyPair, error) {
+	key, err := GenerateKey()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate key: %w", err)
+		return nil, err
 	}
 
-	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate serial number: %w", err)
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	
+	if req.Duration == 0 {
+		req.Duration = time.Hour * 24 * 365 // 1 year default
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: serialNumber,
+		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{organization},
-			CommonName:   commonName,
+			Organization: []string{req.Organization},
+			CommonName:   req.CommonName,
 		},
 		NotBefore:   time.Now(),
-		NotAfter:    time.Now().AddDate(1, 0, 0), // 1 year
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		NotAfter:    time.Now().Add(req.Duration),
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		DNSNames:    req.DNSNames,
+		IPAddresses: req.IPAddresses,
 	}
 
-	certBytes, err := x509.CreateCertificate(rand.Reader, template, ca.Cert, &priv.PublicKey, ca.Key)
+	der, err := x509.CreateCertificate(rand.Reader, template, ca.Cert, &key.PublicKey, ca.Key)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
+		return nil, err
 	}
 
-	// Encode to PEM
-	certPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
-	
-	privBytes, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal key: %w", err)
-	}
-	keyPem := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
+	cert, _ := x509.ParseCertificate(der)
+	certPEM, keyPEM, _ := EncodeToPEM(der, key)
 
-	return certPem, keyPem, nil
+	return &KeyPair{Cert: cert, Key: key, CertPEM: certPEM, KeyPEM: keyPEM}, nil
 }
 
-// SaveToFile writes the CA certificate and key to files.
-func (ca *CertificateAuthority) SaveToFile(certPath, keyPath string) error {
-	certPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Cert.Raw})
-	if err := os.WriteFile(certPath, certPem, 0644); err != nil {
-		return err
+// ParseKeyPair loads a certificate and key from PEM data
+func ParseKeyPair(certPEM, keyPEM []byte) (*KeyPair, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode certificate PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
 	}
 
-	privBytes, err := x509.MarshalECPrivateKey(ca.Key)
-	if err != nil {
-		return err
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return nil, fmt.Errorf("failed to decode key PEM")
 	}
-	keyPem := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
-	return os.WriteFile(keyPath, keyPem, 0600)
+	key, err := x509.ParseECPrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &KeyPair{
+		Cert:    cert,
+		Key:     key,
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	}, nil
 }

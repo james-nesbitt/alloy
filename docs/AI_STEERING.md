@@ -38,7 +38,11 @@ This document defines how AI agents, like yourselves, should interact with the A
     - Use the kernel's message bus or RefID system for resource access (files, network).
     - Respect "Fuel" and memory limits in plugin logic.
     - Implement non-blocking host calls.
-- **Security by Design**: Always think about multi-user permissions, sandbox isolation, and mTLS-based identity.
+- **Security by Design**: Always think about multi-user permissions and sandbox isolation. (Note: mTLS-based identity is currently deferred).
+- **XDG Compliance**: Always respect XDG environment variables (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_RUNTIME_DIR`, etc.). 
+    - Default to `~/.config/alloy`, `~/.local/share/alloy`, and `~/.cache/alloy`.
+    - Volatile files (sockets, PIDs) should reside in `XDG_RUNTIME_DIR/alloy`.
+    - Paths should only fall back to the current directory (`pwd`) when explicitly requested or during localized development.
 - **Audit Everything**: Ensure new features or communication paths are integrated into the audit logging system.
 - **Follow the Path**: When adding new files, place them in the established directory hierarchy.
 

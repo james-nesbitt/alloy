@@ -2,15 +2,19 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
+	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 )
 
 // Kernel is the core component that manages plugins and message routing.
 type Kernel struct {
 	logger *slog.Logger
+	audit  *audit.Logger
 	mu     sync.RWMutex
 	
 	// plugins maps plugin IDs to their instances
@@ -26,14 +30,16 @@ type Kernel struct {
 // Plugin defines the interface for backend extensions.
 type Plugin interface {
 	ID() string
+	Capabilities() []api.Capability
 	HandleMessage(ctx context.Context, msg api.Message) (api.Message, error)
 	Shutdown(ctx context.Context) error
 }
 
 // New creates a new instance of the Alloy Kernel.
-func New(logger *slog.Logger) *Kernel {
+func New(logger *slog.Logger, audit *audit.Logger) *Kernel {
 	return &Kernel{
 		logger:    logger,
+		audit:     audit,
 		plugins:   make(map[string]Plugin),
 		frontends: make(map[string]chan<- api.Message),
 		stopCh:    make(chan struct{}),
@@ -59,6 +65,9 @@ func (k *Kernel) RegisterPlugin(p Plugin) {
 	defer k.mu.Unlock()
 	k.plugins[p.ID()] = p
 	k.logger.Info("plugin registered", "plugin_id", p.ID())
+	if k.audit != nil {
+		k.audit.Log(audit.Entry{Actor: "system", Action: "plugin_register", Target: p.ID(), Status: "success"})
+	}
 }
 
 // RouteMessage handles the delivery of a message to its intended target.
@@ -69,6 +78,24 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	plugin, isPlugin := k.plugins[msg.Target]
 	frontendChan, isFrontend := k.frontends[msg.Target]
 	k.mu.RUnlock()
+
+	if k.audit != nil {
+		k.audit.Log(audit.Entry{
+			Actor:  msg.Sender,
+			Action: "route",
+			Target: msg.Target,
+			Status: "processed",
+			Details: map[string]any{
+				"method": msg.Method,
+				"type":   msg.Type,
+			},
+		})
+	}
+
+	if msg.Target == "kernel" || msg.Target == "system" {
+		k.handleInternalMessage(ctx, msg)
+		return
+	}
 
 	if isPlugin {
 		go func() {
@@ -103,4 +130,60 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 	defer k.mu.Unlock()
 	k.frontends[id] = ch
 	k.logger.Info("frontend registered", "frontend_id", id)
+}
+
+func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
+	k.logger.Debug("handling internal message", "method", msg.Method)
+	
+	switch msg.Method {
+	case "ping":
+		resp := api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Method:    "ping",
+			Payload:   []byte(`{"status":"pong"}`),
+			Timestamp: time.Now().Unix(),
+		}
+		k.RouteMessage(ctx, resp)
+	case "discover":
+		k.mu.RLock()
+		type registration struct {
+			ID           string           `json:"id"`
+			Capabilities []api.Capability `json:"capabilities,omitempty"`
+			Type         string           `json:"type"`
+		}
+		var targets []registration
+		for id, p := range k.plugins {
+			targets = append(targets, registration{
+				ID:           id,
+				Capabilities: p.Capabilities(),
+				Type:         "plugin",
+			})
+		}
+		for id := range k.frontends {
+			targets = append(targets, registration{
+				ID:   id,
+				Type: "frontend",
+			})
+		}
+		k.mu.RUnlock()
+
+		payload, _ := json.Marshal(map[string]any{
+			"targets": targets,
+		})
+		resp := api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Method:    "discover",
+			Payload:   payload,
+			Timestamp: time.Now().Unix(),
+		}
+		k.RouteMessage(ctx, resp)
+	default:
+		k.logger.Warn("unknown internal method", "method", msg.Method)
+	}
 }

@@ -22,3 +22,9 @@ type Message struct {
 	Timestamp int64           `json:"timestamp"`
 	Metadata  map[string]any  `json:"metadata,omitempty"`
 }
+
+// Capability describes a functionality provided by a component.
+type Capability struct {
+	Method      string `json:"method"`
+	Description string `json:"description,omitempty"`
+}

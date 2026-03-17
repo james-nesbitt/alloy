@@ -20,8 +20,9 @@ Alloy supports multiple frontend implementations:
 
 For more information, see the following documents:
 - [Architecture Overview](docs/ARCHITECTURE.md)
-- [Security Framework (SIPC)](docs/SECURITY.md)
-- [Plugin Roadmap](docs/PLUGINS_ROADMAP.md)
+- [Security Framework](docs/SECURITY.md)
+- [Implementation Roadmap](docs/ROADMAP.md)
+- [Plugin Details](docs/PLUGINS_ROADMAP.md)
 - [Coding Guidelines](docs/CODING_GUIDELINES.md)
 - [AI Steering & Guidelines](docs/AI_STEERING.md)
 
