@@ -25,7 +25,7 @@ test:
 
 # Build the core backend
 build-core:
-    go build -o bin/alloy-core cmd/alloy-core/main.go
+    go build -o build/core cmd/alloy-core/main.go
 
 # Run the insecure test script
 test-smoke:
@@ -39,10 +39,14 @@ test-uds:
 
 # Build the CLI
 build-cli:
-    go build -o bin/alloy-cli cmd/alloy-cli/main.go
+    go build -o build/frontend cmd/alloy-cli/main.go
+
+# Build WASM plugins
+build-wasm:
+    ./build_plugins.sh
 
 # Build everything
-build-all: build-core build-cli
+build-all: build-core build-cli build-wasm
 
 # Run everything (format, lint, test, build)
 all: fmt lint test build-all

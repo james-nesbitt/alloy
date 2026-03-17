@@ -18,12 +18,12 @@ func TestWasmMigration(t *testing.T) {
 	defer os.RemoveAll(homeDir)
 
 	socketPath := filepath.Join(homeDir, "alloy.sock")
-	corePath := "../bin/alloy-core"
+	corePath := "../build/core"
 
 	// Copy the built WASM plugins to a stable location or just absolute path
 	cwd, _ := os.Getwd()
-	chatPath := filepath.Join(cwd, "../plugins/wasm/chat-manager/chat.wasm")
-	bufferPath := filepath.Join(cwd, "../plugins/wasm/buffer-manager/buffer.wasm")
+	chatPath := filepath.Join(cwd, "../build/wasm/chat.wasm")
+	bufferPath := filepath.Join(cwd, "../build/wasm/buffer.wasm")
 
 	// Create provision.json
 	manifest := map[string]any{

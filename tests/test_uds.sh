@@ -6,8 +6,8 @@ just build-all
 SOCK="./alloy.sock"
 rm -f "$SOCK"
 
-echo "Starting alloy-core using Unix socket at $SOCK..."
-./bin/alloy-core --socket "$SOCK" --debug &
+echo "Starting core using Unix socket at $SOCK..."
+./build/core --socket "$SOCK" --debug &
 CORE_PID=$!
 
 trap "kill $CORE_PID 2>/dev/null; rm -f $SOCK" EXIT
@@ -18,8 +18,8 @@ if [ ! -S "$SOCK" ]; then
     exit 1
 fi
 
-echo "Running alloy-cli ping via Unix socket..."
-./bin/alloy-cli ping --socket "unix://$SOCK" --timeout 5
+echo "Running frontend ping via Unix socket..."
+./build/frontend ping --socket "unix://$SOCK" --timeout 5
 
 RESULT=$?
 

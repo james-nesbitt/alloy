@@ -34,8 +34,8 @@ func TestDynamicProvisioning(t *testing.T) {
 	// We'll run it as a subprocess or just use the packages. 
 	// For a true functional test, let's assume alloy-core is built.
 	
-	// Since we are in the same repo, we can just use the built binary from 'bin/'
-	corePath := "../bin/alloy-core"
+	// Since we are in the same repo, we can just use the built binary from 'build/'
+	corePath := "../build/core"
 	if _, err := os.Stat(corePath); err != nil {
 		t.Skip("alloy-core binary not found, skip functional test")
 	}

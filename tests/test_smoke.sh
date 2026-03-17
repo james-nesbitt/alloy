@@ -11,8 +11,8 @@ INSTANCE="smoke-test"
 # Ensure no old data
 rm -rf ~/.local/share/alloy/audit.log
 
-echo "Starting alloy-core instance '$INSTANCE' on $ADDR..."
-./bin/alloy-core --socket "tcp://$ADDR" --name "$INSTANCE" --insecure --debug &
+echo "Starting core instance '$INSTANCE' on $ADDR..."
+./build/core --socket "tcp://$ADDR" --name "$INSTANCE" --insecure --debug &
 CORE_PID=$!
 
 function cleanup {
@@ -26,7 +26,7 @@ trap cleanup EXIT
 # Wait for core to be ready
 MAX_WAIT=5
 WAIT_COUNT=0
-until ./bin/alloy-cli list | grep -q "$INSTANCE"; do
+until ./build/frontend list | grep -q "$INSTANCE"; do
     if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
         echo "ALARM: Core failed to start within $MAX_WAIT seconds"
         exit 1
@@ -35,8 +35,8 @@ until ./bin/alloy-cli list | grep -q "$INSTANCE"; do
     WAIT_COUNT=$((WAIT_COUNT + 1))
 done
 
-echo "Running alloy-cli ping..."
-./bin/alloy-cli ping --socket "tcp://$ADDR" --insecure --timeout 2
+echo "Running frontend ping..."
+./build/frontend ping --socket "tcp://$ADDR" --insecure --timeout 2
 
 RESULT=$?
 
@@ -47,7 +47,7 @@ else
 fi
 
 echo "Stopping core via CLI..."
-./bin/alloy-cli stop --name "$INSTANCE"
+./build/frontend stop --name "$INSTANCE"
 STOP_RESULT=$?
 
 # Wait for process to actually exit

@@ -19,7 +19,7 @@ func TestApplicationPlugins(t *testing.T) {
 	defer os.RemoveAll(homeDir)
 
 	socketPath := filepath.Join(homeDir, "alloy.sock")
-	corePath := "../bin/alloy-core"
+	corePath := "../build/core"
 
 	// Provisioning with new application plugins
 	manifest := map[string]any{

@@ -1,0 +1,15 @@
+# Binaries and build artifacts
+build/
+
+# Go environment
+vendor/
+
+# Test documentation and coverage
+coverage.out
+coverdata/
+race_report.txt
+smoke_test_output.log
+
+# IDEs
+.vscode/
+.idea/

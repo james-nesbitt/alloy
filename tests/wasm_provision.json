@@ -2,7 +2,7 @@
   "plugins": [
     {"id": "plugin-events", "type": "native"},
     {"id": "plugin-kv", "type": "native"},
-    {"id": "plugin-chat", "type": "wasm", "path": "plugins/wasm/chat-manager/chat.wasm"},
-    {"id": "plugin-buffer-manager", "type": "wasm", "path": "plugins/wasm/buffer-manager/buffer.wasm"}
+    {"id": "plugin-chat", "type": "wasm", "path": "build/wasm/chat.wasm"},
+    {"id": "plugin-buffer-manager", "type": "wasm", "path": "build/wasm/buffer.wasm"}
   ]
 }

@@ -28,7 +28,7 @@ jobs:
         run: go test -v -race -cover ./...
 
       - name: Build Core
-        run: go build -o bin/alloy-core cmd/alloy-core/main.go || true # Ignore failure if main.go doesn't exist yet
+        run: go build -o build/core cmd/alloy-core/main.go || true # Ignore failure if main.go doesn't exist yet
 
       - name: Build CLI
-        run: go build -o bin/alloy-cli cmd/alloy-cli/main.go || true # Ignore failure if main.go doesn't exist yet
+        run: go build -o build/frontend cmd/alloy-cli/main.go || true # Ignore failure if main.go doesn't exist yet
