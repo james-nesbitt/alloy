@@ -1,4 +1,4 @@
-//go:build tinygo
+//go:build tinygo || wasip1 || wasm
 package wasm
 
 import (
@@ -79,12 +79,13 @@ func KVDelete(key string) bool {
 	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
 }
 
-// export malloc for the host to allocate memory in guest
-//
-//go:export malloc
-func malloc(size uint32) uintptr {
-	ptr := make([]byte, size)
-	return uintptr(unsafe.Pointer(&ptr[0]))
+// Malloc exports a memory allocation function to the host.
+func Malloc(size uint32) uintptr {
+	if size == 0 {
+		return 0
+	}
+	buf := make([]byte, size)
+	return uintptr(unsafe.Pointer(&buf[0]))
 }
 
 //go:export alloy_handle_message

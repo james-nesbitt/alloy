@@ -75,13 +75,7 @@ func (a *AIManager) HandleMessage(ctx context.Context, msg api.Message) (api.Mes
 
 		textToSummarize := req.Text
 		if req.BufferID != "" {
-			// Fetch from Buffer Manager
-			getReq, _ := json.Marshal(map[string]string{"id": req.BufferID})
-			// This is a synchronous request-response over the bus!
-			// We need a helper for this or use a channel.
-			// For simplicity in native code, we can just call and wait if we have a way.
-			// But the kernel/bus is async.
-			// Let's just mock it for now or implement a sync call in the manager.
+			// Fetch from Buffer Manager (Mock for now)
 			textToSummarize = "Content of buffer " + req.BufferID
 		}
 

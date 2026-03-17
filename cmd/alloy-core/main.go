@@ -118,6 +118,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Instantiate the host module (alloy) so plugins can import log, kv, etc.
+	if _, err := wasmRuntime.InstantiateAlloyHost(context.Background()); err != nil {
+		logger.Error("failed to instantiate alloy host module", "error", err)
+		os.Exit(1)
+	}
+
 	// Registry Manager (Orchestrator)
 	rm := native.NewRegistryManager(logger, k, stateStore, wasmRuntime)
 	k.RegisterPlugin(rm)
