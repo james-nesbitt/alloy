@@ -33,10 +33,16 @@ Establishing the "Standard Library" and durable plugin state.
 - [ ] **Plugin State Persistence**:
     - [ ] Kernel-managed `Save/Load` mechanism for plugin-local state.
     - [ ] Host-provided KV storage interface for WASM guests.
-- [ ] **Core Plugins**:
-    - [ ] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
-    - [ ] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
-    - [ ] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions and discovery.
+- [ ] **Core Plugins & Standard Services**:
+    - [ ] **Infrastructure Plugins**:
+        - [ ] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
+        - [ ] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
+        - [ ] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions and discovery.
+    - [ ] **Standard Service Helpers**:
+        - [ ] **KV Store (`plugin-kv`)**: Simple persistent Key-Value service.
+        - [ ] **Cache Manager (`plugin-cache`)**: High-speed transient storage (TTL-based).
+        - [ ] **Doc Store (`plugin-doc`)**: Indexed document/search service.
+        - [ ] **Secret Manager (`plugin-secrets`)**: Policy-based encrypted storage.
 - [ ] **Resource Lifecycle**:
     - [ ] Resource constraints (CPU Fuel, Memory Limits).
 

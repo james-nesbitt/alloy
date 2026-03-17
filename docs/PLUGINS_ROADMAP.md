@@ -59,14 +59,28 @@ Provides a centralized registry for discovering and executing actions across the
 - **Execution Orchestration**: Routes command execution requests to the providing component via the kernel's message bus.
 - **Auditing**: Every command execution is logged for security and debugging.
 
-## 8. Registry & Plugin Manager (`plugin-registry-manager`)
-Manages the lifecycle of plugin artifacts and handles the logistics of keeping the system up to date.
+## 9. Key-Value Store (`service:kv`)
+A foundational service for simple, hierarchical data storage.
+- **Methods**: `get(key)`, `set(key, value)`, `delete(key)`, `list(prefix)`.
+- **Future-proofing**: Can be configured to use local DB (Bolt/Pebble) or external stores like Etcd or Consul.
 
-- **Plugin Acquisition**: Downloads WASM plugin binaries from remote registries (e.g., OCI-compliant registries or HTTPS endpoints).
-- **Compilation/Toolchain**: Optionally manages the compilation of plugins from source if a supported toolchain is available.
-- **Lifecycle Coordination**: Signals the Backend Kernel to load, unload, or hot-reload plugins.
-- **Versioning & Upgrades**: Tracks plugin versions, checks for updates, and manages the upgrade process to ensure compatibility (interacting with the ABI version checks).
-- **Uninstall/Cleanup**: Safely removes plugins and cleans up their associated virtual filesystem data (working with the Storage plugin).
+## 10. Cache Manager (`service:cache`)
+Transient, high-speed storage for non-critical ephemeral data.
+- **Methods**: `set(key, value, ttl)`, `get(key)`, `evict(key)`.
+- **Usage**: Perfect for session data or temporary AI conversation history.
+- **Future-proofing**: Can be backed by Redis or Memcached.
+
+## 11. Document Store (`service:doc`)
+A NoSQL-style service for indexed JSON document management.
+- **Methods**: `insert(coll, doc)`, `find(coll, query)`, `update(coll, id, patch)`, `delete(coll, id)`.
+- **Usage**: Powers the Buffer Manager and Project Manager for rich querying.
+- **Future-proofing**: Can bridge to MongoDB or Elasticsearch.
+
+## 12. Secret Manager (`service:secrets`)
+A secure vault for sensitive data (API keys, certificates, passwords).
+- **Methods**: `get_secret(id)`, `store_secret(id, value)`.
+- **Security**: Implements "Caller Policy" to ensure only authorized plugins can access specific secrets.
+- **Future-proofing**: Can be configured to bridge to HashiCorp Vault, AWS Secrets Manager, or Kubernetes Secrets.
 
 ---
 

@@ -30,6 +30,10 @@ Plugins extend the capabilities of the Alloy backend.
     - High-level orchestration (downloading, upgrading, and managing the plugin catalog) is handled by the **Registry & Plugin Manager** plugin (see [Plugin Roadmap](PLUGINS_ROADMAP.md)).
 - **Standard Interface**: Plugins must implement a standard interface for message handling.
 - **Inter-Plugin Communication**: Plugins can communicate with each other via the kernel's message bus.
+- **Helper Service Plugins**:
+    - **Standardized Helpers**: Specific plugins provide common services (KV, Cache, Secrets, Doc Store) as "Service Providers."
+    - **Interface-based**: Other plugins interact with these via logical service targets (e.g., `service:kv`), allowing the underlying plugin to be swapped (e.g., from a local implementation to a Redis-backed bridge).
+    - **Bootstrap Independence**: The Kernel must remain self-sufficient and not depend on these helper plugins for its own basic startup or mTLS operations.
 - **Dependencies**: 
     - Plugins can depend on the presence of other plugins to function.
     - Plugins can provide **optional functionality**; for example, the Chat plugin might offer enhanced logging only if the Buffer Manager plugin is available.
