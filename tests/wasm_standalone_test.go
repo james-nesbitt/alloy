@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
 	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
@@ -50,6 +51,21 @@ func TestStandaloneWasmLoad(t *testing.T) {
 	}
 
 	t.Logf("Successfully loaded plugin: %s", plugin.ID())
+
+	// Test a message
+	resp, err := plugin.HandleMessage(ctx, api.Message{
+		ID:        "ping-1",
+		Type:      api.TypeRequest,
+		Sender:    "test-runner",
+		Target:    "mock-plugin",
+		Method:    "ping",
+		Timestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		t.Errorf("failed to handle message: %v", err)
+	} else {
+		t.Logf("Successfully handled message: %s - response: %s", resp.ID, string(resp.Payload))
+	}
 
 	// Shutdown the plugin
 	if err := plugin.Shutdown(ctx); err != nil {
