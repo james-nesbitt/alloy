@@ -29,6 +29,7 @@ func TestWasmMigration(t *testing.T) {
 	manifest := map[string]any{
 		"plugins": []map[string]any{
 			{"id": "plugin-events", "type": "native"},
+			{"id": "plugin-command-manager", "type": "native"},
 			{"id": "plugin-kv", "type": "native"},
 			{"id": "plugin-chat", "type": "wasm", "path": chatPath},
 			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferPath},
@@ -46,7 +47,13 @@ func TestWasmMigration(t *testing.T) {
 	}
 	defer coreProcess.Process.Kill()
 
-	time.Sleep(1 * time.Second)
+	// Wait for socket to appear
+	for i := 0; i < 20; i++ {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Connect
 	conn, err := net.Dial("unix", socketPath)
@@ -55,6 +62,52 @@ func TestWasmMigration(t *testing.T) {
 	}
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
+
+	// Polling for plugins...
+	pluginsToWait := map[string]bool{
+		"plugin-chat":           true,
+		"plugin-buffer-manager": true,
+	}
+	deadline := time.Now().Add(600 * time.Second)
+	foundCount := 0
+	for time.Now().Before(deadline) {
+		sendMsg(t, conn, api.Message{
+			ID:     "poll-discover",
+			Type:   api.TypeRequest,
+			Sender: "user-1",
+			Target: "plugin-command-manager",
+			Method: "discover",
+		})
+
+		var m api.Message
+		if err := decoder.Decode(&m); err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if m.ID == "poll-discover-resp" {
+			var result struct {
+				Targets []struct {
+					ID string `json:"id"`
+				} `json:"targets"`
+			}
+			json.Unmarshal(m.Payload, &result)
+			count := 0
+			for _, target := range result.Targets {
+				if pluginsToWait[target.ID] {
+					count++
+				}
+			}
+			if count >= len(pluginsToWait) {
+				foundCount = count
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if foundCount < len(pluginsToWait) {
+		t.Fatal("Timed out waiting for WASM plugins")
+	}
 
 	// 1. Test WASM Chat Plugin
 	chatReq, _ := json.Marshal(map[string]string{

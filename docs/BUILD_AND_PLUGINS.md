@@ -1,63 +1,69 @@
-# Alloy Development: Build and Plugin Guidelines
+# Alloy Build and Plugin Guidelines
 
-## 1. Build System
+Alloy is a hybrid system that leverages both Native Go code for infrastructure and WebAssembly (WASM) for application logic. This document outlines how to build the core and its plugins.
 
-All build artifacts (binaries and WASM modules) are centralized in the `/build` directory. This keeps the source tree clean and simplifies deployment and CI/CD pipelines.
+## 1. Build Process
 
-### 1.1 Directory Structure
-- `/build/core`: The main Alloy backend (kernel) binary.
-- `/build/frontend`: The Alloy CLI/TUI frontend binary.
-- `/build/wasm/`: Directory containing all compiled WASM plugins (e.g., `chat.wasm`, `secrets.wasm`).
+Alloy uses a `justfile` (via [just](https://github.com/casey/just)) to manage its build process.
 
-### 1.2 Compilation
-Use the [justfile](../justfile) to manage builds:
-- `just build-all`: Compiles the core, frontend, and all WASM plugins.
-- `just build-core`: Compiles only the backend.
-- `just build-wasm`: Compiles all WASM plugins using `build_plugins.sh`.
+### 1.1 Building the Core
+The Alloy core is built as a standard Go binary:
+```bash
+just build-core
+```
 
-## 2. Plugin Architecture: Native vs. WASM
+### 1.2 Building WASM Plugins
+Alloy plugins are built into independent WebAssembly binaries using the `wasip1` target. These are decoupled from the core lifecycle and can be built separately:
+```bash
+just build-plugins
+```
+This command compiles all plugins found in `plugins/wasm/` and places the resulting `.wasm` files in `build/wasm/`.
 
-Alloy supports two types of plugins: **Native (Go)** and **WASM**. Choosing the correct type is critical for maintaining the system's security, performance, and portability.
+### 1.3 Building Everything
+To build both the core and all plugins at once:
+```bash
+just build-all
+```
 
-### 2.1 Native Plugins
-Native plugins are compiled directly into the Alloy core binary.
+## 2. Plugin Loading and Discovery
 
-**When to use Native:**
-- **Core Infrastructure**: Components that provide the fundamental "plumbing" of the system (e.g., the Event Bus, KV Store abstraction).
-- **Resource Management**: Logic that requires direct, high-performance access to host system resources (memory, file descriptors) that WASI cannot yet provide efficiently.
-- **Bootstrapping**: Components necessary for the kernel to reach a state where it can safely load other plugins.
+The Alloy core does not have plugins "burned-in" or statically linked. Instead, it discovers them at runtime.
 
-**Decision Criteria:**
-- Does it provide a service used by almost every other plugin?
-- Is it part of the "Trusted Computing Base" (TCB)?
+### 2.1 The `--wasm-plugins` Flag
+When starting the core, you can specify one or more directories for the core to scan for WASM plugins:
+```bash
+./build/core --wasm-plugins ./build/wasm --wasm-plugins ./my-custom-plugins
+```
+The core will automatically:
+1. Scan these directories for files ending in `.wasm`.
+2. Derive a Plugin ID from the filename (e.g., `chat.wasm` -> `plugin-chat`).
+3. Load the plugin asynchronously using the `RegistryManager`.
 
-### 2.2 WASM Plugins
-WASM plugins are standalone `.wasm` files loaded dynamically by the kernel's runtime (`wazero`).
+### 2.2 Asynchronous Loading
+Because WASM compilation (Ahead-of-Time compilation via `wazero`) can be resource-intensive, the core loads plugins in the background. A plugin is not immediately available for message routing; it becomes available once its code is compiled and it successfully executes its `_start` routine and registers with the host.
 
-**When to use WASM:**
-- **Application Logic**: Business rules, chat protocols, AI agent behaviors, and user-level features.
-- **Untrusted/Third-Party Code**: Any logic that should not have the power to crash the kernel or access unauthorized host files.
-- **Security-Sensitive Logic**: Components like **IAM** or **Secrets Management**—by running these in WASM, we ensure they are isolated from the rest of the kernel and other plugins.
+## 3. Testing Considerations
 
-**Decision Criteria:**
-- Does it handle user data?
-- Does it need to be sandboxed?
-- Should it be swappable or updateable without restarting the kernel?
+When writing tests for Alloy, you must account for the asynchronous nature of WASM plugin initialization.
 
-### 2.3 Summary Comparison
+### 3.1 Compilation Overhead
+WASM plugins in Alloy are relatively large because they include the Go runtime. Compiling these modules into machine code during a test run can take significant time (up to 30 seconds or more per plugin depending on the environment).
 
-| Feature | Native | WASM |
-| :--- | :--- | :--- |
-| **Isolation** | None (Runs in Kernel space) | High (Sandboxed) |
-| **Security** | Trusted | Untrusted / Restricted |
-| **Performance** | Native (Highest) | Near-native (Wasm Overhead) |
-| **Language** | Go only | Any language targeting WASM/WASI |
-| **Updateability** | Requires recompiling Core | Dynamic reload |
-| **Access** | Full Host Access | Capability-based (WASI/Host Calls) |
+### 3.2 The Polling Pattern
+Tests should never use fixed `time.Sleep()` to wait for a plugin. Instead, use the **Discovery Polling Pattern**:
+1. Connect to the core.
+2. Periodically send a `discover` request to the `plugin-command-manager`.
+3. Check the response to see if the desired plugin ID is listed in the available targets.
+4. Continue with test logic only once the plugin is present.
 
-## 3. Current Decision Tree
+Refer to `tests/application_test.go` for an example of this pattern.
 
-1. **Is it the Message Bus or KV Provider?** -> **Native**
-2. **Is it a user-facing feature?** (Chat, AI, Buffer) -> **WASM**
-3. **Is it a security service?** (IAM, Secrets) -> **WASM** (for isolation/auditability)
-4. **Is it a monitoring service?** (Health, Tasks) -> **WASM** (to prevent crashes from affecting core)
+### 3.3 Test Timeouts
+Due to compilation overhead, tests involving WASM plugins should be run with a generous timeout. The default project timeout is set to 30s in the `justfile`, but heavy integration tests may require manual adjustment or polling loops with much longer deadlines.
+
+## 4. Resource Constraints
+
+All WASM plugins are executed within the `wazero` runtime with the following constraints:
+- **Sandbox**: No direct access to host files, network, or environment unless explicitly mapped by the core.
+- **Clock Support**: Plugins are provided with access to system wall time and monotonic time via WASI.
+- **Panic Guards**: The core manages the lifecycle of plugin modules; if a plugin's `_start` goroutine panics, it is caught to prevent the host process from crashing, though the plugin may enter an error state.

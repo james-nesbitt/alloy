@@ -77,10 +77,11 @@ func TestApplicationPlugins(t *testing.T) {
 	pluginsToWait := map[string]bool{
 		"plugin-chat":     true,
 		"plugin-ai-agent": true,
+		"plugin-buffer-manager": true,
 	}
 
 	t.Log("Polling for WASM plugins to register...")
-	deadline := time.Now().Add(300 * time.Second)
+	deadline := time.Now().Add(600 * time.Second) // 10 minutes for slow compilation
 	foundCount := 0
 	for time.Now().Before(deadline) {
 		sendMsg(t, conn, api.Message{

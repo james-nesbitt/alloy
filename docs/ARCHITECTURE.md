@@ -29,6 +29,7 @@ Plugins extend the capabilities of the Alloy backend.
 - **Lifecycle Management**: 
     - The Backend Kernel provides the low-level mechanism for starting, stopping, and restarting plugins.
     - High-level orchestration (downloading, upgrading, and managing the plugin catalog) is handled by the **Registry & Plugin Manager** plugin (see [Plugin Roadmap](PLUGINS_ROADMAP.md)).
+- **Discovery**: While the core supports explicit provisioning, it can also automatically discover WASM plugins in directories specified via the `--wasm-plugins` flag at startup.
 - **Standard Interface**: Plugins must implement a standard interface for message handling.
 - **Inter-Plugin Communication**: Plugins can communicate with each other via the kernel's message bus.
 - **Helper Service Plugins**:

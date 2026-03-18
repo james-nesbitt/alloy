@@ -2,7 +2,6 @@ package tests
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -32,6 +31,7 @@ func TestWasmBulkMigration(t *testing.T) {
 	manifest := map[string]any{
 		"plugins": []map[string]any{
 			{"id": "plugin-events", "type": "native"},
+			{"id": "plugin-command-manager", "type": "native"},
 			{"id": "plugin-kv", "type": "native"},
 			{"id": "plugin-chat", "type": "wasm", "path": chatPath},
 			{"id": "plugin-ai-agent", "type": "wasm", "path": aiPath},
@@ -51,7 +51,13 @@ func TestWasmBulkMigration(t *testing.T) {
 	}
 	defer coreProcess.Process.Kill()
 
-	time.Sleep(5 * time.Second)
+	// Wait for socket to appear
+	for i := 0; i < 20; i++ {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Connect
 	conn, err := net.Dial("unix", socketPath)
@@ -61,29 +67,70 @@ func TestWasmBulkMigration(t *testing.T) {
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
 
-	// 1. Verify Health (with retry since provision might still be in progress)
-	var healthResp api.Message
-	for i := 0; i < 5; i++ {
-		sendMsg(t, conn, api.Message{
-			ID:     fmt.Sprintf("health-%d", i),
-			Sender: "user",
-			Target: "plugin-health",
-			Method: "status",
-		})
-		
-		var m api.Message
-		err := decoder.Decode(&m)
-		if err == nil && m.ID == fmt.Sprintf("health-%d-resp", i) {
-			healthResp = m
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	
-	if healthResp.ID == "" {
-		t.Fatal("never received health response")
+	// Polling for plugins to register...
+	pluginsToWait := map[string]bool{
+		"plugin-chat":     true,
+		"plugin-ai-agent": true,
+		"plugin-secrets":  true,
+		"plugin-health":   true,
 	}
 
+	t.Log("Polling for WASM plugins to register...")
+	deadline := time.Now().Add(600 * time.Second)
+	foundCount := 0
+	for time.Now().Before(deadline) {
+		sendMsg(t, conn, api.Message{
+			ID:     "poll-discover",
+			Type:   api.TypeRequest,
+			Sender: "user",
+			Target: "plugin-command-manager",
+			Method: "discover",
+		})
+
+		var resp api.Message
+		err := decoder.Decode(&resp)
+		if err != nil {
+			t.Logf("Decode error during poll: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if resp.ID == "poll-discover-resp" {
+			var result struct {
+				Targets []struct {
+					ID string `json:"id"`
+				} `json:"targets"`
+			}
+			json.Unmarshal(resp.Payload, &result)
+			count := 0
+			for _, target := range result.Targets {
+				if pluginsToWait[target.ID] {
+					count++
+				}
+			}
+			if count >= len(pluginsToWait) {
+				t.Log("All WASM plugins registered")
+				foundCount = count
+				break
+			}
+			t.Logf("Found %d/%d WASM plugins...", count, len(pluginsToWait))
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if foundCount < len(pluginsToWait) {
+		t.Fatal("Timed out waiting for WASM plugins")
+	}
+
+	// 1. Verify Health
+	sendMsg(t, conn, api.Message{
+		ID:     "health-1",
+		Sender: "user",
+		Target: "plugin-health",
+		Method: "status",
+	})
+	awaitResponse(t, decoder, "health-1-resp")
+	
 	// 2. Verify Secrets
 	storeReq, _ := json.Marshal(map[string]string{"id": "db_pass", "value": "password123"})
 	sendMsg(t, conn, api.Message{
