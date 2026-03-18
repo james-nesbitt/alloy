@@ -39,7 +39,20 @@ The core will automatically:
 2. Derive a Plugin ID from the filename (e.g., `chat.wasm` -> `plugin-chat`).
 3. Load the plugin asynchronously using the `RegistryManager`.
 
-### 2.2 Asynchronous Loading
+### 2.2 Manual Plugin Loading
+You can also load specific WASM plugins using the `--wasm-plugin` flag:
+```bash
+./build/core --wasm-plugin ./build/wasm/chat.wasm
+```
+
+### 2.3 Provisioning Manifest
+For complex setups involving multiple native and WASM plugins with specific constraints, use a provisioning manifest:
+```bash
+./build/core --provision ./tests/wasm_provision.json
+```
+The manifest is a JSON file defining a list of plugins to load.
+
+### 2.4 Asynchronous Loading
 Because WASM compilation (Ahead-of-Time compilation via `wazero`) can be resource-intensive, the core loads plugins in the background. A plugin is not immediately available for message routing; it becomes available once its code is compiled and it successfully executes its `_start` routine and registers with the host.
 
 ## 3. Testing Considerations

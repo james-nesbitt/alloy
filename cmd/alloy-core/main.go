@@ -68,6 +68,11 @@ func main() {
 	var wasmPluginsDirs stringSlice
 	flag.Var(&wasmPluginsDirs, "wasm-plugins", "Directory to scan for WASM plugins to load at startup (can be specified multiple times)")
 
+	var wasmPlugins stringSlice
+	flag.Var(&wasmPlugins, "wasm-plugin", "WASM plugin file to load at startup (can be specified multiple times)")
+
+	provisionManifest := flag.String("provision", "", "Path to provisioning manifest (JSON)")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
 		flag.PrintDefaults()
@@ -175,21 +180,49 @@ func main() {
 		}
 	}
 
-	// Automatic Provisioning (if manifest exists)
-	manifestPath := filepath.Join(*alloyHome, "provision.json")
-	if _, err := os.Stat(manifestPath); err == nil {
-		logger.Info("loading provisioning manifest", "path", manifestPath)
-		data, _ := os.ReadFile(manifestPath)
+	// Manual Loading (if --wasm-plugin flag(s) set)
+	for _, pluginPath := range wasmPlugins {
+		pluginID := "plugin-" + filepath.Base(pluginPath)
+		if len(pluginID) > 5 && pluginID[len(pluginID)-5:] == ".wasm" {
+			pluginID = pluginID[:len(pluginID)-5]
+		}
+		logger.Info("loading manual WASM plugin", "id", pluginID, "path", pluginPath)
+
+		pluginDef := map[string]any{
+			"id":   pluginID,
+			"type": "wasm",
+			"path": pluginPath,
+		}
+		payload, _ := json.Marshal(pluginDef)
+
 		k.RouteMessage(context.Background(), api.Message{
-			ID:      "bootstrap-provision",
+			ID:      "manual-load-" + pluginID,
 			Type:    api.TypeRequest,
 			Sender:  "system",
 			Target:  rm.ID(),
-			Method:  "provision",
-			Payload: data,
+			Method:  "load",
+			Payload: payload,
 		})
+	}
+
+	// Provisioning (if manifest path provided)
+	if *provisionManifest != "" {
+		logger.Info("loading provisioning manifest", "path", *provisionManifest)
+		data, err := os.ReadFile(*provisionManifest)
+		if err != nil {
+			logger.Error("failed to read provisioning manifest", "path", *provisionManifest, "error", err)
+		} else {
+			k.RouteMessage(context.Background(), api.Message{
+				ID:      "bootstrap-provision",
+				Type:    api.TypeRequest,
+				Sender:  "system",
+				Target:  rm.ID(),
+				Method:  "provision",
+				Payload: data,
+			})
+		}
 	} else {
-		logger.Info("no provisioning manifest found, starting in minimal mode")
+		logger.Info("no provisioning manifest provided, starting in minimal mode")
 	}
 
 	if err := k.Start(ctx); err != nil {

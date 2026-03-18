@@ -49,7 +49,8 @@ func TestApplicationPlugins(t *testing.T) {
 	os.WriteFile(filepath.Join(homeDir, "provision.json"), manifestData, 0644)
 
 	// Start core
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug")
+	provisionPath := filepath.Join(homeDir, "provision.json")
+	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug", "--provision", provisionPath)
 	coreProcess.Stdout = os.Stdout
 	coreProcess.Stderr = os.Stderr
 	if err := coreProcess.Start(); err != nil {
@@ -200,12 +201,5 @@ func TestApplicationPlugins(t *testing.T) {
 		if !foundAI {
 			t.Error("AI agent response not found in chat history")
 		}
-	}
-}
-
-func sendMsg(t *testing.T, conn net.Conn, msg api.Message) {
-	data, _ := json.Marshal(msg)
-	if _, err := conn.Write(append(data, '\n')); err != nil {
-		t.Fatalf("failed to send message %s: %v", msg.ID, err)
 	}
 }

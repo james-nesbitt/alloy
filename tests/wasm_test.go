@@ -13,9 +13,9 @@ import (
 	"github.com/jnesbitt/alloy-go/api"
 )
 
-func TestWasmBulkMigration(t *testing.T) {
+func TestWasmPlugins(t *testing.T) {
 	// Setup environment
-	homeDir, _ := os.MkdirTemp("", "alloy-wasm-bulk-*")
+	homeDir, _ := os.MkdirTemp("", "alloy-wasm-test-*")
 	defer os.RemoveAll(homeDir)
 
 	socketPath := filepath.Join(homeDir, "alloy.sock")
@@ -26,6 +26,7 @@ func TestWasmBulkMigration(t *testing.T) {
 	secretsPath := filepath.Join(cwd, "../build/wasm/secrets.wasm")
 	healthPath := filepath.Join(cwd, "../build/wasm/health.wasm")
 	chatPath := filepath.Join(cwd, "../build/wasm/chat.wasm")
+	bufferPath := filepath.Join(cwd, "../build/wasm/buffer.wasm")
 
 	// Create provision.json
 	manifest := map[string]any{
@@ -37,13 +38,15 @@ func TestWasmBulkMigration(t *testing.T) {
 			{"id": "plugin-ai-agent", "type": "wasm", "path": aiPath},
 			{"id": "plugin-secrets", "type": "wasm", "path": secretsPath},
 			{"id": "plugin-health", "type": "wasm", "path": healthPath},
+			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferPath},
 		},
 	}
 	manifestData, _ := json.Marshal(manifest)
-	os.WriteFile(filepath.Join(homeDir, "provision.json"), manifestData, 0644)
+	provisionPath := filepath.Join(homeDir, "provision.json")
+	os.WriteFile(provisionPath, manifestData, 0644)
 
 	// Start core
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug")
+	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug", "--provision", provisionPath)
 	coreProcess.Stdout = os.Stdout
 	coreProcess.Stderr = os.Stderr
 	if err := coreProcess.Start(); err != nil {
@@ -74,10 +77,11 @@ func TestWasmBulkMigration(t *testing.T) {
 
 	// Polling for plugins to register...
 	pluginsToWait := map[string]bool{
-		"plugin-chat":     true,
-		"plugin-ai-agent": true,
-		"plugin-secrets":  true,
-		"plugin-health":   true,
+		"plugin-chat":           true,
+		"plugin-ai-agent":       true,
+		"plugin-secrets":        true,
+		"plugin-health":         true,
+		"plugin-buffer-manager": true,
 	}
 
 	t.Log("Polling for WASM plugins to register...")
@@ -159,7 +163,22 @@ func TestWasmBulkMigration(t *testing.T) {
 		t.Errorf("secret mismatch, got: %s", string(resp.Payload))
 	}
 
-	// 3. Verify AI Agent (Subscription and Reaction)
+	// 3. Verify Buffer Manager
+	openReq, _ := json.Marshal(map[string]string{
+		"id":   "doc-1",
+		"type": "text",
+	})
+	sendMsg(t, conn, api.Message{
+		ID:      "buf-wasm-1",
+		Type:    api.TypeRequest,
+		Sender:  "user",
+		Target:  "plugin-buffer-manager",
+		Method:  "open",
+		Payload: openReq,
+	})
+	awaitResponse(t, decoder, "buf-wasm-1-resp")
+
+	// 4. Verify Chat and AI Agent (Subscription and Reaction)
 	chatReq, _ := json.Marshal(map[string]string{
 		"channel": "ai-test",
 		"content": "AI: test bulk migration",
@@ -188,18 +207,4 @@ func TestWasmBulkMigration(t *testing.T) {
 	if !foundAI {
 		t.Error("never received AI agent response via Route in WASM")
 	}
-}
-
-func awaitResponse(t *testing.T, dec *json.Decoder, id string) api.Message {
-	for i := 0; i < 100; i++ {
-		var m api.Message
-		if err := dec.Decode(&m); err != nil {
-			t.Fatalf("failed to decode while waiting for %s: %v", id, err)
-		}
-		if m.ID == id {
-			return m
-		}
-	}
-	t.Fatalf("timed out waiting for message %s", id)
-	return api.Message{}
 }

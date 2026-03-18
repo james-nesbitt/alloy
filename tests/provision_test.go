@@ -42,7 +42,7 @@ func TestDynamicProvisioning(t *testing.T) {
 	}
 
 	// Start core
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug")
+	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug", "--provision", provisionPath)
 	coreProcess.Stdout = os.Stdout
 	coreProcess.Stderr = os.Stderr
 	if err := coreProcess.Start(); err != nil {
