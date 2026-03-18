@@ -51,7 +51,7 @@ func TestWasmBulkMigration(t *testing.T) {
 	}
 	defer coreProcess.Process.Kill()
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// Connect
 	conn, err := net.Dial("unix", socketPath)
@@ -77,7 +77,7 @@ func TestWasmBulkMigration(t *testing.T) {
 			healthResp = m
 			break
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 	
 	if healthResp.ID == "" {

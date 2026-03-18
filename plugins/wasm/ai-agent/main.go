@@ -18,17 +18,16 @@ type ChatMessage struct {
 
 func main() {
 	wasm.SetHandler(handleMessage)
-
-	// NOTE: wasm.Route is currently not supported by the host runtime.
-	// Subscription and event routing are handled by returning properly
-	// formatted messages to the kernel.
+	// Avoid deadlock detector by having a "waiting" goroutine
+	go func() {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}()
+	select {}
 }
 
 // malloc is needed for the host to allocate memory in the guest
-//go:export malloc
-func malloc(size uint32) uintptr {
-	return wasm.Malloc(size)
-}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {

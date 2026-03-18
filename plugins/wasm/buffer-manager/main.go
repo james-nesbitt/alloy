@@ -18,12 +18,15 @@ type Buffer struct {
 
 func main() {
 	wasm.SetHandler(handleMessage)
+	// Avoid deadlock detector by having a "waiting" goroutine
+	go func() {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}()
+	select {}
 }
 
-//go:export malloc
-func malloc(size uint32) uintptr {
-	return wasm.Malloc(size)
-}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {

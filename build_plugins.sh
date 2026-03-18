@@ -1,17 +1,13 @@
 #!/bin/bash
 set -e
 
-# Core and Frontend are handled by the Task Runner (justfile)
-# This script handles WASM plugins specifically.
-
-mkdir -p build/wasm
-
-# Check for tinygo
+# Use TinyGo if available, fallback to Go
 if command -v tinygo >/dev/null 2>&1; then
-    COMPILER="tinygo build -target=wasi"
+    echo "Using TinyGo for plugin builds..."
+    # Build with wasi target
+    COMPILER="tinygo build -target=wasi -no-debug -scheduler=none"
 else
-    echo "Tinygo not found, using 'go build' with GOOS=wasip1 GOARCH=wasm (might lack WASI features)..."
-    # We use 'env' to make sure the Go environment variables are correctly assigned
+    echo "Using 'go build' with GOOS=wasip1 GOARCH=wasm..."
     COMPILER="env GOOS=wasip1 GOARCH=wasm go build"
 fi
 

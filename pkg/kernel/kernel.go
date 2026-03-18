@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/security/audit"
+)
+
+const (
+	auditContextKey = "alloy.no_audit"
 )
 
 // Kernel is the core component that manages plugins and message routing.
 type Kernel struct {
 	logger *slog.Logger
-	audit  *audit.Logger
 	mu     sync.RWMutex
 
 	// plugins maps plugin IDs to their instances
@@ -28,10 +30,9 @@ type Kernel struct {
 }
 
 // New creates a new instance of the Alloy Kernel.
-func New(logger *slog.Logger, audit *audit.Logger) *Kernel {
+func New(logger *slog.Logger) *Kernel {
 	return &Kernel{
 		logger:    logger,
-		audit:     audit,
 		plugins:   make(map[string]api.Plugin),
 		frontends: make(map[string]chan<- api.Message),
 		stopCh:    make(chan struct{}),
@@ -61,7 +62,10 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 
 	// Emit registration event
 	caps, _ := json.Marshal(p.Capabilities())
-	k.RouteMessage(context.Background(), api.Message{
+	// Use non-auditing context for system-level events
+	systemCtx := context.WithValue(context.Background(), auditContextKey, true)
+
+	k.RouteMessage(systemCtx, api.Message{
 		ID:        "event-reg-" + p.ID(),
 		Type:      api.TypeEvent,
 		Sender:    "kernel",
@@ -71,7 +75,7 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 		Timestamp: time.Now().Unix(),
 	})
 
-	k.publishAuditEvent(context.Background(), api.Message{Sender: "system", Target: p.ID()}, "plugin_register", "success")
+	k.publishAuditEvent(systemCtx, api.Message{Sender: "system", Target: p.ID()}, "plugin_register", "success")
 }
 
 // RouteMessage handles the delivery of a message to its intended target.
@@ -84,7 +88,9 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	k.mu.RUnlock()
 
 	// Emit auditing event for core routing (if enabled)
-	k.publishAuditEvent(ctx, msg, "route", "processed")
+	if ctx.Value(auditContextKey) == nil {
+		k.publishAuditEvent(ctx, msg, "route", "processed")
+	}
 
 	if msg.Target == "kernel" || msg.Target == "system" {
 		k.handleInternalMessage(ctx, msg)
@@ -123,13 +129,17 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 // RegisterFrontend registers a frontend's response channel.
 func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 	k.mu.Lock()
+	if existing, ok := k.frontends[id]; ok && existing == ch {
+		k.mu.Unlock()
+		return
+	}
 	k.frontends[id] = ch
 	k.mu.Unlock()
 
 	k.logger.Info("frontend registered", "frontend_id", id)
 
 	// Emit registration event
-	k.RouteMessage(context.Background(), api.Message{
+	k.RouteMessage(context.WithValue(context.Background(), auditContextKey, true), api.Message{
 		ID:        "event-reg-" + id,
 		Type:      api.TypeEvent,
 		Sender:    "kernel",
@@ -162,28 +172,6 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 	case "audit":
 		// Handle audit log request (e.g., from an external auditor plugin)
 		k.publishAuditEvent(ctx, msg, "audit_request", "authorized")
-	case "discover":
-		k.mu.RLock()
-		var plugins []map[string]any
-		for id, p := range k.plugins {
-			plugins = append(plugins, map[string]any{
-				"id":           id,
-				"capabilities": p.Capabilities(),
-			})
-		}
-		k.mu.RUnlock()
-
-		payload, _ := json.Marshal(plugins)
-		resp := api.Message{
-			ID:        msg.ID + "-resp",
-			Type:      api.TypeResponse,
-			Sender:    "kernel",
-			Target:    msg.Sender,
-			Method:    "discover",
-			Payload:   payload,
-			Timestamp: time.Now().Unix(),
-		}
-		k.RouteMessage(ctx, resp)
 	case "stop":
 		k.logger.Info("stop request received via internal channel")
 		k.Stop(ctx)
@@ -198,25 +186,12 @@ func (k *Kernel) StopCh() <-chan struct{} {
 }
 
 func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action, status string) {
-	// Avoid recursive auditing:
-	// 1. Don't audit messages targeting the event/audit system itself
-	// 2. Don't audit messages sent by the kernel (internal events/responses)
-	if msg.Target == "plugin-events" || msg.Sender == "kernel" {
+	// Avoid recursive auditing and system noise:
+	if msg.Target == "plugin-events" || msg.Target == "plugin-logger" ||
+		msg.Sender == "kernel" || msg.Sender == "plugin-events" || msg.Sender == "plugin-logger" ||
+		msg.Sender == "system" || msg.Sender == "ipc-server" ||
+		msg.Method == "system:audit" || msg.Method == "component:registered" {
 		return
-	}
-
-	// Traditional structured audit log (if configured)
-	if k.audit != nil {
-		k.audit.Log(audit.Entry{
-			Actor:  msg.Sender,
-			Action: action,
-			Target: msg.Target,
-			Status: status,
-			Details: map[string]any{
-				"method": msg.Method,
-				"type":   msg.Type,
-			},
-		})
 	}
 
 	// Modern Event-driven audit log
@@ -230,7 +205,10 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 			"method": msg.Method,
 		})
 
-		k.RouteMessage(context.Background(), api.Message{
+		// Use a explicit context to prevent audit loops at the routing level
+		auditCtx := context.WithValue(context.Background(), auditContextKey, true)
+
+		k.RouteMessage(auditCtx, api.Message{
 			ID:        "audit-" + time.Now().Format("150405.000"),
 			Type:      api.TypeEvent,
 			Sender:    "kernel",

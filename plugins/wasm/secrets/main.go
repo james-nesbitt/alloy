@@ -10,10 +10,6 @@ func main() {
 }
 
 // malloc is needed for the host to allocate memory in the guest
-//go:export malloc
-func malloc(size uint32) uintptr {
-	return wasm.Malloc(size)
-}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {

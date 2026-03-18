@@ -11,6 +11,7 @@ type StateStore interface {
 	Get(pluginID, key string) ([]byte, error)
 	Set(pluginID, key string, value []byte) error
 	Delete(pluginID, key string) error
+	BaseDir() string
 }
 
 // FileStateStore implements StateStore using the local filesystem.
@@ -25,6 +26,10 @@ func NewFileStateStore(baseDir string) (*FileStateStore, error) {
 		return nil, err
 	}
 	return &FileStateStore{baseDir: baseDir}, nil
+}
+
+func (s *FileStateStore) BaseDir() string {
+	return s.baseDir
 }
 
 func (s *FileStateStore) pluginDir(pluginID string) string {
@@ -110,3 +115,5 @@ func (m *MemoryStateStore) Delete(pluginID, key string) error {
 	}
 	return nil
 }
+
+func (m *MemoryStateStore) BaseDir() string { return "" }

@@ -22,8 +22,9 @@ func TestDynamicProvisioning(t *testing.T) {
 	// Create a provision manifest
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	manifest := map[string]any{
-		"plugins": []map[string]string{
+		"plugins": []map[string]any{
 			{"id": "plugin-events", "type": "native"},
+			{"id": "plugin-command-manager", "type": "native"},
 			{"id": "plugin-kv", "type": "native"},
 		},
 	}
@@ -41,7 +42,9 @@ func TestDynamicProvisioning(t *testing.T) {
 	}
 
 	// Start core
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure")
+	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug")
+	coreProcess.Stdout = os.Stdout
+	coreProcess.Stderr = os.Stderr
 	if err := coreProcess.Start(); err != nil {
 		t.Fatalf("failed to start core: %v", err)
 	}
@@ -57,12 +60,12 @@ func TestDynamicProvisioning(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// 4. Send "discover" request to kernel
+	// 4. Send "discover" request to Command Manager
 	discoverMsg := api.Message{
 		ID:     "disc-1",
 		Type:   api.TypeRequest,
 		Sender: "test-frontend",
-		Target: "kernel",
+		Target: "plugin-command-manager",
 		Method: "discover",
 	}
 	
@@ -78,12 +81,14 @@ func TestDynamicProvisioning(t *testing.T) {
 
 	t.Logf("Discover response: %s", string(resp.Payload))
 
-	var plugins []map[string]any
-	json.Unmarshal(resp.Payload, &plugins)
+	var result struct {
+		Targets []map[string]any `json:"targets"`
+	}
+	json.Unmarshal(resp.Payload, &result)
 
 	foundEvents := false
 	foundKV := false
-	for _, p := range plugins {
+	for _, p := range result.Targets {
 		if p["id"] == "plugin-events" {
 			foundEvents = true
 		}

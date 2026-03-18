@@ -109,7 +109,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	k := kernel.New(logger, auditLogger)
+	k := kernel.New(logger)
 
 	// WASM Runtime Setup
 	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore)
@@ -151,7 +151,7 @@ func main() {
 	}
 
 	// Start IPC Server
-	ipcServer := ipc.NewServer(logger, auditLogger, k, tlsConfig)
+	ipcServer := ipc.NewServer(logger, k, tlsConfig)
 	go func() {
 		if err := ipcServer.ListenAndServe(*socket); err != nil {
 			logger.Error("IPC server stopped", "error", err)

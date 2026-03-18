@@ -8,10 +8,6 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/wasm/sdk-go"
 )
 
-// Ensure symbols are NOT optimized away by referencing them in a way the compiler sees.
-// We use a global variable and a function that the compiler cannot prove is unused.
-var _ = wasm.Malloc
-
 type ChatMessage struct {
 	ID        string `json:"id"`
 	Channel   string `json:"channel"`
@@ -22,13 +18,16 @@ type ChatMessage struct {
 
 func main() {
 	wasm.SetHandler(handleMessage)
+	// Avoid deadlock detector by having a "waiting" goroutine
+	go func() {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}()
+	select {}
 }
 
 // Ensure the binary doesn't exit and exports are available
-//go:export malloc
-func malloc(size uint32) uintptr {
-	return wasm.Malloc(size)
-}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {

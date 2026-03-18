@@ -33,14 +33,14 @@ func TestMTLSMessageFlow(t *testing.T) {
 	clientTLS, _ := store.GetClientTLSConfig(ca, "test-client")
 
 	// 2. Start Kernel
-	k := kernel.New(logger, nil)
+	k := kernel.New(logger)
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
 	defer k.Stop(ctx)
 
 	// 3. Start IPC Server
-	server := ipc.NewServer(logger, nil, k, serverTLS)
+	server := ipc.NewServer(logger, k, serverTLS)
 	go func() {
 		if err := server.ListenAndServe("127.0.0.1:0"); err != nil {
 		}

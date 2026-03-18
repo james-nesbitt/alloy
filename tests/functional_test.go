@@ -10,7 +10,6 @@ import (
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
-	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 )
 
 // MockPlugin is a simple plugin for testing.
@@ -44,13 +43,8 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	tempDir, _ := os.MkdirTemp("", "audit-functest")
-	defer os.RemoveAll(tempDir)
-	auditLogger, _ := audit.NewLogger(tempDir)
-	defer auditLogger.Close()
-
 	// 1. Initialize Kernel
-	k := kernel.New(logger, auditLogger)
+	k := kernel.New(logger)
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

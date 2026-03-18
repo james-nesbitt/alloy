@@ -46,7 +46,7 @@ func TestWasmMigration(t *testing.T) {
 	}
 	defer coreProcess.Process.Kill()
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	// Connect
 	conn, err := net.Dial("unix", socketPath)

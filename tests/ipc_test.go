@@ -18,14 +18,14 @@ func TestIPCMessageFlow(t *testing.T) {
 	defer cancel()
 
 	// 1. Start Kernel
-	k := kernel.New(logger, nil)
+	k := kernel.New(logger)
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
 	defer k.Stop(ctx)
 
 	// 2. Start IPC Server on a random port
-	server := ipc.NewServer(logger, nil, k, nil)
+	server := ipc.NewServer(logger, k, nil)
 	go func() {
 		if err := server.ListenAndServe("127.0.0.1:0"); err != nil {
 			// server.Stop() will cause an error here, which is fine

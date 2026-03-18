@@ -26,39 +26,34 @@ type Runtime struct {
 
 // NewRuntime creates a new Alloy WASM runtime.
 func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore) (*Runtime, error) {
-	// Configuration for resource constraints
-	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
+	// Configuration for resource constraints.
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
 		WithCoreFeatures(wazeroapi.CoreFeaturesV2))
 
-	// Note: In 1.11.0, Fuel is enabled via experimental features or compiler config.
-	// For this phase, we ensure sandboxed execution via memory limits.
-
 	// Instantiate WASI
-	wasi_snapshot_preview1.MustInstantiate(ctx, r)
+	if _, err := wasi_snapshot_preview1.NewBuilder(rt).Instantiate(ctx); err != nil {
+		return nil, fmt.Errorf("failed to instantiate WASI: %w", err)
+	}
 
 	return &Runtime{
 		logger: logger,
-		r:      r,
+		r:      rt,
 		kv:     kv,
 	}, nil
 }
 
-// LoadPlugin loads a WASM module from bytes and returns an Alloy-compatible plugin instance.
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasm []byte, memoryLimitMB uint64, fuelLimit uint64) (api.Plugin, error) {
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, memoryLimitMB uint64, fuelLimit uint64) (api.Plugin, error) {
 	config := wazero.NewModuleConfig().
 		WithName(id).
 		WithStdout(os.Stdout).
-		WithStderr(os.Stderr)
+		WithStderr(os.Stderr).
+		WithSysWalltime().
+		WithSysNanotime()
 
-	if memoryLimitMB > 0 {
-		// TODO: Find the correct wazero 1.x method for memory limits
-		// maxPages := uint32(memoryLimitMB * 1024 / 64)
-		// config = config.WithMaxMemoryPages(maxPages)
-	}
-
-	mod, err := r.r.InstantiateWithConfig(ctx, wasm, config)
+	// Use InstantiateWithConfig which handles _start correctly for Go WASIP1
+	mod, err := r.r.InstantiateWithConfig(ctx, wasmBytes, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate module: %w", err)
+		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
 	}
 
 	return &Instance{
@@ -75,8 +70,12 @@ func (r *Runtime) Close(ctx context.Context) error {
 }
 
 // InstantiateAlloyHost defines the host-side functions available to plugins.
-// This is the beginning of the Host Discovery Interface.
 func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, error) {
+	// Idempotent host module instantiation
+	if mod := r.r.Module(HostModuleName); mod != nil {
+		return mod, nil
+	}
+
 	return r.r.NewHostModuleBuilder(HostModuleName).
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, offset, byteCount uint32) {

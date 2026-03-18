@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/jnesbitt/alloy-go/pkg/storage"
 )
@@ -27,5 +28,18 @@ var Registry = map[string]PluginConstructor{
 	},
 	"plugin-storage": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewStorageManager(), nil
+	},
+	"plugin-command-manager": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+		return NewCommandManager(logger), nil
+	},
+	"plugin-logger": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+		auditDir := state.BaseDir()
+		if auditDir != "" {
+			auditDir = filepath.Join(filepath.Dir(auditDir), "audit")
+		} else {
+			// fallback if it's memory store
+			auditDir = "audit"
+		}
+		return NewLoggerManager(logger, auditDir)
 	},
 }

@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/security/audit"
 )
 
 // ParseAddress returns the network and address for net.Listen/net.Dial.
@@ -40,7 +39,6 @@ type Router interface {
 
 type Server struct {
 	logger *slog.Logger
-	audit  *audit.Logger
 	router Router
 	config *tls.Config
 
@@ -58,10 +56,9 @@ type connection struct {
 	sendCh chan api.Message
 }
 
-func NewServer(logger *slog.Logger, audit *audit.Logger, router Router, tlsConfig *tls.Config) *Server {
+func NewServer(logger *slog.Logger, router Router, tlsConfig *tls.Config) *Server {
 	return &Server{
 		logger: logger,
-		audit:  audit,
 		router: router,
 		config: tlsConfig,
 		conns:  make(map[string]*connection),
@@ -157,14 +154,24 @@ func (s *Server) handleConn(netConn net.Conn) {
 		if len(state.PeerCertificates) > 0 {
 			clientID = state.PeerCertificates[0].Subject.CommonName
 			s.logger.Info("mtls identity verified", "client_id", clientID)
-			if s.audit != nil {
-				s.audit.Log(audit.Entry{Actor: clientID, Action: "connection", Status: "success", Details: map[string]any{"type": "mtls"}})
-			}
+			s.router.RouteMessage(context.Background(), api.Message{
+				ID:      "audit-conn-" + clientID,
+				Type:    api.TypeEvent,
+				Sender:  "ipc-server",
+				Target:  "plugin-events",
+				Method:  "publish",
+				Payload: []byte(`{"topic":"system:audit","data":{"actor":"` + clientID + `","action":"connection","status":"success","details":{"type":"mtls"}}}`),
+			})
 		}
 	} else {
-		if s.audit != nil {
-			s.audit.Log(audit.Entry{Actor: clientID, Action: "connection", Status: "success", Details: map[string]any{"type": "plain"}})
-		}
+		s.router.RouteMessage(context.Background(), api.Message{
+			ID:      "audit-conn-" + clientID,
+			Type:    api.TypeEvent,
+			Sender:  "ipc-server",
+			Target:  "plugin-events",
+			Method:  "publish",
+			Payload: []byte(`{"topic":"system:audit","data":{"actor":"` + clientID + `","action":"connection","status":"success","details":{"type":"plain"}}}`),
+		})
 	}
 
 	s.logger.Info("new connection", "client_id", clientID)
@@ -201,9 +208,11 @@ func (s *Server) handleConn(netConn net.Conn) {
 			// In plain TCP, we trust the sender for now, but ensure it's set
 			if msg.Sender == "" {
 				msg.Sender = clientID
-			} else {
-				// Re-register if sender name changed or first message
+			} else if msg.Sender != clientID {
+				// Re-register if sender name changed
 				s.router.RegisterFrontend(msg.Sender, sendCh)
+				// Update clientID for this connection context
+				clientID = msg.Sender
 			}
 			s.router.RouteMessage(ctx, msg)
 		}

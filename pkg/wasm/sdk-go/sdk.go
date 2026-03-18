@@ -79,8 +79,8 @@ func KVDelete(key string) bool {
 	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
 }
 
-// Malloc exports a memory allocation function to the host.
-func Malloc(size uint32) uintptr {
+//go:wasmexport malloc
+func malloc(size uint32) uintptr {
 	if size == 0 {
 		return 0
 	}
@@ -88,7 +88,7 @@ func Malloc(size uint32) uintptr {
 	return uintptr(unsafe.Pointer(&buf[0]))
 }
 
-//go:export alloy_handle_message
+//go:wasmexport alloy_handle_message
 func alloyHandleMessage(ptr uintptr, size uint32) uint64 {
 	// 1. Read message from guest memory
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)

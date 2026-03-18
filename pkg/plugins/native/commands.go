@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -19,12 +20,33 @@ type registration struct {
 type CommandManager struct {
 	mu       sync.RWMutex
 	registry map[string]registration
+	logger   *slog.Logger
+	route    func(context.Context, api.Message)
 }
 
-func NewCommandManager() *CommandManager {
+func NewCommandManager(logger *slog.Logger) *CommandManager {
 	return &CommandManager{
 		registry: make(map[string]registration),
+		logger:   logger,
 	}
+}
+
+func (c *CommandManager) SetRouter(r func(context.Context, api.Message)) {
+	c.route = r
+	// Subscribe to registration events
+	go func() {
+		// Small delay to ensure event manager is likely up
+		time.Sleep(100 * time.Millisecond)
+		c.route(context.Background(), api.Message{
+			ID:        "sub-cm-reg",
+			Type:      api.TypeRequest,
+			Sender:    c.ID(),
+			Target:    "plugin-events",
+			Method:    "subscribe",
+			Payload:   []byte(`{"topic":"component:registered"}`),
+			Timestamp: time.Now().Unix(),
+		})
+	}()
 }
 
 func (c *CommandManager) ID() string { return "plugin-command-manager" }
@@ -51,15 +73,22 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		return api.Message{}, nil
 
 	case "register":
-		var caps []api.Capability
-		if err := json.Unmarshal(msg.Payload, &caps); err != nil {
+		var reg registration
+		if err := json.Unmarshal(msg.Payload, &reg); err != nil {
 			return api.Message{}, err
 		}
+		
+		id := reg.ID
+		if id == "" {
+			id = msg.Sender
+		}
+
+		c.logger.Info("registering component in command-manager", "id", id, "type", reg.Type)
 		c.mu.Lock()
-		c.registry[msg.Sender] = registration{
-			ID:           msg.Sender,
-			Type:         "plugin",
-			Capabilities: caps,
+		c.registry[id] = registration{
+			ID:           id,
+			Type:         reg.Type,
+			Capabilities: reg.Capabilities,
 		}
 		c.mu.Unlock()
 		return api.Message{

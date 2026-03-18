@@ -34,6 +34,10 @@ type WasmLoader interface {
 	LoadPlugin(ctx context.Context, id string, wasm []byte, memoryLimitMB uint64, fuelLimit uint64) (api.Plugin, error)
 }
 
+type RouterSetter interface {
+	SetRouter(r func(context.Context, api.Message))
+}
+
 func NewRegistryManager(logger *slog.Logger, k KernelInternal, state storage.StateStore, wasm WasmLoader) *RegistryManager {
 	return &RegistryManager{
 		logger: logger,
@@ -72,10 +76,36 @@ func (r *RegistryManager) HandleMessage(ctx context.Context, msg api.Message) (a
 			return api.Message{}, err
 		}
 
+		loadedPlugins := make([]api.Plugin, 0)
+
 		for _, p := range req.Plugins {
-			if err := r.loadPlugin(ctx, p); err != nil {
+			plugin, err := r.loadPluginInstance(ctx, p)
+			if err != nil {
 				r.logger.Error("failed to load plugin during provision", "id", p.ID, "error", err)
+				continue
 			}
+			if plugin != nil {
+				loadedPlugins = append(loadedPlugins, plugin)
+			}
+		}
+
+		// Now that all plugins (including command-manager) are registered in the kernel,
+		// we can register their capabilities with the command manager.
+		for _, p := range loadedPlugins {
+			caps := p.Capabilities()
+			if caps == nil {
+				caps = []api.Capability{}
+			}
+			capsData, _ := json.Marshal(caps)
+			r.kernel.RouteMessage(ctx, api.Message{
+				ID:        "reg-cm-" + p.ID(),
+				Type:      api.TypeRequest,
+				Sender:    r.ID(),
+				Target:    "plugin-command-manager",
+				Method:    "register",
+				Payload:   []byte(`{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(capsData) + `}`),
+				Timestamp: time.Now().Unix(),
+			})
 		}
 
 		return api.Message{
@@ -92,8 +122,25 @@ func (r *RegistryManager) HandleMessage(ctx context.Context, msg api.Message) (a
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {
 			return api.Message{}, err
 		}
-		if err := r.loadPlugin(ctx, p); err != nil {
+		plugin, err := r.loadPluginInstance(ctx, p)
+		if err != nil {
 			return api.Message{}, err
+		}
+		if plugin != nil {
+			// Cross-register
+			caps := plugin.Capabilities()
+			if caps == nil {
+				caps = []api.Capability{}
+			}
+			capsData, _ := json.Marshal(caps)
+			r.kernel.RouteMessage(ctx, api.Message{
+				ID:      "reg-cm-" + plugin.ID(),
+				Type:    api.TypeRequest,
+				Sender:  r.ID(),
+				Target:  "plugin-command-manager",
+				Method:  "register",
+				Payload: []byte(`{"id":"` + plugin.ID() + `","type":"plugin","capabilities":` + string(capsData) + `}`),
+			})
 		}
 		return api.Message{
 			ID:      msg.ID + "-resp",
@@ -106,54 +153,70 @@ func (r *RegistryManager) HandleMessage(ctx context.Context, msg api.Message) (a
 	return api.Message{}, nil
 }
 
-func (r *RegistryManager) loadPlugin(ctx context.Context, def PluginDef) error {
+func (r *RegistryManager) loadPluginInstance(ctx context.Context, def PluginDef) (api.Plugin, error) {
 	r.logger.Info("loading plugin", "id", def.ID, "type", def.Type)
 
 	switch def.Type {
 	case "native":
 		factory, ok := Registry[def.ID]
 		if !ok {
-			return fmt.Errorf("native plugin not found in registry: %s", def.ID)
+			return nil, fmt.Errorf("native plugin not found in registry: %s", def.ID)
 		}
 		p, err := factory(ctx, r.logger, r.state)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		
-		// If it's the EventManager, it might need the router
-		if em, ok := p.(*EventManager); ok {
-			em.SetRouter(r.kernel.RouteMessage)
-		}
-		if bm, ok := p.(*BufferManager); ok {
-			bm.SetRouter(r.kernel.RouteMessage)
-		}
-		if cm, ok := p.(*ChatManager); ok {
-			cm.SetRouter(r.kernel.RouteMessage)
-		}
-		if ai, ok := p.(*AIManager); ok {
-			ai.SetRouter(r.kernel.RouteMessage)
+		// Use interface instead of type-checking for every plugin
+		if setter, ok := p.(RouterSetter); ok {
+			setter.SetRouter(r.kernel.RouteMessage)
 		}
 
-		r.kernel.RegisterPlugin(p.(api.Plugin))
-		return nil
+		plugin := p.(api.Plugin)
+		r.kernel.RegisterPlugin(plugin)
+		return plugin, nil
 
 	case "wasm":
 		if r.wasm == nil {
-			return fmt.Errorf("wasm runtime not available")
+			return nil, fmt.Errorf("wasm runtime not available")
 		}
 		content, err := os.ReadFile(def.Path)
 		if err != nil {
-			return fmt.Errorf("failed to read wasm file: %w", err)
+			return nil, fmt.Errorf("failed to read wasm file: %w", err)
 		}
-		p, err := r.wasm.LoadPlugin(ctx, def.ID, content, def.MemoryLimit, def.FuelLimit)
-		if err != nil {
-			return err
-		}
-		r.kernel.RegisterPlugin(p)
-		return nil
+
+		// Asynchronously load and register WASM to avoid blocking provisioning or the message bus
+		go func() {
+			r.logger.Info("starting async wasm load", "id", def.ID)
+			p, err := r.wasm.LoadPlugin(context.Background(), def.ID, content, def.MemoryLimit, def.FuelLimit)
+			if err != nil {
+				r.logger.Error("failed to load wasm plugin", "id", def.ID, "error", err)
+				return
+			}
+			r.kernel.RegisterPlugin(p)
+			r.logger.Info("wasm plugin registered in kernel", "id", def.ID)
+
+			// Register with command manager
+			caps := p.Capabilities()
+			if caps == nil {
+				caps = []api.Capability{}
+			}
+			capsData, _ := json.Marshal(caps)
+			r.kernel.RouteMessage(context.Background(), api.Message{
+				ID:        "reg-cm-" + p.ID(),
+				Type:      api.TypeRequest,
+				Sender:    r.ID(),
+				Target:    "plugin-command-manager",
+				Method:    "register",
+				Payload:   []byte(`{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(capsData) + `}`),
+				Timestamp: time.Now().Unix(),
+			})
+		}()
+
+		return nil, nil // Return nil because registration happens asynchronously
 
 	default:
-		return fmt.Errorf("unknown plugin type: %s", def.Type)
+		return nil, fmt.Errorf("unknown plugin type: %s", def.Type)
 	}
 }
 

@@ -23,7 +23,7 @@ func (m *mockRouter) RegisterFrontend(id string, ch chan<- api.Message) {}
 func TestServerClient(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	router := &mockRouter{msgCh: make(chan api.Message, 10)}
-	server := NewServer(logger, nil, router, nil)
+	server := NewServer(logger, router, nil)
 
 	addr := "127.0.0.1:0"
 	go func() {
@@ -56,13 +56,18 @@ func TestServerClient(t *testing.T) {
 		t.Fatalf("client send failed: %v", err)
 	}
 
-	select {
-	case received := <-router.msgCh:
-		if received.ID != msg.ID {
-			t.Errorf("expected msg ID %s, got %s", msg.ID, received.ID)
+	// Expect both internal audit events and our ping
+	foundRecv := false
+	deadline := time.After(1 * time.Second)
+	for !foundRecv {
+		select {
+		case received := <-router.msgCh:
+			if received.ID == msg.ID {
+				foundRecv = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for message")
 		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for message")
 	}
 
 	_ = server.Stop()

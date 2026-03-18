@@ -48,9 +48,9 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
         - [x] **Health & Monitoring (`plugin-health`)**: Resource tracking and heartbeat.
         - [x] **Task Runner (`plugin-tasks`)**: Scheduled and background job management.
         - [x] **Network Manager (`plugin-network`)**: Policy-enforced network/Fetch provider.
-- [ ] **Kernel "Thinning" & Decentralization**:
-    - [ ] **Decentralized Discovery**: Move `discover` logic from Kernel to `plugin-command-manager`.
-    - [ ] **Event-Driven Auditing**: Replace direct `AuditLogger` with `plugin-events` + a Logger plugin.
+- [x] **Kernel "Thinning" & Decentralization**:
+    - [x] **Decentralized Discovery**: Move `discover` logic from Kernel to `plugin-command-manager`.
+    - [x] **Event-Driven Auditing**: Replace direct `AuditLogger` with `plugin-events` + a Logger plugin.
     - [ ] **Middleware Interceptors**: Add high-performance "Pre-Route" hooks for `plugin-iam` authorization.
     - [ ] **System Telemetry**: Delegate resource tracking and health state to `plugin-health`.
 - [ ] **Resource Lifecycle & Sandboxing**:
