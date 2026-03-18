@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	auditContextKey = "alloy.no_audit"
+	auditContextKey      = "alloy.no_audit"
+	skipInterceptorsKey  = "alloy.skip_interceptors"
 )
 
 // Kernel is the core component that manages plugins and message routing.
@@ -25,6 +26,9 @@ type Kernel struct {
 	// frontends maps connection IDs to their message channels
 	frontends map[string]chan<- api.Message
 
+	// interceptors is a list of components that can filter or modify messages before delivery
+	interceptors []api.Interceptor
+
 	// stopCh is used to signal the kernel to shut down
 	stopCh chan struct{}
 }
@@ -32,10 +36,11 @@ type Kernel struct {
 // New creates a new instance of the Alloy Kernel.
 func New(logger *slog.Logger) *Kernel {
 	return &Kernel{
-		logger:    logger,
-		plugins:   make(map[string]api.Plugin),
-		frontends: make(map[string]chan<- api.Message),
-		stopCh:    make(chan struct{}),
+		logger:       logger,
+		plugins:      make(map[string]api.Plugin),
+		frontends:    make(map[string]chan<- api.Message),
+		interceptors: make([]api.Interceptor, 0),
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -56,14 +61,20 @@ func (k *Kernel) Stop(ctx context.Context) error {
 func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	k.mu.Lock()
 	k.plugins[p.ID()] = p
+	// Automatically register if it implements Interceptor
+	if i, ok := p.(api.Interceptor); ok {
+		k.interceptors = append(k.interceptors, i)
+		k.logger.Info("interceptor registered", "plugin_id", p.ID())
+	}
 	k.mu.Unlock()
 
 	k.logger.Info("plugin registered", "plugin_id", p.ID())
 
 	// Emit registration event
 	caps, _ := json.Marshal(p.Capabilities())
-	// Use non-auditing context for system-level events
+	// Use non-auditing/intercepting context for system-level events
 	systemCtx := context.WithValue(context.Background(), auditContextKey, true)
+	systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
 
 	k.RouteMessage(systemCtx, api.Message{
 		ID:        "event-reg-" + p.ID(),
@@ -80,7 +91,27 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 
 // RouteMessage handles the delivery of a message to its intended target.
 func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
-	k.logger.Debug("routing message", "id", msg.ID, "method", msg.Method, "target", msg.Target)
+	k.logger.Debug("routing message", "id", msg.ID, "sender", msg.Sender, "method", msg.Method, "target", msg.Target)
+
+	// Pre-Route Interception
+	if ctx.Value(skipInterceptorsKey) == nil {
+		k.mu.RLock()
+		interceptors := k.interceptors
+		k.mu.RUnlock()
+
+		for _, interceptor := range interceptors {
+			newMsg, allow, err := interceptor.PreRoute(ctx, msg)
+			if err != nil {
+				k.logger.Error("interceptor error", "error", err, "target", msg.Target)
+				return
+			}
+			if !allow {
+				k.logger.Warn("routing denied by interceptor", "sender", msg.Sender, "target", msg.Target)
+				return
+			}
+			msg = newMsg
+		}
+	}
 
 	k.mu.RLock()
 	plugin, isPlugin := k.plugins[msg.Target]
@@ -139,7 +170,10 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 	k.logger.Info("frontend registered", "frontend_id", id)
 
 	// Emit registration event
-	k.RouteMessage(context.WithValue(context.Background(), auditContextKey, true), api.Message{
+	systemCtx := context.WithValue(context.Background(), auditContextKey, true)
+	systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
+
+	k.RouteMessage(systemCtx, api.Message{
 		ID:        "event-reg-" + id,
 		Type:      api.TypeEvent,
 		Sender:    "kernel",
@@ -205,8 +239,9 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 			"method": msg.Method,
 		})
 
-		// Use a explicit context to prevent audit loops at the routing level
+		// Use a explicit context to prevent audit loops or interception at the routing level
 		auditCtx := context.WithValue(context.Background(), auditContextKey, true)
+		auditCtx = context.WithValue(auditCtx, skipInterceptorsKey, true)
 
 		k.RouteMessage(auditCtx, api.Message{
 			ID:        "audit-" + time.Now().Format("150405.000"),

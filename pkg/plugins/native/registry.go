@@ -29,6 +29,9 @@ var Registry = map[string]PluginConstructor{
 	"plugin-storage": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewStorageManager(), nil
 	},
+	"plugin-iam": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+		return NewIdentityManager(ctx, logger, state)
+	},
 	"plugin-command-manager": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewCommandManager(logger), nil
 	},

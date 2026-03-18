@@ -39,3 +39,9 @@ type Capability struct {
 	Method      string `json:"method"`
 	Description string `json:"description,omitempty"`
 }
+
+// Interceptor is an optional interface that plugins can implement to intercept 
+// and potentially filter or modify messages before they are routed by the kernel.
+type Interceptor interface {
+	PreRoute(ctx context.Context, msg Message) (Message, bool, error)
+}
