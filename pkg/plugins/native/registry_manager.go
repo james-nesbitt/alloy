@@ -180,14 +180,16 @@ func (r *RegistryManager) loadPluginInstance(ctx context.Context, def PluginDef)
 		if r.wasm == nil {
 			return nil, fmt.Errorf("wasm runtime not available")
 		}
-		content, err := os.ReadFile(def.Path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read wasm file: %w", err)
-		}
 
 		// Asynchronously load and register WASM to avoid blocking provisioning or the message bus
 		go func() {
 			r.logger.Info("starting async wasm load", "id", def.ID)
+			content, err := os.ReadFile(def.Path)
+			if err != nil {
+				r.logger.Error("failed to read wasm file", "id", def.ID, "path", def.Path, "error", err)
+				return
+			}
+
 			p, err := r.wasm.LoadPlugin(context.Background(), def.ID, content, def.MemoryLimit, def.FuelLimit)
 			if err != nil {
 				r.logger.Error("failed to load wasm plugin", "id", def.ID, "error", err)
