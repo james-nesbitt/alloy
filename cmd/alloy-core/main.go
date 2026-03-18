@@ -45,6 +45,17 @@ func getAlloyRuntimeDir() string {
 	return filepath.Join(os.TempDir(), "alloy")
 }
 
+type stringSlice []string
+
+func (s *stringSlice) String() string {
+	return fmt.Sprintf("%v", *s)
+}
+
+func (s *stringSlice) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	insecure := flag.Bool("insecure", false, "Disable mTLS")
@@ -53,7 +64,9 @@ func main() {
 
 	defaultSocket := filepath.Join(getAlloyRuntimeDir(), "default.sock")
 	socket := flag.String("socket", defaultSocket, "Socket address to listen for IPC connections (supports tcp://, unix://, or local path)")
-	wasmPluginsDir := flag.String("wasm-plugins", "", "Directory to scan for WASM plugins to load at startup")
+
+	var wasmPluginsDirs stringSlice
+	flag.Var(&wasmPluginsDirs, "wasm-plugins", "Directory to scan for WASM plugins to load at startup (can be specified multiple times)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
@@ -130,34 +143,34 @@ func main() {
 	rm := native.NewRegistryManager(logger, k, stateStore, wasmRuntime)
 	k.RegisterPlugin(rm)
 
-	// Plugin Discovery (if --wasm-plugins flag set)
-	if *wasmPluginsDir != "" {
-		files, err := os.ReadDir(*wasmPluginsDir)
+	// Plugin Discovery (if --wasm-plugins flag(s) set)
+	for _, dir := range wasmPluginsDirs {
+		files, err := os.ReadDir(dir)
 		if err != nil {
-			logger.Error("failed to scan WASM plugins directory", "path", *wasmPluginsDir, "error", err)
-		} else {
-			for _, file := range files {
-				if !file.IsDir() && filepath.Ext(file.Name()) == ".wasm" {
-					pluginID := "plugin-" + file.Name()[:len(file.Name())-5]
-					pluginPath := filepath.Join(*wasmPluginsDir, file.Name())
-					logger.Info("discovered WASM plugin", "id", pluginID, "path", pluginPath)
+			logger.Error("failed to scan WASM plugins directory", "path", dir, "error", err)
+			continue
+		}
+		for _, file := range files {
+			if !file.IsDir() && filepath.Ext(file.Name()) == ".wasm" {
+				pluginID := "plugin-" + file.Name()[:len(file.Name())-5]
+				pluginPath := filepath.Join(dir, file.Name())
+				logger.Info("discovered WASM plugin", "id", pluginID, "path", pluginPath)
 
-					pluginDef := map[string]any{
-						"id":   pluginID,
-						"type": "wasm",
-						"path": pluginPath,
-					}
-					payload, _ := json.Marshal(pluginDef)
-
-					k.RouteMessage(context.Background(), api.Message{
-						ID:      "auto-load-" + pluginID,
-						Type:    api.TypeRequest,
-						Sender:  "system",
-						Target:  rm.ID(),
-						Method:  "load",
-						Payload: payload,
-					})
+				pluginDef := map[string]any{
+					"id":   pluginID,
+					"type": "wasm",
+					"path": pluginPath,
 				}
+				payload, _ := json.Marshal(pluginDef)
+
+				k.RouteMessage(context.Background(), api.Message{
+					ID:      "auto-load-" + pluginID,
+					Type:    api.TypeRequest,
+					Sender:  "system",
+					Target:  rm.ID(),
+					Method:  "load",
+					Payload: payload,
+				})
 			}
 		}
 	}
