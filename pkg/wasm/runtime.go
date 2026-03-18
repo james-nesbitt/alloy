@@ -27,7 +27,8 @@ type Runtime struct {
 // NewRuntime creates a new Alloy WASM runtime.
 func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore) (*Runtime, error) {
 	// Configuration for resource constraints.
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
+	// We use the interpreter for now because the compiler is too slow for integration tests in some environments.
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().
 		WithCoreFeatures(wazeroapi.CoreFeaturesV2))
 
 	// Instantiate WASI

@@ -148,83 +148,6 @@ func main() {
 	rm := native.NewRegistryManager(logger, k, stateStore, wasmRuntime)
 	k.RegisterPlugin(rm)
 
-	// Plugin Discovery (if --wasm-plugins flag(s) set)
-	for _, dir := range wasmPluginsDirs {
-		files, err := os.ReadDir(dir)
-		if err != nil {
-			logger.Error("failed to scan WASM plugins directory", "path", dir, "error", err)
-			continue
-		}
-		for _, file := range files {
-			if !file.IsDir() && filepath.Ext(file.Name()) == ".wasm" {
-				pluginID := "plugin-" + file.Name()[:len(file.Name())-5]
-				pluginPath := filepath.Join(dir, file.Name())
-				logger.Info("discovered WASM plugin", "id", pluginID, "path", pluginPath)
-
-				pluginDef := map[string]any{
-					"id":   pluginID,
-					"type": "wasm",
-					"path": pluginPath,
-				}
-				payload, _ := json.Marshal(pluginDef)
-
-				k.RouteMessage(context.Background(), api.Message{
-					ID:      "auto-load-" + pluginID,
-					Type:    api.TypeRequest,
-					Sender:  "system",
-					Target:  rm.ID(),
-					Method:  "load",
-					Payload: payload,
-				})
-			}
-		}
-	}
-
-	// Manual Loading (if --wasm-plugin flag(s) set)
-	for _, pluginPath := range wasmPlugins {
-		pluginID := "plugin-" + filepath.Base(pluginPath)
-		if len(pluginID) > 5 && pluginID[len(pluginID)-5:] == ".wasm" {
-			pluginID = pluginID[:len(pluginID)-5]
-		}
-		logger.Info("loading manual WASM plugin", "id", pluginID, "path", pluginPath)
-
-		pluginDef := map[string]any{
-			"id":   pluginID,
-			"type": "wasm",
-			"path": pluginPath,
-		}
-		payload, _ := json.Marshal(pluginDef)
-
-		k.RouteMessage(context.Background(), api.Message{
-			ID:      "manual-load-" + pluginID,
-			Type:    api.TypeRequest,
-			Sender:  "system",
-			Target:  rm.ID(),
-			Method:  "load",
-			Payload: payload,
-		})
-	}
-
-	// Provisioning (if manifest path provided)
-	if *provisionManifest != "" {
-		logger.Info("loading provisioning manifest", "path", *provisionManifest)
-		data, err := os.ReadFile(*provisionManifest)
-		if err != nil {
-			logger.Error("failed to read provisioning manifest", "path", *provisionManifest, "error", err)
-		} else {
-			k.RouteMessage(context.Background(), api.Message{
-				ID:      "bootstrap-provision",
-				Type:    api.TypeRequest,
-				Sender:  "system",
-				Target:  rm.ID(),
-				Method:  "provision",
-				Payload: data,
-			})
-		}
-	} else {
-		logger.Info("no provisioning manifest provided, starting in minimal mode")
-	}
-
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)
 		os.Exit(1)
@@ -235,6 +158,89 @@ func main() {
 	go func() {
 		if err := ipcServer.ListenAndServe(*socket); err != nil {
 			logger.Error("IPC server stopped", "error", err)
+		}
+	}()
+
+	// Now that core is stable and listening, trigger plugin loading
+	go func() {
+		// Give IPC a moment to actually bind if needed, though kernel is ready now
+		time.Sleep(100 * time.Millisecond)
+
+		// Plugin Discovery (if --wasm-plugins flag(s) set)
+		for _, dir := range wasmPluginsDirs {
+			files, err := os.ReadDir(dir)
+			if err != nil {
+				logger.Error("failed to scan WASM plugins directory", "path", dir, "error", err)
+				continue
+			}
+			for _, file := range files {
+				if !file.IsDir() && filepath.Ext(file.Name()) == ".wasm" {
+					pluginID := "plugin-" + file.Name()[:len(file.Name())-5]
+					pluginPath := filepath.Join(dir, file.Name())
+					logger.Info("discovered WASM plugin", "id", pluginID, "path", pluginPath)
+
+					pluginDef := map[string]any{
+						"id":   pluginID,
+						"type": "wasm",
+						"path": pluginPath,
+					}
+					payload, _ := json.Marshal(pluginDef)
+
+					k.RouteMessage(context.Background(), api.Message{
+						ID:      "auto-load-" + pluginID,
+						Type:    api.TypeRequest,
+						Sender:  "system",
+						Target:  rm.ID(),
+						Method:  "load",
+						Payload: payload,
+					})
+				}
+			}
+		}
+
+		// Manual Loading (if --wasm-plugin flag(s) set)
+		for _, pluginPath := range wasmPlugins {
+			pluginID := "plugin-" + filepath.Base(pluginPath)
+			if len(pluginID) > 5 && pluginID[len(pluginID)-5:] == ".wasm" {
+				pluginID = pluginID[:len(pluginID)-5]
+			}
+			logger.Info("loading manual WASM plugin", "id", pluginID, "path", pluginPath)
+
+			pluginDef := map[string]any{
+				"id":   pluginID,
+				"type": "wasm",
+				"path": pluginPath,
+			}
+			payload, _ := json.Marshal(pluginDef)
+
+			k.RouteMessage(context.Background(), api.Message{
+				ID:      "manual-load-" + pluginID,
+				Type:    api.TypeRequest,
+				Sender:  "system",
+				Target:  rm.ID(),
+				Method:  "load",
+				Payload: payload,
+			})
+		}
+
+		// Provisioning (if manifest path provided)
+		if *provisionManifest != "" {
+			logger.Info("loading provisioning manifest", "path", *provisionManifest)
+			data, err := os.ReadFile(*provisionManifest)
+			if err != nil {
+				logger.Error("failed to read provisioning manifest", "path", *provisionManifest, "error", err)
+			} else {
+				k.RouteMessage(context.Background(), api.Message{
+					ID:      "bootstrap-provision",
+					Type:    api.TypeRequest,
+					Sender:  "system",
+					Target:  rm.ID(),
+					Method:  "provision",
+					Payload: data,
+				})
+			}
+		} else {
+			logger.Info("no provisioning manifest provided, starting in minimal mode")
 		}
 	}()
 
