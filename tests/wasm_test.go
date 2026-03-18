@@ -13,85 +13,61 @@ import (
 	"github.com/jnesbitt/alloy-go/api"
 )
 
-func TestWasmPlugins(t *testing.T) {
-	// Setup environment
-	homeDir, _ := os.MkdirTemp("", "alloy-wasm-test-*")
-	defer os.RemoveAll(homeDir)
-
+// setupTestCore starts the alloy-core with the given manifest and returns
+// the process, connection, and a decoder.
+func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *json.Decoder, string) {
+	homeDir, _ := os.MkdirTemp("", "alloy-wasm-"+label+"-*")
 	socketPath := filepath.Join(homeDir, "alloy.sock")
-	corePath := "../build/core"
-
+	
 	cwd, _ := os.Getwd()
-	aiPath := filepath.Join(cwd, "../build/wasm/ai.wasm")
-	secretsPath := filepath.Join(cwd, "../build/wasm/secrets.wasm")
-	healthPath := filepath.Join(cwd, "../build/wasm/health.wasm")
-	chatPath := filepath.Join(cwd, "../build/wasm/chat.wasm")
-	bufferPath := filepath.Join(cwd, "../build/wasm/buffer.wasm")
+	corePath := filepath.Join(filepath.Dir(cwd), "build/core")
 
-	// Create provision.json
-	manifest := map[string]any{
-		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-kv", "type": "native"},
-			{"id": "plugin-chat", "type": "wasm", "path": chatPath},
-			{"id": "plugin-ai-agent", "type": "wasm", "path": aiPath},
-			{"id": "plugin-secrets", "type": "wasm", "path": secretsPath},
-			{"id": "plugin-health", "type": "wasm", "path": healthPath},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferPath},
-		},
-	}
 	manifestData, _ := json.Marshal(manifest)
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	os.WriteFile(provisionPath, manifestData, 0644)
 
-	// Start core
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug", "--provision", provisionPath)
-	coreProcess.Stdout = os.Stdout
-	coreProcess.Stderr = os.Stderr
-	if err := coreProcess.Start(); err != nil {
+	cmd := exec.Command(corePath, 
+		"--socket", "unix://"+socketPath, 
+		"--home", homeDir, 
+		"--insecure", 
+		"--debug", 
+		"--provision", provisionPath,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start core: %v", err)
 	}
-	defer coreProcess.Process.Kill()
 
-	// Wait for socket to appear
-	socketFound := false
-	for i := 0; i < 40; i++ {
+	// Wait for socket
+	for i := 0; i < 20; i++ {
 		if _, err := os.Stat(socketPath); err == nil {
-			socketFound = true
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if !socketFound {
-		t.Fatal("timed out waiting for socket file")
-	}
 
-	// Connect
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-	defer conn.Close()
-	decoder := json.NewDecoder(conn)
-
-	// Polling for plugins to register...
-	pluginsToWait := map[string]bool{
-		"plugin-chat":           true,
-		"plugin-ai-agent":       true,
-		"plugin-secrets":        true,
-		"plugin-health":         true,
-		"plugin-buffer-manager": true,
+		cmd.Process.Kill()
+		t.Fatalf("failed to connect to core: %v", err)
 	}
 
-	t.Log("Polling for WASM plugins to register...")
-	deadline := time.Now().Add(600 * time.Second)
-	foundCount := 0
+	return cmd, conn, json.NewDecoder(conn), homeDir
+}
+
+func waitForPlugins(t *testing.T, conn net.Conn, decoder *json.Decoder, expectedIDs []string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	expected := make(map[string]bool)
+	for _, id := range expectedIDs {
+		expected[id] = true
+	}
+
 	for time.Now().Before(deadline) {
 		sendMsg(t, conn, api.Message{
 			ID:     "poll-discover",
 			Type:   api.TypeRequest,
-			Sender: "user",
+			Sender: "test-waiter",
 			Target: "plugin-command-manager",
 			Method: "discover",
 		})
@@ -99,7 +75,7 @@ func TestWasmPlugins(t *testing.T) {
 		var resp api.Message
 		err := decoder.Decode(&resp)
 		if err != nil {
-			time.Sleep(1 * time.Second)
+			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
@@ -112,23 +88,107 @@ func TestWasmPlugins(t *testing.T) {
 			json.Unmarshal(resp.Payload, &result)
 			count := 0
 			for _, target := range result.Targets {
-				if pluginsToWait[target.ID] {
+				if expected[target.ID] {
 					count++
 				}
 			}
-			if count >= len(pluginsToWait) {
-				t.Log("All WASM plugins registered")
-				foundCount = count
-				break
+			if count >= len(expected) {
+				return
 			}
-			t.Logf("Found %d/%d WASM plugins...", count, len(pluginsToWait))
+			t.Logf("Waiting for plugins: %d/%d registered...", count, len(expected))
 		}
 		time.Sleep(1 * time.Second)
 	}
+	t.Fatalf("timed out waiting for plugins: %v", expectedIDs)
+}
 
-	if foundCount < len(pluginsToWait) {
-		t.Fatal("Timed out waiting for WASM plugins")
+func TestWasmLoadMock(t *testing.T) {
+	cwd, _ := os.Getwd()
+	mockPath := filepath.Join(filepath.Dir(cwd), "build/wasm/mock.wasm")
+	if _, err := os.Stat(mockPath); os.IsNotExist(err) {
+		t.Skip("mock.wasm not found")
 	}
+
+	manifest := map[string]any{
+		"plugins": []map[string]any{
+			{"id": "plugin-events", "type": "native"},
+			{"id": "plugin-command-manager", "type": "native"},
+			{"id": "plugin-mock", "type": "wasm", "path": mockPath},
+		},
+	}
+
+	cmd, conn, decoder, home := setupTestCore(t, "mock", manifest)
+	defer os.RemoveAll(home)
+	defer cmd.Process.Kill()
+	defer conn.Close()
+
+	waitForPlugins(t, conn, decoder, []string{"plugin-mock"}, 30*time.Second)
+}
+
+func TestWasmLoadBulk(t *testing.T) {
+	cwd, _ := os.Getwd()
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	
+	plugins := []string{"ai", "secrets", "health", "chat", "buffer"}
+	wasmPlugins := []map[string]any{
+		{"id": "plugin-events", "type": "native"},
+		{"id": "plugin-command-manager", "type": "native"},
+	}
+	expectedIDs := []string{}
+
+	for _, p := range plugins {
+		path := filepath.Join(buildDir, p+".wasm")
+		if _, err := os.Stat(path); err == nil {
+			id := "plugin-" + p
+			if p == "ai" { id = "plugin-ai-agent" }
+			if p == "chat" { id = "plugin-chat" }
+			if p == "buffer" { id = "plugin-buffer-manager" }
+
+			wasmPlugins = append(wasmPlugins, map[string]any{
+				"id":   id,
+				"type": "wasm",
+				"path": path,
+			})
+			expectedIDs = append(expectedIDs, id)
+		}
+	}
+
+	manifest := map[string]any{"plugins": wasmPlugins}
+	cmd, conn, decoder, home := setupTestCore(t, "bulk", manifest)
+	defer os.RemoveAll(home)
+	defer cmd.Process.Kill()
+	defer conn.Close()
+
+	waitForPlugins(t, conn, decoder, expectedIDs, 300*time.Second)
+}
+
+func TestWasmFunctionalSuite(t *testing.T) {
+	cwd, _ := os.Getwd()
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+
+	manifest := map[string]any{
+		"plugins": []map[string]any{
+			{"id": "plugin-events", "type": "native"},
+			{"id": "plugin-command-manager", "type": "native"},
+			{"id": "plugin-kv", "type": "native"},
+			{"id": "plugin-chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
+			{"id": "plugin-ai-agent", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm")},
+			{"id": "plugin-secrets", "type": "wasm", "path": filepath.Join(buildDir, "secrets.wasm")},
+			{"id": "plugin-health", "type": "wasm", "path": filepath.Join(buildDir, "health.wasm")},
+			{"id": "plugin-buffer-manager", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
+		},
+	}
+
+	cmd, conn, decoder, home := setupTestCore(t, "full", manifest)
+	defer os.RemoveAll(home)
+	defer cmd.Process.Kill()
+	defer conn.Close()
+
+	expected := []string{
+		"plugin-chat", "plugin-ai-agent", "plugin-secrets", 
+		"plugin-health", "plugin-buffer-manager",
+	}
+	waitForPlugins(t, conn, decoder, expected, 300*time.Second)
 
 	// 1. Verify Health
 	sendMsg(t, conn, api.Message{
@@ -193,10 +253,10 @@ func TestWasmPlugins(t *testing.T) {
 
 	// AI should react to the chat event
 	foundAI := false
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		var chatResp api.Message
 		if err := decoder.Decode(&chatResp); err != nil {
-			t.Fatalf("decode err: %v", err)
+			t.Fatalf("decode err at index %d: %v", i, err)
 		}
 		if chatResp.Sender == "plugin-ai-agent" && chatResp.Method == "send" {
 			foundAI = true

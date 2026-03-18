@@ -80,8 +80,8 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 	return r.r.NewHostModuleBuilder(HostModuleName).
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, offset, byteCount uint32) {
-			buf, ok := mod.Memory().Read(offset, byteCount)
-			if !ok {
+			buf, modMemoryReadOk := mod.Memory().Read(offset, byteCount)
+			if !modMemoryReadOk {
 				return
 			}
 			r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", string(buf))

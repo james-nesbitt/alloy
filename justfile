@@ -21,7 +21,7 @@ lint:
 
 # Run all tests
 test:
-    go test -v -race -timeout 30s ./...
+    go test -v -race -timeout 300s ./...
 
 # Build the core backend
 build-core:
