@@ -21,7 +21,7 @@ lint:
 
 # Run all tests
 test:
-    go test -v -race -timeout 60s ./...
+    go test -v -race -timeout 30s ./...
 
 # Build the core backend
 build-core:
@@ -61,6 +61,9 @@ build-wasm:
             GOOS=wasip1 GOARCH=wasm go build -o "build/wasm/$target_name.wasm" "$plugin_dir/main.go"
         fi
     done
+
+# Alias for building plugins
+build-plugins: build-wasm
 
 # Run everything (format, lint, test, build)
 all: fmt lint test build-all

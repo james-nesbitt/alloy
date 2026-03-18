@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,7 @@ func main() {
 
 	defaultSocket := filepath.Join(getAlloyRuntimeDir(), "default.sock")
 	socket := flag.String("socket", defaultSocket, "Socket address to listen for IPC connections (supports tcp://, unix://, or local path)")
+	wasmPluginsDir := flag.String("wasm-plugins", "", "Directory to scan for WASM plugins to load at startup")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
@@ -127,6 +129,38 @@ func main() {
 	// Registry Manager (Orchestrator)
 	rm := native.NewRegistryManager(logger, k, stateStore, wasmRuntime)
 	k.RegisterPlugin(rm)
+
+	// Plugin Discovery (if --wasm-plugins flag set)
+	if *wasmPluginsDir != "" {
+		files, err := os.ReadDir(*wasmPluginsDir)
+		if err != nil {
+			logger.Error("failed to scan WASM plugins directory", "path", *wasmPluginsDir, "error", err)
+		} else {
+			for _, file := range files {
+				if !file.IsDir() && filepath.Ext(file.Name()) == ".wasm" {
+					pluginID := "plugin-" + file.Name()[:len(file.Name())-5]
+					pluginPath := filepath.Join(*wasmPluginsDir, file.Name())
+					logger.Info("discovered WASM plugin", "id", pluginID, "path", pluginPath)
+
+					pluginDef := map[string]any{
+						"id":   pluginID,
+						"type": "wasm",
+						"path": pluginPath,
+					}
+					payload, _ := json.Marshal(pluginDef)
+
+					k.RouteMessage(context.Background(), api.Message{
+						ID:      "auto-load-" + pluginID,
+						Type:    api.TypeRequest,
+						Sender:  "system",
+						Target:  rm.ID(),
+						Method:  "load",
+						Payload: payload,
+					})
+				}
+			}
+		}
+	}
 
 	// Automatic Provisioning (if manifest exists)
 	manifestPath := filepath.Join(*alloyHome, "provision.json")
