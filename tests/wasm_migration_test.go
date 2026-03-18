@@ -48,11 +48,16 @@ func TestWasmMigration(t *testing.T) {
 	defer coreProcess.Process.Kill()
 
 	// Wait for socket to appear
-	for i := 0; i < 20; i++ {
+	socketFound := false
+	for i := 0; i < 40; i++ {
 		if _, err := os.Stat(socketPath); err == nil {
+			socketFound = true
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+	if !socketFound {
+		t.Fatal("timed out waiting for socket file")
 	}
 
 	// Connect
@@ -101,6 +106,7 @@ func TestWasmMigration(t *testing.T) {
 				foundCount = count
 				break
 			}
+			t.Logf("Found %d/%d WASM plugins...", count, len(pluginsToWait))
 		}
 		time.Sleep(1 * time.Second)
 	}

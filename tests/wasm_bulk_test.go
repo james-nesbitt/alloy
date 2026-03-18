@@ -52,11 +52,16 @@ func TestWasmBulkMigration(t *testing.T) {
 	defer coreProcess.Process.Kill()
 
 	// Wait for socket to appear
-	for i := 0; i < 20; i++ {
+	socketFound := false
+	for i := 0; i < 40; i++ {
 		if _, err := os.Stat(socketPath); err == nil {
+			socketFound = true
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+	if !socketFound {
+		t.Fatal("timed out waiting for socket file")
 	}
 
 	// Connect
@@ -90,7 +95,6 @@ func TestWasmBulkMigration(t *testing.T) {
 		var resp api.Message
 		err := decoder.Decode(&resp)
 		if err != nil {
-			t.Logf("Decode error during poll: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
