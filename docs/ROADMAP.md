@@ -64,9 +64,13 @@ Logic-heavy plugins that provide the user experience.
 - **Group Chat**: Real-time communication and presence.
 - **AI Agent**: LLM integration and tool-use orchestration.
 
-## Phase 5: Frontends
-Bringing the system to users.
+## Phase 5: Frontends & Deployment Refinement
+Bringing the system to users and finalizing global configuration.
 
 - **Alloy TUI**: Terminal-based client (Bubbletea).
 - **Alloy GUI**: Wayland-compatible graphical client.
 - **Alloy Web**: Browser-based access via Go-WASM bridge.
+- **Configuration & Persistence**:
+    - **Global Global Resource Limits**: Refactor hardcoded limits (like the 500MB WASM pool) into command-line flags.
+    - **Hot-Reloading**: Allow WASM plugins to be updated or swapped without restarting the core.
+    - **Plugin Priority**: Support boot-order or priority levels in provisioning.

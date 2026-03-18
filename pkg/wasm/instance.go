@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 	wazeroapi "github.com/tetratelabs/wazero/api"
@@ -20,8 +21,14 @@ type Instance struct {
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
 func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
-	// If fuel is enabled, we could add it here if context-based fuel is used.
-	// For now, we will focus on memory constraints in LoadPlugin.
+	// Resource enforcement: Timeout based on "fuel"
+	// For now, treat fuel as milliseconds for simplicity in sandboxing.
+	if i.defaultFuel > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(i.defaultFuel)*time.Millisecond)
+		defer cancel()
+	}
+
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return api.Message{}, err

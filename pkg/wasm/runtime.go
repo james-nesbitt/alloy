@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
@@ -15,31 +17,42 @@ import (
 
 const (
 	HostModuleName = "alloy"
+	WasmPageSize   = 65536 // 64KB
 )
 
 // Runtime manages the wazero WASM environment.
 type Runtime struct {
-	logger *slog.Logger
-	r      wazero.Runtime
-	kv     storage.StateStore
+	logger  *slog.Logger
+	r       wazero.Runtime
+	kv      storage.StateStore
+	dataDir string
 }
 
 // NewRuntime creates a new Alloy WASM runtime.
-func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore) (*Runtime, error) {
+func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore, dataDir string) (*Runtime, error) {
 	// Configuration for resource constraints.
-	// We use the interpreter for now because the compiler is too slow for integration tests in some environments.
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().
-		WithCoreFeatures(wazeroapi.CoreFeaturesV2))
+	// Allow 500MB total host memory.
+	nc := wazero.NewRuntimeConfigInterpreter().
+		WithCoreFeatures(wazeroapi.CoreFeaturesV2).
+		WithMemoryLimitPages(500 * 1024 * 1024 / WasmPageSize)
 
-	// Instantiate WASI
-	if _, err := wasi_snapshot_preview1.NewBuilder(rt).Instantiate(ctx); err != nil {
-		return nil, fmt.Errorf("failed to instantiate WASI: %w", err)
+	rt := wazero.NewRuntimeWithConfig(ctx, nc)
+
+	// Ensure dataDir exists
+	if dataDir != "" {
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create runtime data directory: %w", err)
+		}
 	}
 
+	// Instantiate WASI properly
+	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+
 	return &Runtime{
-		logger: logger,
-		r:      rt,
-		kv:     kv,
+		logger:  logger,
+		r:       rt,
+		kv:      kv,
+		dataDir: dataDir,
 	}, nil
 }
 
@@ -51,10 +64,43 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		WithSysWalltime().
 		WithSysNanotime()
 
-	// Use InstantiateWithConfig which handles _start correctly for Go WASIP1
-	mod, err := r.r.InstantiateWithConfig(ctx, wasmBytes, config)
+	// Map storage for the plugin
+	if r.dataDir != "" {
+		pluginDir := filepath.Join(r.dataDir, id)
+		if err := os.MkdirAll(pluginDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create plugin storage dir: %w", err)
+		}
+		config = config.WithFS(os.DirFS(pluginDir))
+		r.logger.Debug("mapped plugin storage", "id", id, "path", pluginDir)
+	}
+
+	if memoryLimitMB > 0 {
+		r.logger.Debug("resource limits requested but per-module memory limiting is constrained in this version", "id", id, "limit_mb", memoryLimitMB)
+	}
+
+	// Instantiate module but don't call _start automatically.
+	// For Go wasip1, _start is actually main.main.
+	compiled, err := r.r.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile module %s: %w", id, err)
+	}
+
+	mod, err := r.r.InstantiateModule(ctx, compiled, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
+	}
+
+	// Run _start asynchronously.
+	if start := mod.ExportedFunction("_start"); start != nil {
+		go func() {
+			// This goroutine keeps the Go plugin's "main" alive.
+			_, err := start.Call(context.Background())
+			if err != nil {
+				r.logger.Debug("wasm plugin _start returned", "id", id, "error", err)
+			}
+		}()
+		// Allow some time for runtime stabilization
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	return &Instance{

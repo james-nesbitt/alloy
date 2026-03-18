@@ -132,7 +132,7 @@ func main() {
 	k := kernel.New(logger)
 
 	// WASM Runtime Setup
-	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore)
+	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(getAlloyDataDir(), "plugins"))
 	if err != nil {
 		logger.Error("failed to initialize wasm runtime", "error", err)
 		os.Exit(1)

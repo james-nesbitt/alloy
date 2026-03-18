@@ -18,9 +18,11 @@ func TestStandaloneWasmLoad(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	kv := storage.NewMemoryStateStore()
+	dataDir, _ := os.MkdirTemp("", "alloy-wasm-standalone-*")
+	defer os.RemoveAll(dataDir)
 
 	// Initialize the runtime
-	rt, err := wasm.NewRuntime(ctx, logger, kv)
+	rt, err := wasm.NewRuntime(ctx, logger, kv, dataDir)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}
