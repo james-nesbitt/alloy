@@ -63,7 +63,7 @@ debug-core: build-core
 # Run Alloy Core with health plugin provisioned
 run-health: build-core build-wasm
     mkdir -p plugins-bin
-    cp build/wasm/health.wasm plugins-bin/
+    cp build/wasm/health-wasm.wasm plugins-bin/
     ./build/core --provision provision.json --debug
 
 # Build all WASM plugins
