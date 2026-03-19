@@ -45,9 +45,13 @@ build-cli:
 build-tui:
     go build -o build/tui cmd/alloy-tui/main.go
 
-# Build the GUI
-build-gui:
-    go build -tags gui -o build/gui cmd/alloy-gui/main.go
+# Build the Gio GUI
+build-gui-gio:
+	go build -tags gui -o build/gui-gio cmd/alloy-gui-gio/main.go
+
+# Build the Pure Go Wayland Native GUI (X11-free)
+build-gui-wayland:
+	go build -o build/gui-wayland cmd/alloy-gui-wayland-native/main.go
 
 # Build everything
 build-all: build-core build-cli build-tui build-gui build-wasm
@@ -62,7 +66,7 @@ run-tui *args: build-tui
 
 # Run the Alloy GUI frontend
 run-gui *args: build-gui
-    ./build/gui {{args}}
+    ./build/gui-gio {{args}}
 
 # Run Alloy Core with debug enabled
 debug-core: build-core
