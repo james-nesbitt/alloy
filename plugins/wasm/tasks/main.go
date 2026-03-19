@@ -1,27 +1,32 @@
 package main
 
 import (
-	"time"
-
 	"github.com/jnesbitt/alloy-go/pkg/wasm/sdk-go"
 )
 
-func main() {
+func init() {
 	wasm.SetHandler(handleMessage)
 }
 
-// malloc is needed for the host to allocate memory in the guest
+func main() {}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {
-	case "schedule":
+	case "create":
 		return wasm.Message{
-			ID:        msg.ID + "-resp",
-			Type:      "response",
-			Sender:    "plugin-tasks",
-			Target:    msg.Sender,
-			Payload:   []byte(`{"task_id":"wasm-task-1"}`),
-			Timestamp: time.Now().Unix(),
+			ID:      msg.ID + "-resp",
+			Type:    "response",
+			Sender:  "plugin-tasks",
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"created"}`),
+		}
+	case "list":
+		return wasm.Message{
+			ID:      msg.ID + "-resp",
+			Type:    "response",
+			Sender:  "plugin-tasks",
+			Target:  msg.Sender,
+			Payload: []byte(`{"tasks":[]}`),
 		}
 	default:
 		return wasm.Message{}

@@ -145,6 +145,24 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	awaitResponse(t, decoder, "buf-wasm-1-resp")
 
 	// 4. Verify Chat and AI Agent (Subscription and Reaction)
+	// First, subscribe AI agent and user to chat events
+	subReq, _ := json.Marshal(map[string]string{"topic": "chat:message"})
+	sendMsg(t, conn, api.Message{
+		ID:      "sub-ai",
+		Sender:  "plugin-ai-agent",
+		Target:  "plugin-events",
+		Method:  "subscribe",
+		Payload: subReq,
+	})
+	sendMsg(t, conn, api.Message{
+		ID:      "sub-user",
+		Sender:  "user",
+		Target:  "plugin-events",
+		Method:  "subscribe",
+		Payload: subReq,
+	})
+	time.Sleep(200 * time.Millisecond) // wait for subs
+
 	chatReq, _ := json.Marshal(map[string]string{
 		"channel": "ai-test",
 		"content": "AI: test bulk migration",
@@ -160,14 +178,18 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	// AI should react to the chat event
 	foundAI := false
 	for i := 0; i < 100; i++ {
-		var chatResp api.Message
-		if err := decoder.Decode(&chatResp); err != nil {
+		var chatEvt api.Message
+		if err := decoder.Decode(&chatEvt); err != nil {
 			t.Fatalf("decode err at index %d: %v", i, err)
 		}
-		if chatResp.Sender == "plugin-ai-agent" && chatResp.Method == "send" {
-			foundAI = true
-			t.Logf("AI Response found: %s", string(chatResp.Payload))
-			break
+		if chatEvt.Type == api.TypeEvent && chatEvt.Method == "chat:message" {
+			var chatMsg ChatMessage
+			json.Unmarshal(chatEvt.Payload, &chatMsg)
+			if chatMsg.Sender == "plugin-ai-agent" {
+				foundAI = true
+				t.Logf("AI Response found: %s", chatMsg.Content)
+				break
+			}
 		}
 	}
 	if !foundAI {

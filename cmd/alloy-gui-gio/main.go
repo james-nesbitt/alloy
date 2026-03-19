@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"gioui.org/app"
-	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/widget"
@@ -36,10 +35,9 @@ func main() {
 	}
 
 	go func() {
-		w := app.NewWindow(
-			app.Title("Alloy Wayland"),
-			app.Size(800, 600),
-		)
+		w := new(app.Window)
+		w.Option(app.Title("Alloy Wayland"))
+		w.Option(app.Size(800, 600))
 		if err := run(w, client); err != nil {
 			log.Fatal(err)
 		}
@@ -65,12 +63,12 @@ func run(w *app.Window, client *frontend.Client) error {
 	})
 
 	for {
-		event := w.NextEvent()
+		event := w.Event()
 		switch e := event.(type) {
-		case system.DestroyEvent:
+		case app.DestroyEvent:
 			return e.Err
-		case system.FrameEvent:
-			gtx := layout.NewContext(&ops, e)
+		case app.FrameEvent:
+			gtx := app.NewContext(&ops, e)
 
 			if sendButton.Clicked(gtx) {
 				content := input.Text()

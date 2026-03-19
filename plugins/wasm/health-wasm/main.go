@@ -7,11 +7,11 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/wasm/sdk-go"
 )
 
-func main() {
+func init() {
 	wasm.SetHandler(handleMessage)
 }
 
-// malloc is needed for the host to allocate memory in the guest
+func main() {}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {

@@ -62,6 +62,8 @@ func main() {
 	alloyHome := flag.String("home", getAlloyHome(), "Directory for alloy config and identities")
 	instanceName := flag.String("name", "default", "Instance name")
 
+	dataDirBase := flag.String("data", "", "Directory for alloy data (state, plugins, audit). Defaults to {home}/data or XDG_DATA_HOME.")
+
 	defaultSocket := filepath.Join(getAlloyRuntimeDir(), "default.sock")
 	socket := flag.String("socket", defaultSocket, "Socket address to listen for IPC connections (supports tcp://, unix://, or local path)")
 
@@ -87,8 +89,18 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(logger)
 
+	// Determine data directory
+	dataDir := *dataDirBase
+	if dataDir == "" {
+		if *alloyHome != getAlloyHome() {
+			dataDir = filepath.Join(*alloyHome, "data")
+		} else {
+			dataDir = getAlloyDataDir()
+		}
+	}
+
 	// Audit Setup
-	auditLogger, err := audit.NewLogger(getAlloyDataDir())
+	auditLogger, err := audit.NewLogger(dataDir)
 	if err != nil {
 		logger.Error("failed to initialize audit logger", "error", err)
 		os.Exit(1)
@@ -120,7 +132,7 @@ func main() {
 	}
 
 	// State Setup
-	stateStore, err := storage.NewFileStateStore(filepath.Join(getAlloyDataDir(), "state"))
+	stateStore, err := storage.NewFileStateStore(filepath.Join(dataDir, "state"))
 	if err != nil {
 		logger.Error("failed to initialize state store", "error", err)
 		os.Exit(1)
@@ -132,7 +144,7 @@ func main() {
 	k := kernel.New(logger)
 
 	// WASM Runtime Setup
-	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(getAlloyDataDir(), "plugins"))
+	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(dataDir, "plugins"), k.RouteMessage)
 	if err != nil {
 		logger.Error("failed to initialize wasm runtime", "error", err)
 		os.Exit(1)
@@ -145,8 +157,12 @@ func main() {
 	}
 
 	// Registry Manager (Orchestrator)
-	rm := native.NewRegistryManager(logger, k, stateStore, wasmRuntime)
+	rm := native.NewRegistryManager(logger, k, stateStore)
 	k.RegisterPlugin(rm)
+
+	// WASM Manager (Isolated WASM lifecycle)
+	wm := wasm.NewManager(logger, wasmRuntime, k)
+	k.RegisterPlugin(wm)
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)

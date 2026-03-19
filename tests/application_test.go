@@ -110,17 +110,19 @@ func TestApplicationPlugins(t *testing.T) {
 			}
 			json.Unmarshal(resp.Payload, &result)
 			count := 0
+			var foundIDs []string
 			for _, target := range result.Targets {
+				foundIDs = append(foundIDs, target.ID)
 				if pluginsToWait[target.ID] {
 					count++
 				}
 			}
+			t.Logf("Found %d/%d WASM plugins. All targets: %v", count, len(pluginsToWait), foundIDs)
 			if count >= len(pluginsToWait) {
 				t.Log("All WASM plugins registered")
 				foundCount = count
 				break
 			}
-			t.Logf("Found %d/%d WASM plugins...", count, len(pluginsToWait))
 		} else {
 			// Skip other messages like registered events
 			t.Logf("Skipping message: %s %s", resp.ID, resp.Method)
@@ -142,6 +144,9 @@ func TestApplicationPlugins(t *testing.T) {
 		Method:  "subscribe",
 		Payload: subReq,
 	})
+	
+	// Wait for subscription to be processed
+	time.Sleep(100 * time.Millisecond)
 	
 	// 2. Send chat message from a user
 	chatReq, _ := json.Marshal(map[string]string{

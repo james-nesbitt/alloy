@@ -39,6 +39,12 @@ func alloyKVGet(kPtr, kLen, vPtr, vMaxLen uint32) uint32
 //go:wasmimport alloy kv_delete
 func alloyKVDelete(kPtr, kLen uint32) uint32
 
+//go:wasmimport alloy route_message
+func alloyRouteMessage(ptr uint32, size uint32) uint32
+
+//go:wasmimport alloy sleep_forever
+func alloySleepForever()
+
 // Log sends a string to the host's logger.
 func Log(msg string) {
 	ptr := uintptr(unsafe.Pointer(unsafe.StringData(msg)))
@@ -79,17 +85,44 @@ func KVDelete(key string) bool {
 	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
 }
 
-//go:wasmexport malloc
-func malloc(size uint32) uintptr {
-	if size == 0 {
-		return 0
-	}
-	buf := make([]byte, size)
-	return uintptr(unsafe.Pointer(&buf[0]))
+// SleepForever blocks the plugin execution safely using a host-side block.
+func SleepForever() {
+	alloySleepForever()
 }
 
+// RouteMessage sends a message to the host kernel for routing.
+func RouteMessage(msg Message) bool {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return false
+	}
+	ptr := uintptr(unsafe.Pointer(&data[0]))
+	return alloyRouteMessage(uint32(ptr), uint32(len(data))) == 0
+}
+
+var allocations = make(map[uintptr][]byte)
+
+// alloy_malloc is exported for the host to allocate memory in the guest.
+//export alloy_malloc
+//go:wasmexport alloy_malloc
+func Alloy_malloc(size uint32) uintptr {
+	buf := make([]byte, size)
+	ptr := uintptr(unsafe.Pointer(&buf[0]))
+	allocations[ptr] = buf
+	return ptr
+}
+
+// alloy_free is exported for the host to free memory in the guest.
+//export alloy_free
+//go:wasmexport alloy_free
+func Alloy_free(ptr uintptr) {
+	delete(allocations, ptr)
+}
+
+// alloy_handle_message is exported for the host to send messages to the guest.
+//export alloy_handle_message
 //go:wasmexport alloy_handle_message
-func alloyHandleMessage(ptr uintptr, size uint32) uint64 {
+func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
 	// 1. Read message from guest memory
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)
 	var msg Message
@@ -109,7 +142,12 @@ func alloyHandleMessage(ptr uintptr, size uint32) uint64 {
 		return 0
 	}
 
-	// 4. Return packed offset and size
-	respPtr := uintptr(unsafe.Pointer(&respBuf[0]))
-	return uint64(uintptr(respPtr))<<32 | uint64(len(respBuf))
+	// 4. Copy response to an allocated buffer to ensure it's stable for the host
+	respSize := uint32(len(respBuf))
+	outPtr := Alloy_malloc(respSize)
+	outBuf := unsafe.Slice((*byte)(unsafe.Pointer(outPtr)), respSize)
+	copy(outBuf, respBuf)
+
+	// 5. Return packed offset and size
+	return uint64(uintptr(outPtr))<<32 | uint64(respSize)
 }

@@ -22,7 +22,7 @@ func TestStandaloneWasmLoad(t *testing.T) {
 	defer os.RemoveAll(dataDir)
 
 	// Initialize the runtime
-	rt, err := wasm.NewRuntime(ctx, logger, kv, dataDir)
+	rt, err := wasm.NewRuntime(ctx, logger, kv, dataDir, func(ctx context.Context, msg api.Message) {})
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}

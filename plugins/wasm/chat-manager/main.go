@@ -16,18 +16,11 @@ type ChatMessage struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func main() {
+func init() {
 	wasm.SetHandler(handleMessage)
-	// Avoid deadlock detector by having a "waiting" goroutine
-	go func() {
-		for {
-			time.Sleep(time.Hour)
-		}
-	}()
-	select {}
 }
 
-// Ensure the binary doesn't exit and exports are available
+func main() {}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {
@@ -42,7 +35,6 @@ func handleMessage(msg wasm.Message) wasm.Message {
 		chatMsg.ID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
 
 		// Persist using host KV
-		// In WASM, we use the host's KV via the SDK
 		historyKey := "history:" + chatMsg.Channel
 		historyBytes := wasm.KVGet(historyKey)
 		var history []ChatMessage
@@ -57,15 +49,23 @@ func handleMessage(msg wasm.Message) wasm.Message {
 		wasm.KVSet(historyKey, newHistoryBytes)
 
 		// Create a synthetic event message (to be routed by kernel)
-		// Actually, in our architecture, the plugin returns a message to the kernel.
-		// If the kernel sees Target="plugin-events", it will route it.
-		// However, we want to return a response to the sender AND publish an event.
-		// Since we only return one message, we "cheat" by returning a response 
-		// but the SDK/Kernel should support returning multiple or we might need 
-		// a separate 'publish' call in the SDK.
-		
-		// For now, let's just return the response. To publish an event, 
-		// the plugin-chat would need to call a host function for 'RouteMessage'.
+		eventReq := struct {
+			Topic string      `json:"topic"`
+			Data  ChatMessage `json:"data"`
+		}{
+			Topic: "chat:message",
+			Data:  chatMsg,
+		}
+		eventPayload, _ := json.Marshal(eventReq)
+		wasm.RouteMessage(wasm.Message{
+			ID:        fmt.Sprintf("evt-chat-%d", chatMsg.Timestamp),
+			Type:      "request",
+			Sender:    "plugin-chat",
+			Target:    "plugin-events",
+			Method:    "publish",
+			Payload:   eventPayload,
+			Timestamp: chatMsg.Timestamp,
+		})
 		
 		payload, _ := json.Marshal(chatMsg)
 		return wasm.Message{

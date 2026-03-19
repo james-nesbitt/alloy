@@ -36,9 +36,9 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 
 	size := uint64(len(payload))
 	// 1. Allocate memory in guest for request
-	malloc := i.mod.ExportedFunction("malloc")
+	malloc := i.mod.ExportedFunction("alloy_malloc")
 	if malloc == nil {
-		return api.Message{}, fmt.Errorf("plugin missing 'malloc' export")
+		return api.Message{}, fmt.Errorf("plugin missing 'alloy_malloc' export")
 	}
 
 	results, err := malloc.Call(ctx, size)
@@ -82,8 +82,11 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, fmt.Errorf("failed to unmarshal guest response: %w", err)
 	}
 
-	// 5. Cleanup (Free memory if plugin exports free)
-	if free := i.mod.ExportedFunction("free"); free != nil {
+	// 5. Cleanup
+	if free := i.mod.ExportedFunction("alloy_free"); free != nil {
+		_, _ = free.Call(ctx, uint64(ptr))
+		_, _ = free.Call(ctx, uint64(respPtr))
+	} else if free := i.mod.ExportedFunction("free"); free != nil {
 		_, _ = free.Call(ctx, uint64(ptr))
 		_, _ = free.Call(ctx, uint64(respPtr))
 	}

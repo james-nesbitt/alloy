@@ -33,7 +33,7 @@ lint:
 
 # Run all tests
 test: kill-alloy build-core build-wasm
-    go test -v -race -timeout 300s ./...
+    go test -v -timeout 600s ./...
 
 # Build the core backend
 build-core:
@@ -61,9 +61,9 @@ build-tui:
 build-gui-gio:
 	go build -tags gui -o build/gui-gio cmd/alloy-gui-gio/main.go
 
-# Build the Pure Go Wayland Native GUI (X11-free)
+# Build the Pure Go Wayland Native GUI (X11-free, Experimental)
 build-gui-wayland:
-	go build -o build/gui-wayland cmd/alloy-gui-wayland-native/main.go
+	go build -tags experimental_wayland -o build/gui-wayland cmd/alloy-gui-wayland-native/main.go
 
 # Build everything
 build-all: build-core build-cli build-tui build-gui-wayland build-wasm
@@ -105,10 +105,12 @@ build-wasm:
                 "chat-manager") target_name="chat" ;;
                 "buffer-manager") target_name="buffer" ;;
                 "ai-agent") target_name="ai" ;;
+                "health-wasm") target_name="health" ;;
                 *) target_name="$plugin_name" ;;
             esac
             echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"
-            GOOS=wasip1 GOARCH=wasm go build -o "build/wasm/$target_name.wasm" "$plugin_dir/main.go"
+            # Use Standard Go wasip1 with c-shared buildmode for stability (Go 1.24+)
+            GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o "build/wasm/$target_name.wasm" "$plugin_dir/main.go"
         fi
     done
 

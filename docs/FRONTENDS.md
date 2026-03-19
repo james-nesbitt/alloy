@@ -35,19 +35,23 @@ Frontends interact with the system by sending `api.Message` structures.
 - **Core Dependencies**: Minimal. Only requires a standard TTY/Terminal.
 - **Use Case**: Quick debugging, server-side management, and low-resource environments.
 
-### 2.2 Alloy GUI (Wayland Native)
-- **Path**: `cmd/alloy-gui/`
+### 2.2 Alloy Desktop GUI (Stable)
+- **Path**: `cmd/alloy-gui-gio/`
 - **Technology**: Go, [Gio](https://gioui.org/).
-- **Platform Focus**: Optimized for Linux Wayland, though cross-platform via Gio.
+- **Platform Focus**: Optimized for Linux Wayland, but cross-platform-capable via Gio.
 - **Build Requirements**:
-  Building the GUI requires several system-level development libraries for rendering and input handling:
-  - `libxkbcommon-dev` (Keyboard handling)
-  - `libwayland-dev` (Wayland client headers)
-  - `libvulkan-dev` (GPU acceleration)
-  - `libgles2-mesa-dev` (OpenGL ES support)
-- **Use Case**: Rich media interaction, multi-windowing, and high-performance rendering for AI/Data visualizations.
+  Building the Gio GUI requires system-level development libraries for rendering and input handling (Vulkan, GLES, Wayland, Xkb).
+- **Use Case**: Rich media interaction and high-performance hardware-accelerated rendering.
 
-### 2.3 Alloy Web (Future)
+### 2.3 Alloy Wayland Native (Experimental)
+- **Path**: `cmd/alloy-gui-wayland-native/`
+- **Technology**: Pure Go, [go-wayland](https://github.com/rajveermalviya/go-wayland).
+- **Status**: Experimental.
+- **Pros**: **Zero C-dependencies** and no X11/Vulkan requirements.
+- **Cons**: Software rendering (SHM) only; no hardware acceleration. Requires a Wayland compositor with `xdg-shell` support.
+- **Build**: Uses the `experimental_wayland` build tag.
+
+### 2.4 Alloy Web (Future)
 - **Technology**: Go (serving WASM), React/Vue.
 - **Strategy**: Leverage the same `pkg/frontend` logic compiled to WASM to bridge browser-based JS events to the Alloy IPC socket (likely via a WebSocket proxy).
 

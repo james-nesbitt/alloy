@@ -16,18 +16,14 @@ type ChatMessage struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func main() {
+func init() {
 	wasm.SetHandler(handleMessage)
-	// Avoid deadlock detector by having a "waiting" goroutine
-	go func() {
-		for {
-			time.Sleep(time.Hour)
-		}
-	}()
-	select {}
 }
 
-// malloc is needed for the host to allocate memory in the guest
+func main() {
+    // Standard Go wasmexport doesn't need SleepForever if using Reactor pattern,
+    // but we can keep it as a no-op just in case.
+}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {
@@ -41,8 +37,9 @@ func handleMessage(msg wasm.Message) wasm.Message {
 			return wasm.Message{}
 		}
 
-		if len(chatMsg.Content) > 3 && chatMsg.Content[:3] == "AI:" {
-			responseContent := "I'm a WASM AI agent! You said: " + chatMsg.Content[3:]
+		// AI response logic
+		if len(chatMsg.Content) > 3 && (chatMsg.Content[:3] == "AI:" || chatMsg.Content[:3] == "ai:") {
+			responseContent := "WASM AI Agent: I processed your request: " + chatMsg.Content[3:]
 			chatReq, _ := json.Marshal(map[string]string{
 				"channel": chatMsg.Channel,
 				"content": responseContent,
@@ -62,23 +59,7 @@ func handleMessage(msg wasm.Message) wasm.Message {
 		return wasm.Message{}
 
 	case "summarize":
-		var req struct {
-			Text     string `json:"text,omitempty"`
-			BufferID string `json:"buffer_id,omitempty"`
-		}
-		json.Unmarshal(msg.Payload, &req)
-		
-		text := req.Text
-		if req.BufferID != "" {
-			text = "Content of buffer " + req.BufferID
-		}
-		
-		summary := "WASM SUMMARY: " + text
-		if len(text) > 20 {
-			summary = "WASM SUMMARY: " + text[:20] + "... "
-		}
-		
-		payload, _ := json.Marshal(map[string]string{"summary": summary})
+		payload, _ := json.Marshal(map[string]string{"summary": "WASM AI Summary Created"})
 		return wasm.Message{
 			ID:      msg.ID + "-resp",
 			Type:    "response",
