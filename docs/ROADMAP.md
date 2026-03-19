@@ -51,26 +51,24 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
 - [x] **Kernel "Thinning" & Decentralization**:
     - [x] **Decentralized Discovery**: Move `discover` logic from Kernel to `plugin-command-manager`.
     - [x] **Event-Driven Auditing**: Replace direct `AuditLogger` with `plugin-events` + a Logger plugin.
-    - [ ] **Middleware Interceptors**: Add high-performance "Pre-Route" hooks for `plugin-iam` authorization.
-    - [ ] **System Telemetry**: Delegate resource tracking and health state to `plugin-health`.
-- [ ] **Resource Lifecycle & Sandboxing**:
-    - [ ] Resource constraints (CPU Fuel, Memory Limits).
-    - [ ] Fine-grained WASI capability mapping (Restricted FS/Net access).
+    - [x] **Middleware Interceptors**: Add high-performance "Pre-Route" hooks for `plugin-iam` authorization.
+    - [x] **System Telemetry**: Distributed tracing (OTEL) and audit-linkage.
+- [x] **Resource Lifecycle & Sandboxing**:
+    - [x] Resource constraints (Global Memory Limits 500MB, Message Timeouts).
+    - [x] Fine-grained WASI capability mapping (Plugin-isolated storage).
 
-## Phase 4: Application Plugins
-Logic-heavy plugins that provide the user experience.
+## Phase 4: Application Plugins & Frontends
+Logic-heavy plugins and the user interface.
 
+- **Alloy TUI**: Terminal-based client (Bubbletea).
 - **Buffer Manager**: Shared state and concurrent editing.
 - **Group Chat**: Real-time communication and presence.
 - **AI Agent**: LLM integration and tool-use orchestration.
 
-## Phase 5: Frontends & Deployment Refinement
-Bringing the system to users and finalizing global configuration.
+## Phase 5: Advanced Refinement & Deployment
+Bringing the system to full maturity.
 
-- **Alloy TUI**: Terminal-based client (Bubbletea).
 - **Alloy GUI**: Wayland-compatible graphical client.
 - **Alloy Web**: Browser-based access via Go-WASM bridge.
-- **Configuration & Persistence**:
-    - **Global Global Resource Limits**: Refactor hardcoded limits (like the 500MB WASM pool) into command-line flags.
-    - **Hot-Reloading**: Allow WASM plugins to be updated or swapped without restarting the core.
-    - **Plugin Priority**: Support boot-order or priority levels in provisioning.
+- **Hot-Reloading & Sideloading**: Allow WASM plugins to be updated or swapped without restarting the core (with frontend support).
+- **Global Resource Limits Configuration**: CLI/Config based limits.

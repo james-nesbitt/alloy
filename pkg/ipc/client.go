@@ -18,8 +18,9 @@ type Client struct {
 	enc  *json.Encoder
 	dec  *json.Decoder
 
-	mu    sync.Mutex
-	resps map[string]chan api.Message
+	mu      sync.Mutex
+	resps   map[string]chan api.Message
+	asyncCh chan api.Message
 }
 
 func Dial(rawAddr string, tlsConfig *tls.Config) (*Client, error) {
@@ -38,10 +39,11 @@ func Dial(rawAddr string, tlsConfig *tls.Config) (*Client, error) {
 	}
 
 	client := &Client{
-		conn:  conn,
-		enc:   json.NewEncoder(conn),
-		dec:   json.NewDecoder(conn),
-		resps: make(map[string]chan api.Message),
+		conn:    conn,
+		enc:     json.NewEncoder(conn),
+		dec:     json.NewDecoder(conn),
+		resps:   make(map[string]chan api.Message),
+		asyncCh: make(chan api.Message, 100),
 	}
 
 	go client.readLoop()
@@ -57,13 +59,6 @@ func (c *Client) readLoop() {
 	for {
 		var msg api.Message
 		if err := c.dec.Decode(&msg); err != nil {
-			if err != io.EOF {
-				select {
-				case <-time.After(10 * time.Millisecond):
-					fmt.Printf("Read error: %v\n", err)
-				default:
-				}
-			}
 			return
 		}
 
@@ -72,11 +67,21 @@ func (c *Client) readLoop() {
 		if ok {
 			ch <- msg
 			delete(c.resps, msg.ID)
-		} else if msg.Type == api.TypeResponse || msg.Type == api.TypeEvent {
-			fmt.Printf("Received %s from %s: %s\n", msg.Type, msg.Sender, string(msg.Payload))
+		} else {
+			// No one is waiting for a response, put it in the async channel
+			select {
+			case c.asyncCh <- msg:
+			default:
+				// ignore if full
+			}
 		}
 		c.mu.Unlock()
 	}
+}
+
+// Async returns a channel that receives unsolicited messages or events.
+func (c *Client) Async() <-chan api.Message {
+	return c.asyncCh
 }
 
 func (c *Client) Send(msg api.Message) error {

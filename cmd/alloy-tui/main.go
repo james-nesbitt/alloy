@@ -196,11 +196,9 @@ func main() {
 
 	subCh := make(chan api.Message)
 	go func() {
+		async := client.Async()
 		for {
-			msg, err := client.Receive()
-			if err != nil {
-				return
-			}
+			msg := <-async
 			subCh <- msg
 		}
 	}()
