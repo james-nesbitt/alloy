@@ -2,7 +2,7 @@
   "plugins": [
     {"id": "plugin-events", "type": "native"},
     {"id": "plugin-iam", "type": "native"},
-    {"id": "plugin-command-manager", "type": "native"},
-    {"id": "plugin-health", "type": "wasm", "path": "plugins-bin/health.wasm"}
+    {"id": "plugin-health", "type": "native"},
+    {"id": "plugin-command-manager", "type": "native"}
   ]
 }
