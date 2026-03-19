@@ -53,7 +53,24 @@ For complex setups involving multiple native and WASM plugins with specific cons
 The manifest is a JSON file defining a list of plugins to load.
 
 ### 2.4 Asynchronous Loading
-Because WASM compilation (Ahead-of-Time compilation via `wazero`) can be resource-intensive, the core loads plugins in the background. A plugin is not immediately available for message routing; it becomes available once its code is compiled and it successfully executes its `_start` routine and registers with the host.
+Because WASM compilation (Ahead-of-Time compilation via `wazero`) can be resource-intensive, the core loads plugins in the background. A plugin is not immediately available for message routing; it becomes available once its code is compiled and it successfully executes its initialization routines.
+
+### 2.5 Hot-Reloading
+Alloy supports swapping a WASM plugin's binary at runtime without restarting the kernel or other plugins. This is useful for rapid development and "zero-downtime" updates.
+
+To trigger a reload, send a `reload` message to the `plugin-wasm-manager`:
+```json
+{
+  "target": "plugin-wasm-manager",
+  "method": "reload",
+  "payload": "{\"id\": \"plugin-chat\"}"
+}
+```
+The manager will:
+1.  Read the current version of the `.wasm` file from its original path.
+2.  Instantiate a new WASM module instance.
+3.  Swap the old instance for the new one in the kernel registry.
+4.  Re-register the plugin's capabilities with the `plugin-command-manager`.
 
 ## 3. Testing Considerations
 

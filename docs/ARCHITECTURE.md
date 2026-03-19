@@ -27,7 +27,8 @@ The backend kernel is responsible for:
 Plugins extend the capabilities of the Alloy backend.
 - **Isolation**: Each plugin runs in its own WASM sandbox (e.g., using `wazero`). Each plugin is a separate WASM binary.
 - **Lifecycle Management**: 
-    - The Backend Kernel provides the low-level mechanism for starting, stopping, and restarting plugins.
+    - The Backend Kernel provides low-level mechanisms for starting, stopping, and **hot-reloading** plugins.
+    - The `WasmManager` supports a `reload` command that can swap a plugin's binary at runtime while preserving the registry state.
     - High-level orchestration (downloading, upgrading, and managing the plugin catalog) is handled by the **Registry & Plugin Manager** plugin (see [Plugin Roadmap](PLUGINS_ROADMAP.md)).
 - **Discovery**: While the core supports explicit provisioning, it can also automatically discover WASM plugins in directories specified via the `--wasm-plugins` flag at startup.
 - **Standard Interface**: Plugins must implement a standard interface for message handling.
@@ -69,7 +70,7 @@ Alloy follows a "Frontend-Driven" bootstrapping model for new backend instances.
 ### 4.1 Startup Flow
 1. **Frontend Init**: The frontend loads its local configuration (paths, certs, policy, plugins).
 2. **Backend Detection**: It checks for an existing backend at the configured socket/address.
-3. **Instance Creation (Optional)**: If no backend is found and configuration permits, the frontend launches a 새로운 backend process.
+3. **Instance Creation (Optional)**: If no backend is found and configuration permits, the frontend launches a new backend process.
 4. **Provisioning**: The frontend passes a configuration payload to the newly started backend. This payload includes:
     - **Components**: Definitions and paths for core kernel modules and WASM plugins.
     - **Security Policies**: MAC (Mandatory Access Control) rules for plugins and users.
