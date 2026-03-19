@@ -15,12 +15,24 @@ fmt:
     go fmt ./...
     goimports -w .
 
+# Clean up build artifacts and any leftover processes
+clean: kill-alloy
+    rm -rf build/
+
+# Kill any leftover alloy processes safely
+kill-alloy:
+    @-pkill -x core || true
+    @-pkill -x tui || true
+    @-pkill -x gui-gio || true
+    @-pkill -x gui-wayland || true
+    @-pkill -x cli || true
+
 # Run linter
 lint:
     golangci-lint run
 
 # Run all tests
-test:
+test: kill-alloy build-core build-wasm
     go test -v -race -timeout 300s ./...
 
 # Build the core backend
@@ -54,7 +66,7 @@ build-gui-wayland:
 	go build -o build/gui-wayland cmd/alloy-gui-wayland-native/main.go
 
 # Build everything
-build-all: build-core build-cli build-tui build-gui build-wasm
+build-all: build-core build-cli build-tui build-gui-wayland build-wasm
 
 # Run the Alloy Core backend
 run-core *args: build-core
@@ -64,9 +76,13 @@ run-core *args: build-core
 run-tui *args: build-tui
     ./build/tui {{args}}
 
-# Run the Alloy GUI frontend
-run-gui *args: build-gui
+# Run the Alloy Gio GUI frontend
+run-gui-gio *args: build-gui-gio
     ./build/gui-gio {{args}}
+
+# Run the Alloy Wayland Native GUI frontend
+run-gui-wayland *args: build-gui-wayland
+    ./build/gui-wayland {{args}}
 
 # Run Alloy Core with debug enabled
 debug-core: build-core

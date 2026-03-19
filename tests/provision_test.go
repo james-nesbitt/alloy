@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,13 +41,15 @@ func TestDynamicProvisioning(t *testing.T) {
 	}
 
 	// Start core
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug", "--provision", provisionPath)
+	coreProcess := StartCore(t, corePath, []string{
+		"--socket", "unix://" + socketPath,
+		"--home", homeDir,
+		"--insecure",
+		"--debug",
+		"--provision", provisionPath,
+	})
 	coreProcess.Stdout = os.Stdout
 	coreProcess.Stderr = os.Stderr
-	if err := coreProcess.Start(); err != nil {
-		t.Fatalf("failed to start core: %v", err)
-	}
-	defer coreProcess.Process.Kill()
 
 	// Wait for socket
 	time.Sleep(2 * time.Second)

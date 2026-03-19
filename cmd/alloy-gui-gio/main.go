@@ -13,11 +13,9 @@ import (
 	"time"
 
 	"gioui.org/app"
-	"gioui.org/font/gofont"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/text"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
@@ -51,7 +49,7 @@ func main() {
 }
 
 func run(w *app.Window, client *frontend.Client) error {
-	th := material.NewTheme(gofont.Collection())
+	th := material.NewTheme()
 	var ops op.Ops
 
 	var (
@@ -59,27 +57,22 @@ func run(w *app.Window, client *frontend.Client) error {
 		sendButton widget.Clickable
 		list       widget.List
 	)
-	list.List.Axis = layout.Vertical
+	list.Axis = layout.Vertical
 
 	// Refresh UI on incoming messages
-	refresh := make(chan struct{}, 1)
 	client.OnMessage(func(msg api.Message) {
-		select {
-		case refresh <- struct{}{}:
-			w.Invalidate()
-		default:
-		}
+		w.Invalidate()
 	})
 
 	for {
-		e := <-w.Events()
-		switch e := e.(type) {
+		event := w.NextEvent()
+		switch e := event.(type) {
 		case system.DestroyEvent:
 			return e.Err
 		case system.FrameEvent:
 			gtx := layout.NewContext(&ops, e)
 
-			if sendButton.Clicked() {
+			if sendButton.Clicked(gtx) {
 				content := input.Text()
 				if content != "" {
 					parts := strings.SplitN(content, " ", 3)

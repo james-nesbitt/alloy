@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,13 +21,14 @@ func TestEmptyBoot(t *testing.T) {
 	corePath := "../build/core"
 
 	// Start core WITHOUT --provision and WITHOUT --wasm-plugins
-	coreProcess := exec.Command(corePath, "--socket", "unix://"+socketPath, "--home", homeDir, "--insecure", "--debug")
+	coreProcess := StartCore(t, corePath, []string{
+		"--socket", "unix://" + socketPath,
+		"--home", homeDir,
+		"--insecure",
+		"--debug",
+	})
 	coreProcess.Stdout = os.Stdout
 	coreProcess.Stderr = os.Stderr
-	if err := coreProcess.Start(); err != nil {
-		t.Fatalf("failed to start core: %v", err)
-	}
-	defer coreProcess.Process.Kill()
 
 	// Wait for socket
 	for i := 0; i < 10; i++ {

@@ -5,11 +5,124 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 )
+
+// StartCore starts the alloy-core as a subprocess and ensures it's killed when the test finishes.
+func StartCore(t *testing.T, corePath string, args []string) *exec.Cmd {
+	t.Helper()
+
+	cmd := exec.Command(corePath, args...)
+	// On Linux, we can ensure the child dies if the parent (the test) dies.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Pdeathsig: syscall.SIGKILL,
+	}
+
+	// For simple tests, let's keep the output as it might be useful for debugging
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start core: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	return cmd
+}
+
+// setupTestCore starts the alloy-core with the given manifest and returns
+// the process, connection, and a decoder.
+func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *json.Decoder, string) {
+	homeDir, _ := os.MkdirTemp("", "alloy-core-"+label+"-*")
+	socketPath := filepath.Join(homeDir, "alloy.sock")
+
+	cwd, _ := os.Getwd()
+	corePath := filepath.Join(filepath.Dir(cwd), "build/core")
+
+	manifestData, _ := json.Marshal(manifest)
+	provisionPath := filepath.Join(homeDir, "provision.json")
+	os.WriteFile(provisionPath, manifestData, 0644)
+
+	cmd := StartCore(t, corePath, []string{
+		"--socket", "unix://" + socketPath,
+		"--home", homeDir,
+		"--insecure",
+		"--debug",
+		"--provision", provisionPath,
+	})
+	
+	// Wait for socket
+	for i := 0; i < 20; i++ {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to connect to core: %v", err)
+	}
+
+	return cmd, conn, json.NewDecoder(conn), homeDir
+}
+
+func waitForPlugins(t *testing.T, conn net.Conn, decoder *json.Decoder, expectedIDs []string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	expected := make(map[string]bool)
+	for _, id := range expectedIDs {
+		expected[id] = true
+	}
+
+	for time.Now().Before(deadline) {
+		sendMsg(t, conn, api.Message{
+			ID:     "poll-discover",
+			Type:   api.TypeRequest,
+			Sender: "test-waiter",
+			Target: "plugin-command-manager",
+			Method: "discover",
+		})
+
+		var resp api.Message
+		err := decoder.Decode(&resp)
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		if resp.ID == "poll-discover-resp" {
+			var result struct {
+				Targets []struct {
+					ID string `json:"id"`
+				} `json:"targets"`
+			}
+			json.Unmarshal(resp.Payload, &result)
+			count := 0
+			for _, target := range result.Targets {
+				if expected[target.ID] {
+					count++
+				}
+			}
+			if count >= len(expected) {
+				return
+			}
+			t.Logf("Waiting for plugins: %d/%d registered...", count, len(expected))
+		}
+		time.Sleep(1 * time.Second)
+	}
+	t.Fatalf("timed out waiting for plugins: %v", expectedIDs)
+}
 
 // targetPlugin is a utility mock for testing routing and interception.
 type targetPlugin struct {

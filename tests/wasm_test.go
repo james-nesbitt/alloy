@@ -2,9 +2,7 @@ package tests
 
 import (
 	"encoding/json"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,95 +10,6 @@ import (
 
 	"github.com/jnesbitt/alloy-go/api"
 )
-
-// setupTestCore starts the alloy-core with the given manifest and returns
-// the process, connection, and a decoder.
-func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *json.Decoder, string) {
-	homeDir, _ := os.MkdirTemp("", "alloy-wasm-"+label+"-*")
-	socketPath := filepath.Join(homeDir, "alloy.sock")
-	
-	cwd, _ := os.Getwd()
-	corePath := filepath.Join(filepath.Dir(cwd), "build/core")
-
-	manifestData, _ := json.Marshal(manifest)
-	provisionPath := filepath.Join(homeDir, "provision.json")
-	os.WriteFile(provisionPath, manifestData, 0644)
-
-	cmd := exec.Command(corePath, 
-		"--socket", "unix://"+socketPath, 
-		"--home", homeDir, 
-		"--insecure", 
-		"--debug", 
-		"--provision", provisionPath,
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start core: %v", err)
-	}
-
-	// Wait for socket
-	for i := 0; i < 20; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		cmd.Process.Kill()
-		t.Fatalf("failed to connect to core: %v", err)
-	}
-
-	return cmd, conn, json.NewDecoder(conn), homeDir
-}
-
-func waitForPlugins(t *testing.T, conn net.Conn, decoder *json.Decoder, expectedIDs []string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	expected := make(map[string]bool)
-	for _, id := range expectedIDs {
-		expected[id] = true
-	}
-
-	for time.Now().Before(deadline) {
-		sendMsg(t, conn, api.Message{
-			ID:     "poll-discover",
-			Type:   api.TypeRequest,
-			Sender: "test-waiter",
-			Target: "plugin-command-manager",
-			Method: "discover",
-		})
-
-		var resp api.Message
-		err := decoder.Decode(&resp)
-		if err != nil {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		if resp.ID == "poll-discover-resp" {
-			var result struct {
-				Targets []struct {
-					ID string `json:"id"`
-				} `json:"targets"`
-			}
-			json.Unmarshal(resp.Payload, &result)
-			count := 0
-			for _, target := range result.Targets {
-				if expected[target.ID] {
-					count++
-				}
-			}
-			if count >= len(expected) {
-				return
-			}
-			t.Logf("Waiting for plugins: %d/%d registered...", count, len(expected))
-		}
-		time.Sleep(1 * time.Second)
-	}
-	t.Fatalf("timed out waiting for plugins: %v", expectedIDs)
-}
 
 func TestWasmLoadMock(t *testing.T) {
 	cwd, _ := os.Getwd()
@@ -117,9 +26,8 @@ func TestWasmLoadMock(t *testing.T) {
 		},
 	}
 
-	cmd, conn, decoder, home := setupTestCore(t, "mock", manifest)
+	_, conn, decoder, home := setupTestCore(t, "mock", manifest)
 	defer os.RemoveAll(home)
-	defer cmd.Process.Kill()
 	defer conn.Close()
 
 	waitForPlugins(t, conn, decoder, []string{"plugin-mock"}, 30*time.Second)
@@ -154,12 +62,11 @@ func TestWasmLoadBulk(t *testing.T) {
 	}
 
 	manifest := map[string]any{"plugins": wasmPlugins}
-	cmd, conn, decoder, home := setupTestCore(t, "bulk", manifest)
+	_, conn, decoder, home := setupTestCore(t, "bulk", manifest)
 	defer os.RemoveAll(home)
-	defer cmd.Process.Kill()
 	defer conn.Close()
 
-	waitForPlugins(t, conn, decoder, expectedIDs, 300*time.Second)
+	waitForPlugins(t, conn, decoder, expectedIDs, 120*time.Second)
 }
 
 func TestWasmFunctionalSuite(t *testing.T) {
@@ -179,16 +86,15 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		},
 	}
 
-	cmd, conn, decoder, home := setupTestCore(t, "full", manifest)
+	_, conn, decoder, home := setupTestCore(t, "full", manifest)
 	defer os.RemoveAll(home)
-	defer cmd.Process.Kill()
 	defer conn.Close()
 
 	expected := []string{
 		"plugin-chat", "plugin-ai-agent", "plugin-secrets", 
 		"plugin-health", "plugin-buffer-manager",
 	}
-	waitForPlugins(t, conn, decoder, expected, 300*time.Second)
+	waitForPlugins(t, conn, decoder, expected, 120*time.Second)
 
 	// 1. Verify Health
 	sendMsg(t, conn, api.Message{
