@@ -4,11 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 )
