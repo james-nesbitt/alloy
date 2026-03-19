@@ -60,15 +60,17 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
 ## Phase 4: Application Plugins & Frontends
 Logic-heavy plugins and the user interface.
 
-- **Alloy TUI**: Terminal-based client (Bubbletea).
-- **Buffer Manager**: Shared state and concurrent editing.
-- **Group Chat**: Real-time communication and presence.
-- **AI Agent**: LLM integration and tool-use orchestration.
+- [x] **Alloy TUI**: Terminal-based client (Bubbletea) with **Dynamic Command Discovery**.
+- [ ] **Buffer Manager**: Shared state and concurrent editing.
+- [ ] **Group Chat**: Real-time communication and presence.
+- [ ] **AI Agent**: LLM integration and tool-use orchestration.
 
 ## Phase 5: Advanced Refinement & Deployment
 Bringing the system to full maturity.
 
-- **Alloy GUI**: Wayland-compatible graphical client.
-- **Alloy Web**: Browser-based access via Go-WASM bridge.
-- **Hot-Reloading & Sideloading**: Allow WASM plugins to be updated or swapped without restarting the core (with frontend support).
-- **Global Resource Limits Configuration**: CLI/Config based limits.
+- [x] **Alloy GUI**: Wayland-compatible graphical client (**Stable Gio + Experimental Native**).
+- [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
+- [x] **Hot-Reloading**: Allow WASM plugins to be updated or swapped without restarting the core. 
+    - [x] Runtime manager reload support.
+    - [ ] Automatic file watching.
+- [ ] **Global Resource Limits Configuration**: CLI/Config based limits.
