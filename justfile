@@ -39,10 +39,32 @@ test-uds:
 
 # Build the CLI
 build-cli:
-    go build -o build/frontend cmd/alloy-cli/main.go
+    go build -o build/cli cmd/alloy-cli/main.go
+
+# Build the TUI
+build-tui:
+    go build -o build/tui cmd/alloy-tui/main.go
 
 # Build everything
-build-all: build-core build-cli build-wasm
+build-all: build-core build-cli build-tui build-wasm
+
+# Run the Alloy Core backend
+run-core *args: build-core
+    ./build/core {{args}}
+
+# Run the Alloy TUI frontend
+run-tui *args: build-tui
+    ./build/tui {{args}}
+
+# Run Alloy Core with debug enabled
+debug-core: build-core
+    ./build/core --debug
+
+# Run Alloy Core with health plugin provisioned
+run-health: build-core build-wasm
+    mkdir -p plugins-bin
+    cp build/wasm/health.wasm plugins-bin/
+    ./build/core --provision provision.json --debug
 
 # Build all WASM plugins
 build-wasm:
