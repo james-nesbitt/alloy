@@ -8,17 +8,22 @@ import (
 	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
 	auditContextKey      = "alloy.no_audit"
 	skipInterceptorsKey  = "alloy.skip_interceptors"
+	tracerName           = "alloy-kernel"
 )
 
 // Kernel is the core component that manages plugins and message routing.
 type Kernel struct {
 	logger *slog.Logger
 	mu     sync.RWMutex
+	tracer trace.Tracer
 
 	// plugins maps plugin IDs to their instances
 	plugins map[string]api.Plugin
@@ -41,6 +46,7 @@ func New(logger *slog.Logger) *Kernel {
 		frontends:    make(map[string]chan<- api.Message),
 		interceptors: make([]api.Interceptor, 0),
 		stopCh:       make(chan struct{}),
+		tracer:       otel.Tracer(tracerName),
 	}
 }
 
@@ -91,6 +97,11 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 
 // RouteMessage handles the delivery of a message to its intended target.
 func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
+	// Start OpenTelemetry span
+	ctx, span := k.tracer.Start(ctx, "kernel.RouteMessage",
+		trace.WithAttributes(msg.ToSpanAttributes()...))
+	defer span.End()
+
 	k.logger.Debug("routing message", "id", msg.ID, "sender", msg.Sender, "method", msg.Method, "target", msg.Target)
 
 	// Pre-Route Interception
@@ -103,15 +114,18 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			newMsg, allow, err := interceptor.PreRoute(ctx, msg)
 			if err != nil {
 				k.logger.Error("interceptor error", "error", err, "target", msg.Target)
+				span.RecordError(err)
 				return
 			}
 			if !allow {
 				k.logger.Warn("routing denied by interceptor", "sender", msg.Sender, "target", msg.Target)
+				span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
 				return
 			}
 			msg = newMsg
 		}
 	}
+	span.SetAttributes(attribute.Bool("alloy.msg.allowed", true))
 
 	k.mu.RLock()
 	plugin, isPlugin := k.plugins[msg.Target]
@@ -129,16 +143,21 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	}
 
 	if isPlugin {
-		go func() {
-			resp, err := plugin.HandleMessage(ctx, msg)
+		go func(p api.Plugin, m api.Message, c context.Context) {
+			childCtx, childSpan := k.tracer.Start(c, "plugin.HandleMessage",
+				trace.WithAttributes(attribute.String("alloy.plugin.id", p.ID())))
+			defer childSpan.End()
+
+			resp, err := p.HandleMessage(childCtx, m)
 			if err != nil {
-				k.logger.Error("plugin error", "plugin_id", msg.Target, "error", err)
+				k.logger.Error("plugin error", "plugin_id", m.Target, "error", err)
+				childSpan.RecordError(err)
 				return
 			}
 			if resp.ID != "" || resp.Target != "" {
-				k.RouteMessage(ctx, resp)
+				k.RouteMessage(childCtx, resp)
 			}
-		}()
+		}(plugin, msg, ctx)
 		return
 	}
 
@@ -243,7 +262,7 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 		auditCtx := context.WithValue(context.Background(), auditContextKey, true)
 		auditCtx = context.WithValue(auditCtx, skipInterceptorsKey, true)
 
-		k.RouteMessage(auditCtx, api.Message{
+		auditMsg := api.Message{
 			ID:        "audit-" + time.Now().Format("150405.000"),
 			Type:      api.TypeEvent,
 			Sender:    "kernel",
@@ -251,6 +270,13 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 			Method:    "publish",
 			Payload:   []byte(`{"topic":"system:audit","data":` + string(details) + `}`),
 			Timestamp: time.Now().Unix(),
-		})
+		}
+
+		// Propagate trace context to audit log message if present
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			auditMsg.InjectSpanContext(span.SpanContext())
+		}
+
+		k.RouteMessage(auditCtx, auditMsg)
 	}()
 }

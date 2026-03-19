@@ -60,6 +60,13 @@ func (l *LoggerManager) HandleMessage(ctx context.Context, msg api.Message) (api
 			l.logger.Error("failed to unmarshal audit entry", "error", err)
 			return api.Message{}, nil
 		}
+		
+		// Correlate with trace if present in message metadata
+		if sc, ok := msg.SpanContext(); ok {
+			entry.TraceID = sc.TraceID().String()
+			entry.SpanID = sc.SpanID().String()
+		}
+		
 		l.audit.Log(entry)
 	}
 	return api.Message{}, nil
