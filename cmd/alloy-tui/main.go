@@ -17,24 +17,28 @@ import (
 )
 
 type model struct {
-	client   *frontend.Client
-	messages []string
-	viewport viewport.Model
-	textarea textarea.Model
-	err      error
-	width    int
-	height   int
-	ready    bool
-	msgCh    chan api.Message
+	client     *frontend.Client
+	messages   []string
+	viewport   viewport.Model
+	textarea   textarea.Model
+	discovery  []string
+	err        error
+	width      int
+	height     int
+	ready      bool
+	msgCh      chan api.Message
 }
 
 type messageMsg api.Message
 type errMsg error
+type discoveryMsg string
+type tickMsg time.Time
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		m.listenForMessages(),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }
 
@@ -55,6 +59,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.viewport, vpCmd = m.viewport.Update(msg)
 
 	switch msg := msg.(type) {
+	case tickMsg:
+		return m, tea.Batch(
+			tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+			func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				resp, err := m.client.Send(ctx, "plugin-command-manager", "discover", nil)
+				if err != nil {
+					return nil
+				}
+				return discoveryMsg(string(resp.Payload))
+			},
+		)
+	case discoveryMsg:
+		lines := strings.Split(string(msg), "\n")
+		var valid []string
+		for _, l := range lines {
+			if strings.TrimSpace(l) != "" {
+				valid = append(valid, l)
+			}
+		}
+		m.discovery = valid
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
@@ -65,7 +93,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			parts := strings.SplitN(content, " ", 3)
+			parts := strings.SplitN(strings.TrimSpace(content), " ", 3)
 			if len(parts) >= 2 {
 				target := parts[0]
 				method := parts[1]
@@ -95,12 +123,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-5)
+			m.viewport = viewport.New(msg.Width, msg.Height-6)
 			m.viewport.SetContent("Connected to Alloy Core.")
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - 5
+			m.viewport.Height = msg.Height - 6
 		}
 		m.textarea.SetWidth(msg.Width)
 
@@ -123,11 +151,27 @@ func (m model) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
 	}
+
+	header := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("3")).
+		Render("Alloy TUI | Available Plugins:")
+	
+	discoveryText := strings.Join(m.discovery, "  ")
+	if len(discoveryText) > m.width {
+		discoveryText = discoveryText[:m.width-3] + "..."
+	}
+	discoveryView := lipgloss.NewStyle().
+		Faint(true).
+		Render(discoveryText)
+
 	return fmt.Sprintf(
-		"%s\n\n%s",
+		"%s\n%s\n\n%s\n\n%s",
+		header,
+		discoveryView,
 		m.viewport.View(),
 		m.textarea.View(),
-	) + "\n\n  ctrl+c to quit"
+	) + "\n\n  ctrl+c to quit | Usage: <target> <method> [payload]"
 }
 
 func main() {

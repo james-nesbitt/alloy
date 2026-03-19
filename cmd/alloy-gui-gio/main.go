@@ -54,8 +54,23 @@ func run(w *app.Window, client *frontend.Client) error {
 		input      widget.Editor
 		sendButton widget.Clickable
 		list       widget.List
+		discovery  string
 	)
 	list.Axis = layout.Vertical
+
+	// Discovery Loop
+	go func() {
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			resp, err := client.Send(ctx, "plugin-command-manager", "discover", nil)
+			cancel()
+			if err == nil {
+				discovery = strings.Join(strings.Split(string(resp.Payload), "\n"), "  ")
+				w.Invalidate()
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
 
 	// Refresh UI on incoming messages
 	client.OnMessage(func(msg api.Message) {
@@ -98,9 +113,18 @@ func run(w *app.Window, client *frontend.Client) error {
 			}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						title := material.H4(th, "Alloy Core Monitor")
-						title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
-						return title.Layout(gtx)
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								title := material.H4(th, "Alloy Core Monitor")
+								title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
+								return title.Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								d := material.Caption(th, "Commands: "+discovery)
+								d.Color = color.NRGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xff}
+								return d.Layout(gtx)
+							}),
+						)
 					})
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
