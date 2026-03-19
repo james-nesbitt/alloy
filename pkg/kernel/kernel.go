@@ -262,7 +262,7 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 		auditCtx := context.WithValue(context.Background(), auditContextKey, true)
 		auditCtx = context.WithValue(auditCtx, skipInterceptorsKey, true)
 
-		k.RouteMessage(auditCtx, api.Message{
+		auditMsg := api.Message{
 			ID:        "audit-" + time.Now().Format("150405.000"),
 			Type:      api.TypeEvent,
 			Sender:    "kernel",
@@ -270,6 +270,13 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 			Method:    "publish",
 			Payload:   []byte(`{"topic":"system:audit","data":` + string(details) + `}`),
 			Timestamp: time.Now().Unix(),
-		})
+		}
+
+		// Propagate trace context to audit log message if present
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			auditMsg.InjectSpanContext(span.SpanContext())
+		}
+
+		k.RouteMessage(auditCtx, auditMsg)
 	}()
 }
