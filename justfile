@@ -47,7 +47,7 @@ build-tui:
 
 # Build the GUI
 build-gui:
-    go build -o build/gui cmd/alloy-gui/main.go
+    go build -tags gui -o build/gui cmd/alloy-gui/main.go
 
 # Build everything
 build-all: build-core build-cli build-tui build-gui build-wasm

@@ -15,8 +15,10 @@ func TestWasmGoOrchestration(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	kv := storage.NewMemoryStateStore()
+	dataDir, _ := os.MkdirTemp("", "alloy-wasm-test-*")
+	defer os.RemoveAll(dataDir)
 
-	r, err := NewRuntime(ctx, logger, kv)
+	r, err := NewRuntime(ctx, logger, kv, dataDir)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}

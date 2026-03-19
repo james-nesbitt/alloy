@@ -37,18 +37,6 @@ func (m *mockInterceptor) HandleMessage(ctx context.Context, msg api.Message) (a
 	return api.Message{}, nil
 }
 
-type targetPlugin struct {
-	received chan api.Message
-}
-
-func (t *targetPlugin) ID() string                      { return "target-plugin" }
-func (t *targetPlugin) Capabilities() []api.Capability { return nil }
-func (t *targetPlugin) Shutdown(ctx context.Context) error { return nil }
-func (t *targetPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
-	t.received <- msg
-	return api.Message{}, nil
-}
-
 func TestInterceptors(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	k := kernel.New(logger)
