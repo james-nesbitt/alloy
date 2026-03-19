@@ -20,6 +20,7 @@ Alloy supports multiple frontend implementations:
 
 For more information, see the following documents:
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [Frontend Details](docs/FRONTENDS.md)
 - [Security Framework](docs/SECURITY.md)
 - [Implementation Roadmap](docs/ROADMAP.md)
 - [Plugin Details](docs/PLUGINS_ROADMAP.md)

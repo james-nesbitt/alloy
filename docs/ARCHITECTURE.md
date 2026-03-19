@@ -50,7 +50,7 @@ Plugins extend the capabilities of the Alloy backend.
 
 ## 3. Frontends
 
-Frontends provide user interaction and connect to the backend core via IPC.
+Frontends provide user interaction and connect to the backend core via IPC. See [Alloy Frontends](FRONTENDS.md) for detailed implementation details and build requirements.
 - **Connection Model**: Frontends can connect to an already-running backend or initialize a new one.
 - **Multi-Client**: Multiple frontends can connect to a single backend simultaneously.
 - **Bootstrapping Process**:

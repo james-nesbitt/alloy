@@ -45,8 +45,12 @@ build-cli:
 build-tui:
     go build -o build/tui cmd/alloy-tui/main.go
 
+# Build the GUI
+build-gui:
+    go build -o build/gui cmd/alloy-gui/main.go
+
 # Build everything
-build-all: build-core build-cli build-tui build-wasm
+build-all: build-core build-cli build-tui build-gui build-wasm
 
 # Run the Alloy Core backend
 run-core *args: build-core
@@ -55,6 +59,10 @@ run-core *args: build-core
 # Run the Alloy TUI frontend
 run-tui *args: build-tui
     ./build/tui {{args}}
+
+# Run the Alloy GUI frontend
+run-gui *args: build-gui
+    ./build/gui {{args}}
 
 # Run Alloy Core with debug enabled
 debug-core: build-core
