@@ -35,6 +35,7 @@ type Client struct {
 	messages []api.Message
 	mu       sync.RWMutex
 	onMsg    []func(api.Message)
+	name     string
 }
 
 func NewClient(name, socket string, insecure bool) (*Client, error) {
@@ -57,7 +58,8 @@ func NewClient(name, socket string, insecure bool) (*Client, error) {
 	}
 
 	c := &Client{
-		ipc: ipcClient,
+		ipc:  ipcClient,
+		name: name,
 	}
 
 	go c.readLoop()
@@ -89,7 +91,7 @@ func (c *Client) Send(ctx context.Context, target, method string, payload []byte
 	msg := api.Message{
 		ID:        fmt.Sprintf("frontend-%d", time.Now().UnixNano()),
 		Type:      api.TypeRequest,
-		Sender:    "frontend-client", // Ideally this comes from the identity
+		Sender:    c.name,
 		Target:    target,
 		Method:    method,
 		Payload:   payload,

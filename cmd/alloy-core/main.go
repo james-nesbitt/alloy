@@ -150,6 +150,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Fundamental Core Plugins (Must be registered early to handle registration events)
+	events, _ := native.Registry["plugin-events"](ctx, logger, stateStore)
+	k.RegisterPlugin(events.(api.Plugin))
+
+	commands, _ := native.Registry["plugin-command-manager"](ctx, logger, stateStore)
+	k.RegisterPlugin(commands.(api.Plugin))
+	if r, ok := commands.(native.RouterSetter); ok {
+		r.SetRouter(k.RouteMessage)
+	}
+
 	// Instantiate the host module (alloy) so plugins can import log, kv, etc.
 	if _, err := wasmRuntime.InstantiateAlloyHost(context.Background()); err != nil {
 		logger.Error("failed to instantiate alloy host module", "error", err)
@@ -163,6 +173,20 @@ func main() {
 	// WASM Manager (Isolated WASM lifecycle)
 	wm := wasm.NewManager(logger, wasmRuntime, k)
 	k.RegisterPlugin(wm)
+
+	// Register base capabilities with CM manually as they were pre-loaded or loaded during startup
+	for _, p := range []api.Plugin{rm, wm, events.(api.Plugin), commands.(api.Plugin)} {
+		caps := p.Capabilities()
+		if caps == nil { caps = []api.Capability{} }
+		capsData, _ := json.Marshal(caps)
+		k.RouteMessage(ctx, api.Message{
+			ID:      "reg-base-" + p.ID(),
+			Sender:  rm.ID(),
+			Target:  "plugin-command-manager",
+			Method:  "register",
+			Payload: []byte(`{"id":"` + p.ID() + `","type":"native","capabilities":` + string(capsData) + `}`),
+		})
+	}
 
 	if err := k.Start(ctx); err != nil {
 		logger.Error("failed to start kernel", "error", err)
