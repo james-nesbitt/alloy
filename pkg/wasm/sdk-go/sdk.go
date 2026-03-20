@@ -79,6 +79,9 @@ func alloyKVDelete(kPtr, kLen uint32) uint32
 //go:wasmimport alloy route_message
 func alloyRouteMessage(ptr uint32, size uint32) uint32
 
+//go:wasmimport alloy fetch
+func alloyFetch(reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32
+
 //go:wasmimport alloy sleep_forever
 func alloySleepForever()
 
@@ -128,6 +131,48 @@ func KVDelete(key string) bool {
 // SleepForever blocks the plugin execution safely using a host-side block.
 func SleepForever() {
 	alloySleepForever()
+}
+
+type FetchRequest struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    []byte            `json:"body,omitempty"`
+}
+
+type FetchResponse struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    []byte            `json:"body"`
+}
+
+// Fetch performs an HTTP request via the host.
+func Fetch(req FetchRequest) (*FetchResponse, error) {
+	data, _ := json.Marshal(req)
+	var respPtr, respSize uint32
+
+	res := alloyFetch(
+		uint32(uintptr(unsafe.Pointer(&data[0]))),
+		uint32(len(data)),
+		uint32(uintptr(unsafe.Pointer(&respPtr))),
+		uint32(uintptr(unsafe.Pointer(&respSize))),
+	)
+
+	if res != 0 {
+		return nil, json.Unmarshal([]byte(`{"error":"fetch_failed"}`), &struct{}{}) // Just a placeholder error
+	}
+
+	// Read response data from allocated memory
+	respBuf := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(respPtr))), respSize)
+	var resp FetchResponse
+	if err := json.Unmarshal(respBuf, &resp); err != nil {
+		return nil, err
+	}
+
+	// Free the memory allocated by the host
+	Alloy_free(uintptr(respPtr))
+
+	return &resp, nil
 }
 
 // RouteMessage sends a message to the host kernel for routing.

@@ -1,10 +1,13 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -211,10 +214,77 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		}).
 		Export("route_message").
 		NewFunctionBuilder().
+		WithFunc(r.hostFetch).
+		Export("fetch").
+		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context) {
 			// Stay alive until context is cancelled (plugin shutdown)
 			<-ctx.Done()
 		}).
 		Export("sleep_forever").
 		Instantiate(ctx)
+}
+
+func (r *Runtime) hostFetch(ctx context.Context, mod wazeroapi.Module, reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32 {
+	// 1. Read request from guest
+	reqBuf, ok := mod.Memory().Read(reqPtr, reqSize)
+	if !ok { return 1 }
+
+	var req struct {
+		Method  string            `json:"method"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		Body    []byte            `json:"body"`
+	}
+	if err := json.Unmarshal(reqBuf, &req); err != nil { return 1 }
+
+	// 2. Perform HTTP request
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bytes.NewBuffer(req.Body))
+	if err != nil { return 1 }
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		r.logger.Error("host fetch failed", "url", req.URL, "error", err)
+		return 1
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	
+	// 3. Prepare response for guest
+	result := struct {
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+		Body    []byte            `json:"body"`
+	}{
+		Status:  resp.StatusCode,
+		Headers: make(map[string]string),
+		Body:    respBody,
+	}
+	for k, v := range resp.Header {
+		result.Headers[k] = v[0]
+	}
+
+	resBuf, _ := json.Marshal(result)
+	
+	// 4. Allocate memory in guest via exported Alloy_malloc (this assumes Alloy_malloc exists)
+	// We need to call back into the guest to allocate space for the result.
+	malloc := mod.ExportedFunction("alloy_malloc")
+	if malloc == nil { return 1 }
+
+	results, err := malloc.Call(ctx, uint64(len(resBuf)))
+	if err != nil { return 1 }
+	outPtr := uint32(results[0])
+
+	// 5. Write results into allocated guest memory
+	if !mod.Memory().Write(outPtr, resBuf) { return 1 }
+
+	// 6. Write pointer and size back to out parameters
+	if !mod.Memory().WriteUint32Le(respPtrPtr, outPtr) { return 1 }
+	if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(resBuf))) { return 1 }
+
+	return 0
 }
