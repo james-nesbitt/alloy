@@ -7,6 +7,10 @@ import (
 
 func init() {
 	wasm.SetHandler(handleMessage)
+	wasm.SetCapabilities([]wasm.Capability{
+		{Method: "store_secret", Description: "Store a new secret", Shortcut: "s s", Annotations: map[string]string{"group": "secrets"}},
+		{Method: "get_secret", Description: "Retrieve a secret by ID", Shortcut: "s g", Annotations: map[string]string{"group": "secrets"}},
+	})
 }
 
 func main() {

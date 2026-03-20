@@ -18,6 +18,10 @@ type ChatMessage struct {
 
 func init() {
 	wasm.SetHandler(handleMessage)
+	wasm.SetCapabilities([]wasm.Capability{
+		{Method: "summarize", Description: "Summarize provided text Content", Shortcut: "a s", Annotations: map[string]string{"group": "ai"}},
+		{Method: "chat:message", Description: "AI reactive response", Shortcut: "a c", Annotations: map[string]string{"group": "ai"}},
+	})
 }
 
 func main() {

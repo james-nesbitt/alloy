@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ type model struct {
 	isLeader      bool
 	breadcrumbs   []string
 	subscriptions map[string]bool
+	commandTree   *CommandNode
 }
 
 type registration struct {
@@ -115,6 +117,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case discoveryMsg:
 		m.targets = msg.Targets
+		m.commandTree = BuildCommandTree(m.targets)
 		var cmds []tea.Cmd
 		for _, t := range m.targets {
 			if t.ID == "plugin-events" && !m.subscriptions["chat:message"] {
@@ -332,20 +335,23 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 	if m.isLeader && msg.Type == tea.KeyRunes {
 		char := string(msg.Runes)
 		m.breadcrumbs = append(m.breadcrumbs, char)
-		sequence := strings.Join(m.breadcrumbs, " ")
 
-		// Check for shortcut matches
-		for _, target := range m.targets {
-			for _, cap := range target.Capabilities {
-				if cap.Shortcut == sequence {
-					// We found a match! Execute it.
-					m.mode = ModeNormal
-					m.commandInput.Blur()
-					m.commandInput.SetValue("")
-					m.breadcrumbs = nil
-					return m.executeCommand(fmt.Sprintf("%s %s", target.ID, cap.Method))
-				}
+		// Check for shortcut matches in the tree
+		node := m.commandTree.Find(m.breadcrumbs)
+		if node != nil {
+			if len(node.Children) == 0 {
+				// We found a leaf match! Execute it.
+				m.mode = ModeNormal
+				m.commandInput.Blur()
+				m.commandInput.SetValue("")
+				m.breadcrumbs = nil
+				return m.executeCommand(fmt.Sprintf("%s %s", node.Target, node.Method))
 			}
+			// Otherwise just stay in leader mode and wait for the rest of the sequence
+		} else {
+			// No match, clear breadcrumbs or just stay?
+			// Emacs style: keep waiting but show it's invalid
+			m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
 		}
 	}
 
@@ -426,26 +432,57 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) filteredCommands() []string {
-	if !m.isLeader {
-		return nil
-	}
-	prefix := strings.Join(m.breadcrumbs, " ")
-	var matched []string
-	for _, t := range m.targets {
-		for _, c := range t.Capabilities {
-			if prefix == "" || strings.HasPrefix(c.Shortcut, prefix) {
-				shortcutPart := strings.TrimPrefix(c.Shortcut, prefix)
-				shortcutPart = strings.TrimSpace(shortcutPart)
-
-				annotation := ""
-				if group, ok := c.Annotations["group"]; ok {
-					annotation = fmt.Sprintf("[%s] ", group)
+	if m.mode == ModeCommand && !m.isLeader {
+		input := m.commandInput.Value()
+		if len(input) > 0 && input[0] == ':' {
+			input = input[1:]
+		}
+		
+		var matched []string
+		for _, t := range m.targets {
+			for _, c := range t.Capabilities {
+				full := t.ID + " " + c.Method
+				if strings.Contains(full, input) || input == "" {
+					matched = append(matched, fmt.Sprintf(" %-20s %s", full, c.Description))
 				}
-
-				matched = append(matched, fmt.Sprintf(" %-2s  %s%-15s %s",
-					shortcutPart, annotation, c.Method, c.Description))
 			}
 		}
+		if len(matched) > 10 {
+			matched = matched[:10]
+		}
+		return matched
+	}
+
+	if !m.isLeader || m.commandTree == nil {
+		return nil
+	}
+
+	node := m.commandTree.Find(m.breadcrumbs)
+	if node == nil {
+		return nil
+	}
+
+	var matched []string
+	keys := make([]string, 0, len(node.Children))
+	for k := range node.Children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		child := node.Children[k]
+		annotation := ""
+		if child.Annotation != "" {
+			annotation = fmt.Sprintf("[%s] ", child.Annotation)
+		}
+
+		label := child.Method
+		if len(child.Children) > 0 {
+			label = "..."
+		}
+
+		matched = append(matched, fmt.Sprintf(" %-2s  %s%-15s %s",
+			k, annotation, label, child.Description))
 	}
 	return matched
 }
