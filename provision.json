@@ -5,6 +5,7 @@
     {"id": "plugin-health", "type": "native"},
     {"id": "plugin-health-wasm", "type": "wasm", "path": "build/wasm/health.wasm"},
     {"id": "plugin-chat", "type": "wasm", "path": "build/wasm/chat.wasm"},
+    {"id": "plugin-project-manager", "type": "wasm", "path": "build/wasm/project.wasm"},
     {"id": "plugin-ai-agent", "type": "wasm", "path": "build/wasm/ai.wasm"},
     {"id": "plugin-command-manager", "type": "native"}
   ]

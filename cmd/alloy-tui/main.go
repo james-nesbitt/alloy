@@ -538,13 +538,24 @@ func (m model) View() string {
 				prompt += " > "
 			}
 
-			// Add filtered commands above the command bar
-			filtered := m.filteredCommands()
-			if len(filtered) > 0 {
-				listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
-				listStr := "\n" + strings.Join(filtered, "\n")
-				view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
+	// Add filtered commands above the command bar
+	filtered := m.filteredCommands()
+	if len(filtered) > 0 {
+		listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
+		
+		// multi-column if many results
+		var matchedRows []string
+		for i := 0; i < len(filtered); i += 2 {
+			row := filtered[i]
+			if i+1 < len(filtered) {
+				row = fmt.Sprintf("%-45s %s", row, filtered[i+1])
 			}
+			matchedRows = append(matchedRows, row)
+		}
+		
+		listStr := "\n" + strings.Join(matchedRows, "\n")
+		view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
+	}
 		}
 		m.commandInput.Placeholder = prompt
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
