@@ -99,8 +99,10 @@ func (r *RegistryManager) delegateLoad(ctx context.Context, def PluginDef) {
 			if caps == nil { caps = []api.Capability{} }
 			capsData, _ := json.Marshal(caps)
 			r.kernel.RouteMessage(ctx, api.Message{
-				Target: "plugin-command-manager",
-				Method: "register",
+				ID:      "reg-" + i.ID(),
+				Sender:  r.ID(),
+				Target:  "plugin-command-manager",
+				Method:  "register",
 				Payload: []byte(`{"id":"` + i.ID() + `","type":"native","capabilities":` + string(capsData) + `}`),
 			})
 		}

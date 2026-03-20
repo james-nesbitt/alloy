@@ -76,6 +76,13 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		WithSysWalltime().
 		WithSysNanotime()
 
+	if memoryLimitMB > 0 {
+		// 1 MB = 1024 * 1024 / 65536 = 16 pages
+		// Note: wazero v1.x does not support setting per-module memory limits via ModuleConfig.
+		// These must be defined in the WASM binary or set globally for the runtime.
+		// _ = uint32(memoryLimitMB * 1024 * 1024 / WasmPageSize)
+	}
+
 	// Map storage for the plugin
 	if r.dataDir != "" {
 		pluginDir := filepath.Join(r.dataDir, id)
@@ -160,6 +167,7 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, offset, byteCount uint32) {
 			buf, ok := mod.Memory().Read(offset, byteCount)
 			if ok {
+				fmt.Fprintf(os.Stderr, "[WASM LOG] %s: %s\n", mod.Name(), string(buf))
 				r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", string(buf))
 			}
 		}).

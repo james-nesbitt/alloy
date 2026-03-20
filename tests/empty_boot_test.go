@@ -53,8 +53,8 @@ func TestEmptyBoot(t *testing.T) {
 	}
 	
 	sendMsg(t, conn, pingMsg)
-	decoder := json.NewDecoder(conn)
-	resp := awaitResponse(t, decoder, "ping-1-resp")
+	collector := NewMessageCollector(json.NewDecoder(conn))
+	resp := awaitResponse(t, collector, "ping-1")
 	if !strings.Contains(string(resp.Payload), "pong") {
 		t.Errorf("expected pong, got %s", string(resp.Payload))
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -41,9 +42,64 @@ func StartCore(t *testing.T, corePath string, args []string) *exec.Cmd {
 	return cmd
 }
 
+type MessageCollector struct {
+	mu       sync.Mutex
+	messages []api.Message
+	decoder  *json.Decoder
+}
+
+func NewMessageCollector(decoder *json.Decoder) *MessageCollector {
+	mc := &MessageCollector{
+		decoder:  decoder,
+		messages: make([]api.Message, 0),
+	}
+	go mc.run()
+	return mc
+}
+
+func (mc *MessageCollector) run() {
+	for {
+		var msg api.Message
+		if err := mc.decoder.Decode(&msg); err != nil {
+			if err == io.EOF {
+				return
+			}
+			continue
+		}
+		mc.mu.Lock()
+		mc.messages = append(mc.messages, msg)
+		mc.mu.Unlock()
+	}
+}
+
+func (mc *MessageCollector) Await(timeout time.Duration, filter func(api.Message) bool) (api.Message, bool) {
+	deadline := time.Now().Add(timeout)
+	lastIdx := 0
+	for time.Now().Before(deadline) {
+		mc.mu.Lock()
+		for i := lastIdx; i < len(mc.messages); i++ {
+			if filter(mc.messages[i]) {
+				msg := mc.messages[i]
+				mc.mu.Unlock()
+				return msg, true
+			}
+		}
+		lastIdx = len(mc.messages)
+		mc.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	return api.Message{}, false
+}
+
+func (mc *MessageCollector) AwaitID(id string, timeout time.Duration) (api.Message, bool) {
+	return mc.Await(timeout, func(m api.Message) bool {
+		return m.ID == id || m.ID == id+"-resp"
+	})
+}
+
 // setupTestCore starts the alloy-core with the given manifest and returns
-// the process, connection, and a decoder.
-func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *json.Decoder, string) {
+// the process, connection, and a collector.
+func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *MessageCollector, string) {
 	homeDir, _ := os.MkdirTemp("", "alloy-core-"+label+"-*")
 	socketPath := filepath.Join(homeDir, "alloy.sock")
 
@@ -75,10 +131,10 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 		t.Fatalf("failed to connect to core: %v", err)
 	}
 
-	return cmd, conn, json.NewDecoder(conn), homeDir
+	return cmd, conn, NewMessageCollector(json.NewDecoder(conn)), homeDir
 }
 
-func waitForPlugins(t *testing.T, conn net.Conn, decoder *json.Decoder, expectedIDs []string, timeout time.Duration) {
+func waitForPlugins(t *testing.T, conn net.Conn, collector *MessageCollector, expectedIDs []string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	expected := make(map[string]bool)
 	for _, id := range expectedIDs {
@@ -86,40 +142,41 @@ func waitForPlugins(t *testing.T, conn net.Conn, decoder *json.Decoder, expected
 	}
 
 	for time.Now().Before(deadline) {
+		id := "poll-discover-" + time.Now().Format("150405.000000")
 		sendMsg(t, conn, api.Message{
-			ID:     "poll-discover",
+			ID:     id,
 			Type:   api.TypeRequest,
 			Sender: "test-waiter",
 			Target: "plugin-command-manager",
 			Method: "discover",
 		})
 
-		var resp api.Message
-		err := decoder.Decode(&resp)
-		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+		resp, ok := collector.AwaitID(id, 5*time.Second)
+		if !ok {
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		if resp.ID == "poll-discover-resp" {
-			var result struct {
-				Targets []struct {
-					ID string `json:"id"`
-				} `json:"targets"`
-			}
-			json.Unmarshal(resp.Payload, &result)
-			count := 0
-			for _, target := range result.Targets {
-				if expected[target.ID] {
-					count++
-				}
-			}
-			if count >= len(expected) {
-				return
-			}
-			t.Logf("Waiting for plugins: %d/%d registered...", count, len(expected))
+		var result struct {
+			Targets []struct {
+				ID string `json:"id"`
+			} `json:"targets"`
 		}
-		time.Sleep(1 * time.Second)
+		json.Unmarshal(resp.Payload, &result)
+		count := 0
+		foundMap := make(map[string]bool)
+		for _, target := range result.Targets {
+			if expected[target.ID] {
+				foundMap[target.ID] = true
+			}
+		}
+		count = len(foundMap)
+
+		if count >= len(expected) {
+			return
+		}
+		t.Logf("Waiting for plugins: %d/%d registered...", count, len(expected))
+		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for plugins: %v", expectedIDs)
 }
@@ -145,23 +202,12 @@ func sendMsg(t *testing.T, conn net.Conn, msg api.Message) {
 	}
 }
 
-// awaitResponse waits for a message with a specific ID from the decoder.
-func awaitResponse(t *testing.T, decoder *json.Decoder, id string) api.Message {
+// awaitResponse waits for a message with a specific ID from the collector.
+func awaitResponse(t *testing.T, collector *MessageCollector, id string) api.Message {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		var resp api.Message
-		if err := decoder.Decode(&resp); err != nil {
-			if err == io.EOF {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-			t.Fatalf("failed to decode response: %v", err)
-		}
-		if resp.ID == id || resp.ID == id+"-resp" {
-			return resp
-		}
+	msg, ok := collector.AwaitID(id, 5*time.Second)
+	if !ok {
+		t.Fatalf("timed out waiting for response ID %s", id)
 	}
-	t.Fatalf("timed out waiting for response ID %s", id)
-	return api.Message{}
+	return msg
 }

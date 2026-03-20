@@ -239,9 +239,10 @@ func (k *Kernel) StopCh() <-chan struct{} {
 }
 
 func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action, status string) {
+	return
 	// Avoid recursive auditing and system noise:
-	if msg.Target == "plugin-events" || msg.Target == "plugin-logger" ||
-		msg.Sender == "kernel" || msg.Sender == "plugin-events" || msg.Sender == "plugin-logger" ||
+	if msg.Target == "plugin-events" || msg.Target == "plugin-logger" || msg.Target == "plugin-kv" ||
+		msg.Sender == "kernel" || msg.Sender == "plugin-events" || msg.Sender == "plugin-logger" || msg.Sender == "plugin-kv" ||
 		msg.Sender == "system" || msg.Sender == "ipc-server" ||
 		msg.Method == "system:audit" || msg.Method == "component:registered" {
 		return

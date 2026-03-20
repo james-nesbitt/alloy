@@ -22,8 +22,8 @@ func TestDynamicProvisioning(t *testing.T) {
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-command-manager", "type": "native"},
+			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-kv", "type": "native"},
 		},
 	}

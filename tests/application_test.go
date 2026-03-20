@@ -2,9 +2,9 @@ package tests
 
 import (
 	"encoding/json"
-	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,192 +20,104 @@ type ChatMessage struct {
 }
 
 func TestApplicationPlugins(t *testing.T) {
-	// Setup environment
-	homeDir, _ := os.MkdirTemp("", "alloy-app-test-*")
-	defer os.RemoveAll(homeDir)
-
-	socketPath := filepath.Join(homeDir, "alloy.sock")
-	corePath := "../build/core"
-
 	cwd, _ := os.Getwd()
-	chatPath := filepath.Join(filepath.Dir(cwd), "build/wasm/chat.wasm")
-	aiPath := filepath.Join(filepath.Dir(cwd), "build/wasm/ai.wasm")
-	bufferPath := filepath.Join(filepath.Dir(cwd), "build/wasm/buffer.wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
 
-	// Provisioning with necessary native plugins first
 	manifest := map[string]any{
 		"plugins": []map[string]any{
 			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-command-manager", "type": "native"},
 			{"id": "plugin-kv", "type": "native"},
 			{"id": "plugin-logger", "type": "native"},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferPath},
-			{"id": "plugin-chat", "type": "wasm", "path": chatPath},
-			{"id": "plugin-ai-agent", "type": "wasm", "path": aiPath},
+			{"id": "plugin-buffer-manager", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
+			{"id": "plugin-chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
+			{"id": "plugin-ai-agent", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm"), "memory_limit_mb": 64},
 		},
 	}
-	manifestData, _ := json.Marshal(manifest)
-	os.WriteFile(filepath.Join(homeDir, "provision.json"), manifestData, 0644)
 
-	// Start core
-	provisionPath := filepath.Join(homeDir, "provision.json")
-	coreProcess := StartCore(t, corePath, []string{
-		"--socket", "unix://" + socketPath,
-		"--home", homeDir,
-		"--insecure",
-		"--debug",
-		"--provision", provisionPath,
-	})
-	coreProcess.Stdout = os.Stdout
-	coreProcess.Stderr = os.Stderr
-
-	// Wait for socket to appear
-	for i := 0; i < 10; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// Connect
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
+	_, conn, collector, home := setupTestCore(t, "app-test", manifest)
+	defer os.RemoveAll(home)
 	defer conn.Close()
-	decoder := json.NewDecoder(conn)
-
-	// Polling for plugins to register...
-	pluginsToWait := map[string]bool{
-		"plugin-chat":     true,
-		"plugin-ai-agent": true,
-		"plugin-buffer-manager": true,
-	}
 
 	t.Log("Polling for WASM plugins to register...")
-	deadline := time.Now().Add(600 * time.Second) // 10 minutes for slow compilation
-	foundCount := 0
-	for time.Now().Before(deadline) {
-		sendMsg(t, conn, api.Message{
-			ID:     "poll-discover",
-			Type:   api.TypeRequest,
-			Sender: "test-waiter",
-			Target: "plugin-command-manager",
-			Method: "discover",
-		})
-
-		var resp api.Message
-		err := decoder.Decode(&resp)
-		if err != nil {
-			t.Logf("Decode error during poll: %v", err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		if resp.ID == "poll-discover-resp" {
-			var result struct {
-				Targets []struct {
-					ID string `json:"id"`
-				} `json:"targets"`
-			}
-			json.Unmarshal(resp.Payload, &result)
-			count := 0
-			var foundIDs []string
-			for _, target := range result.Targets {
-				foundIDs = append(foundIDs, target.ID)
-				if pluginsToWait[target.ID] {
-					count++
-				}
-			}
-			t.Logf("Found %d/%d WASM plugins. All targets: %v", count, len(pluginsToWait), foundIDs)
-			if count >= len(pluginsToWait) {
-				t.Log("All WASM plugins registered")
-				foundCount = count
-				break
-			}
-		} else {
-			// Skip other messages like registered events
-			t.Logf("Skipping message: %s %s", resp.ID, resp.Method)
-		}
-		time.Sleep(1 * time.Second)
+	expected := []string{
+		"plugin-chat", "plugin-ai-agent", "plugin-buffer-manager",
 	}
+	waitForPlugins(t, conn, collector, expected, 30*time.Second)
+	t.Log("All WASM plugins registered")
 
-	if foundCount < len(pluginsToWait) {
-		t.Fatal("Timed out waiting for WASM plugins")
-	}
-
-	// 1. Subscribe AI agent to chat events
+	// 1. Subscribe to chat events for the test connection and the AI agent
 	subReq, _ := json.Marshal(map[string]string{"topic": "chat:message"})
+	// Test connection subscription
 	sendMsg(t, conn, api.Message{
-		ID:      "sub-1",
-		Type:    api.TypeRequest,
+		ID:      "sub-test",
+		Sender:  "user-1",
+		Target:  "plugin-events",
+		Method:  "subscribe",
+		Payload: subReq,
+	})
+	awaitResponse(t, collector, "sub-test-resp")
+
+	// AI Agent subscription
+	sendMsg(t, conn, api.Message{
+		ID:      "sub-ai",
 		Sender:  "plugin-ai-agent",
 		Target:  "plugin-events",
 		Method:  "subscribe",
 		Payload: subReq,
 	})
-	
-	// Wait for subscription to be processed
+	// We don't await the response here because it goes to the plugin, not us
+	time.Sleep(200 * time.Millisecond) // Give time for sub to process
+
+	// 2. Clear old collector messages before test
 	time.Sleep(100 * time.Millisecond)
-	
-	// 2. Send chat message from a user
+
+	// 3. User sends a message that should trigger AI response
 	chatReq, _ := json.Marshal(map[string]string{
-		"channel": "general",
-		"content": "AI: hello test",
+		"channel": "test-channel",
+		"content": "AI: hello world",
 	})
 	sendMsg(t, conn, api.Message{
 		ID:      "chat-1",
-		Type:    api.TypeRequest,
 		Sender:  "user-1",
 		Target:  "plugin-chat",
 		Method:  "send",
 		Payload: chatReq,
 	})
+	awaitResponse(t, collector, "chat-1-resp")
 
-	// Wait for AI to respond
-	time.Sleep(2 * time.Second)
+	// 4. Verify AI Response via event bus
+	aiEvt, found := collector.Await(10*time.Second, func(m api.Message) bool {
+		if m.Method == "chat:message" && m.Type == "event" {
+			var chatMsg ChatMessage
+			json.Unmarshal(m.Payload, &chatMsg)
+			return chatMsg.Sender == "plugin-ai-agent"
+		}
+		return false
+	})
 
-	// 3. Check history
-	histReq, _ := json.Marshal(map[string]string{"channel": "general"})
+	if !found {
+		t.Fatal("never received AI agent response event")
+	}
+	
+	var aiMsg ChatMessage
+	json.Unmarshal(aiEvt.Payload, &aiMsg)
+	if !strings.Contains(aiMsg.Content, "I processed your request") {
+		t.Errorf("unexpected AI message content: %s", aiMsg.Content)
+	}
+
+	// 5. Verify Chat history
 	sendMsg(t, conn, api.Message{
 		ID:      "hist-1",
-		Type:    api.TypeRequest,
 		Sender:  "user-1",
 		Target:  "plugin-chat",
 		Method:  "history",
-		Payload: histReq,
+		Payload: []byte(`{"channel":"test-channel"}`),
 	})
-
+	histResp := awaitResponse(t, collector, "hist-1-resp")
 	var history []ChatMessage
-	foundHist := false
-	for i := 0; i < 20; i++ {
-		var resp api.Message
-		if err := decoder.Decode(&resp); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-		if resp.ID == "hist-1-resp" {
-			json.Unmarshal(resp.Payload, &history)
-			foundHist = true
-			break
-		}
-	}
-
-	if !foundHist {
-		t.Fatal("never received hist-1-resp")
-	}
-
+	json.Unmarshal(histResp.Payload, &history)
 	if len(history) < 2 {
-		t.Errorf("expected at least 2 messages in history (user + AI), got %d", len(history))
-	} else {
-		foundAI := false
-		for _, m := range history {
-			if m.Sender == "plugin-ai-agent" {
-				foundAI = true
-				break
-			}
-		}
-		if !foundAI {
-			t.Error("AI agent response not found in chat history")
-		}
+		t.Errorf("expected at least 2 messages in history, got %d", len(history))
 	}
 }

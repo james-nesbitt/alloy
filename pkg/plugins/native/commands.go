@@ -91,6 +91,9 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 			Capabilities: reg.Capabilities,
 		}
 		c.mu.Unlock()
+		if msg.Sender == "" {
+			return api.Message{}, nil
+		}
 		return api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,

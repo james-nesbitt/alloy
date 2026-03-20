@@ -6,8 +6,7 @@ import (
 	"unsafe"
 )
 
-// Message is a copy of the api.Message to avoid circular dependencies if needed,
-// but usually the SDK is a standalone package.
+// Message is a copy of the api.Message to avoid circular dependencies.
 type Message struct {
 	ID        string          `json:"id"`
 	Type      string          `json:"type"`
@@ -54,6 +53,9 @@ func Log(msg string) {
 // KVSet stores data in the host's durable KV store.
 func KVSet(key string, value []byte) bool {
 	kPtr := uintptr(unsafe.Pointer(unsafe.StringData(key)))
+	if len(value) == 0 {
+		return alloyKVSet(uint32(kPtr), uint32(len(key)), 0, 0) == 0
+	}
 	vPtr := uintptr(unsafe.Pointer(&value[0]))
 	return alloyKVSet(uint32(kPtr), uint32(len(key)), uint32(vPtr), uint32(len(value))) == 0
 }
@@ -100,12 +102,16 @@ func RouteMessage(msg Message) bool {
 	return alloyRouteMessage(uint32(ptr), uint32(len(data))) == 0
 }
 
+// Memory management without sync.Mutex (rely on host-side serialization)
 var allocations = make(map[uintptr][]byte)
 
 // alloy_malloc is exported for the host to allocate memory in the guest.
 //export alloy_malloc
 //go:wasmexport alloy_malloc
 func Alloy_malloc(size uint32) uintptr {
+	if size == 0 {
+		return 0
+	}
 	buf := make([]byte, size)
 	ptr := uintptr(unsafe.Pointer(&buf[0]))
 	allocations[ptr] = buf
@@ -135,6 +141,9 @@ func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
 		return 0
 	}
 	resp := handler(msg)
+	if resp.Type == "ignore" {
+		return 0
+	}
 
 	// 3. Serialize response
 	respBuf, err := json.Marshal(resp)
@@ -145,6 +154,9 @@ func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
 	// 4. Copy response to an allocated buffer to ensure it's stable for the host
 	respSize := uint32(len(respBuf))
 	outPtr := Alloy_malloc(respSize)
+	if outPtr == 0 {
+		return 0
+	}
 	outBuf := unsafe.Slice((*byte)(unsafe.Pointer(outPtr)), respSize)
 	copy(outBuf, respBuf)
 

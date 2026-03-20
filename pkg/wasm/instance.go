@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
@@ -17,10 +18,14 @@ type Instance struct {
 	mod         wazeroapi.Module
 	logger      *slog.Logger
 	defaultFuel uint64
+	mu          sync.Mutex
 }
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
 func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	// Resource enforcement: Timeout based on "fuel"
 	// For now, treat fuel as milliseconds for simplicity in sandboxing.
 	if i.defaultFuel > 0 {
@@ -46,6 +51,13 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, fmt.Errorf("failed to allocate memory in guest: %w", err)
 	}
 	ptr := uint32(results[0])
+
+	// Ensure we free the allocated pointer on the way out
+	defer func() {
+		if free := i.mod.ExportedFunction("alloy_free"); free != nil {
+			_, _ = free.Call(ctx, uint64(ptr))
+		}
+	}()
 
 	// 2. Write payload to guest memory
 	if !i.mod.Memory().Write(ptr, payload) {
@@ -77,18 +89,14 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, fmt.Errorf("failed to read response from guest memory")
 	}
 
+	// Cleanup response buffer in guest now that we've read it
+	if free := i.mod.ExportedFunction("alloy_free"); free != nil {
+		_, _ = free.Call(ctx, uint64(respPtr))
+	}
+
 	var resp api.Message
 	if err := json.Unmarshal(respBuf, &resp); err != nil {
 		return api.Message{}, fmt.Errorf("failed to unmarshal guest response: %w", err)
-	}
-
-	// 5. Cleanup
-	if free := i.mod.ExportedFunction("alloy_free"); free != nil {
-		_, _ = free.Call(ctx, uint64(ptr))
-		_, _ = free.Call(ctx, uint64(respPtr))
-	} else if free := i.mod.ExportedFunction("free"); free != nil {
-		_, _ = free.Call(ctx, uint64(ptr))
-		_, _ = free.Call(ctx, uint64(respPtr))
 	}
 
 	return resp, nil

@@ -11,6 +11,7 @@ type StateStore interface {
 	Get(pluginID, key string) ([]byte, error)
 	Set(pluginID, key string, value []byte) error
 	Delete(pluginID, key string) error
+	List(pluginID, prefix string) ([]string, error)
 	BaseDir() string
 }
 
@@ -76,6 +77,35 @@ func (s *FileStateStore) Delete(pluginID, key string) error {
 	return err
 }
 
+func (s *FileStateStore) List(pluginID, prefix string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	dir := s.pluginDir(pluginID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var keys []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if len(name) > 4 && name[len(name)-4:] == ".bin" {
+			key := name[:len(name)-4]
+			if prefix == "" || (len(key) >= len(prefix) && key[:len(prefix)] == prefix) {
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys, nil
+}
+
 // MemoryStateStore implements StateStore in-memory for testing.
 type MemoryStateStore struct {
 	mu   sync.RWMutex
@@ -114,6 +144,21 @@ func (m *MemoryStateStore) Delete(pluginID, key string) error {
 		delete(plugin, key)
 	}
 	return nil
+}
+
+func (m *MemoryStateStore) List(pluginID, prefix string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var keys []string
+	if plugin, ok := m.data[pluginID]; ok {
+		for key := range plugin {
+			if prefix == "" || (len(key) >= len(prefix) && key[:len(prefix)] == prefix) {
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys, nil
 }
 
 func (m *MemoryStateStore) BaseDir() string { return "" }

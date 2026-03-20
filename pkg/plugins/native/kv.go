@@ -24,12 +24,14 @@ func (k *KVManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "get", Description: "Retrieve value for a key"},
 		{Method: "set", Description: "Store a value for a key"},
+		{Method: "list", Description: "List keys with a prefix"},
 	}
 }
 
 type KVRequest struct {
-	Key   string `json:"key"`
-	Value string `json:"value,omitempty"` // Base64 encoded in real usage, raw for this mock
+	Key    string `json:"key"`
+	Value  string `json:"value,omitempty"`
+	Prefix string `json:"prefix,omitempty"`
 }
 
 func (k *KVManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
@@ -37,6 +39,23 @@ func (k *KVManager) HandleMessage(ctx context.Context, msg api.Message) (api.Mes
 	_ = json.Unmarshal(msg.Payload, &req)
 
 	switch msg.Method {
+	case "list":
+		keys, err := k.kv.List(msg.Sender, req.Prefix)
+		if err != nil {
+			return api.Message{}, err
+		}
+		resp := map[string][]string{
+			"keys": keys,
+		}
+		respPayload, _ := json.Marshal(resp)
+		return api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    k.ID(),
+			Target:    msg.Sender,
+			Payload:   respPayload,
+			Timestamp: time.Now().Unix(),
+		}, nil
 	case "get":
 		val, err := k.kv.Get(msg.Sender, req.Key)
 		if err != nil {
@@ -45,12 +64,17 @@ func (k *KVManager) HandleMessage(ctx context.Context, msg api.Message) (api.Mes
 		if val == nil {
 			val = []byte("")
 		}
+		resp := map[string]string{
+			"key":   req.Key,
+			"value": string(val),
+		}
+		respPayload, _ := json.Marshal(resp)
 		return api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,
 			Sender:    k.ID(),
 			Target:    msg.Sender,
-			Payload:   []byte(`{"key":"` + req.Key + `","value":"` + string(val) + `"}`),
+			Payload:   respPayload,
 			Timestamp: time.Now().Unix(),
 		}, nil
 	case "set":

@@ -34,7 +34,7 @@ func TestStandaloneWasmLoad(t *testing.T) {
 	}
 
 	// Load the mock plugin binary
-	wasmPath := "../plugins/wasm/mock/mock.wasm"
+	wasmPath := "../build/wasm/mock.wasm"
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
 		t.Fatalf("failed to read wasm file: %v", err)

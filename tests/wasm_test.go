@@ -20,17 +20,17 @@ func TestWasmLoadMock(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-command-manager", "type": "native"},
+			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-mock", "type": "wasm", "path": mockPath},
 		},
 	}
 
-	_, conn, decoder, home := setupTestCore(t, "mock", manifest)
+	_, conn, collector, home := setupTestCore(t, "mock", manifest)
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, decoder, []string{"plugin-mock"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"plugin-mock"}, 30*time.Second)
 }
 
 func TestWasmLoadBulk(t *testing.T) {
@@ -39,8 +39,8 @@ func TestWasmLoadBulk(t *testing.T) {
 	
 	plugins := []string{"ai", "secrets", "health", "chat", "buffer"}
 	wasmPlugins := []map[string]any{
-		{"id": "plugin-events", "type": "native"},
 		{"id": "plugin-command-manager", "type": "native"},
+		{"id": "plugin-events", "type": "native"},
 	}
 	expectedIDs := []string{}
 
@@ -62,11 +62,11 @@ func TestWasmLoadBulk(t *testing.T) {
 	}
 
 	manifest := map[string]any{"plugins": wasmPlugins}
-	_, conn, decoder, home := setupTestCore(t, "bulk", manifest)
+	_, conn, collector, home := setupTestCore(t, "bulk", manifest)
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, decoder, expectedIDs, 120*time.Second)
+	waitForPlugins(t, conn, collector, expectedIDs, 120*time.Second)
 }
 
 func TestWasmFunctionalSuite(t *testing.T) {
@@ -75,8 +75,8 @@ func TestWasmFunctionalSuite(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-command-manager", "type": "native"},
+			{"id": "plugin-events", "type": "native"},
 			{"id": "plugin-kv", "type": "native"},
 			{"id": "plugin-chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
 			{"id": "plugin-ai-agent", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm")},
@@ -86,7 +86,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		},
 	}
 
-	_, conn, decoder, home := setupTestCore(t, "full", manifest)
+	_, conn, collector, home := setupTestCore(t, "full", manifest)
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
@@ -94,7 +94,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		"plugin-chat", "plugin-ai-agent", "plugin-secrets", 
 		"plugin-health", "plugin-buffer-manager",
 	}
-	waitForPlugins(t, conn, decoder, expected, 120*time.Second)
+	waitForPlugins(t, conn, collector, expected, 120*time.Second)
 
 	// 1. Verify Health
 	sendMsg(t, conn, api.Message{
@@ -103,7 +103,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		Target: "plugin-health",
 		Method: "status",
 	})
-	awaitResponse(t, decoder, "health-1-resp")
+	awaitResponse(t, collector, "health-1")
 	
 	// 2. Verify Secrets
 	storeReq, _ := json.Marshal(map[string]string{"id": "db_pass", "value": "password123"})
@@ -114,7 +114,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		Method:  "store_secret",
 		Payload: storeReq,
 	})
-	awaitResponse(t, decoder, "secret-1-resp")
+	awaitResponse(t, collector, "secret-1")
 
 	getReq, _ := json.Marshal(map[string]string{"id": "db_pass"})
 	sendMsg(t, conn, api.Message{
@@ -124,7 +124,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		Method:  "get_secret",
 		Payload: getReq,
 	})
-	resp := awaitResponse(t, decoder, "secret-2-resp")
+	resp := awaitResponse(t, collector, "secret-2")
 	if !strings.Contains(string(resp.Payload), "password123") {
 		t.Errorf("secret mismatch, got: %s", string(resp.Payload))
 	}
@@ -142,7 +142,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		Method:  "open",
 		Payload: openReq,
 	})
-	awaitResponse(t, decoder, "buf-wasm-1-resp")
+	awaitResponse(t, collector, "buf-wasm-1")
 
 	// 4. Verify Chat and AI Agent (Subscription and Reaction)
 	// First, subscribe AI agent and user to chat events
@@ -176,23 +176,21 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	})
 
 	// AI should react to the chat event
-	foundAI := false
-	for i := 0; i < 100; i++ {
-		var chatEvt api.Message
-		if err := decoder.Decode(&chatEvt); err != nil {
-			t.Fatalf("decode err at index %d: %v", i, err)
-		}
-		if chatEvt.Type == api.TypeEvent && chatEvt.Method == "chat:message" {
+	chatEvt, ok := collector.Await(10*time.Second, func(m api.Message) bool {
+		if m.Type == api.TypeEvent && m.Method == "chat:message" {
 			var chatMsg ChatMessage
-			json.Unmarshal(chatEvt.Payload, &chatMsg)
+			json.Unmarshal(m.Payload, &chatMsg)
 			if chatMsg.Sender == "plugin-ai-agent" {
-				foundAI = true
-				t.Logf("AI Response found: %s", chatMsg.Content)
-				break
+				return true
 			}
 		}
-	}
-	if !foundAI {
+		return false
+	})
+	if !ok {
 		t.Error("never received AI agent response via Route in WASM")
+	} else {
+		var chatMsg ChatMessage
+		json.Unmarshal(chatEvt.Payload, &chatMsg)
+		t.Logf("AI Response found: %s", chatMsg.Content)
 	}
 }
