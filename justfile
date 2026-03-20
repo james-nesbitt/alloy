@@ -66,7 +66,7 @@ build-gui-wayland:
 	go build -tags experimental_wayland -o build/gui-wayland ./cmd/alloy-gui-wayland-native
 
 # Build everything
-build-all: build-core build-cli build-tui build-gui-wayland build-wasm
+build-all: build-core build-cli build-tui build-gui-gio build-gui-wayland build-wasm
 
 # Run the Alloy Core backend
 run-core *args: build-core
@@ -106,6 +106,7 @@ build-wasm:
                 "buffer-manager") target_name="buffer" ;;
                 "ai-agent") target_name="ai" ;;
                 "health-wasm") target_name="health" ;;
+                "plugin-project-manager") target_name="project" ;;
                 *) target_name="$plugin_name" ;;
             esac
             echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"

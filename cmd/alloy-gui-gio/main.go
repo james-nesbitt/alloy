@@ -32,6 +32,12 @@ type registration struct {
 	Capabilities []api.Capability `json:"capabilities,omitempty"`
 }
 
+type Project struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+}
+
 type discoveryMsg struct {
 	Targets []registration `json:"targets"`
 }
@@ -42,10 +48,14 @@ const (
 )
 
 type guiState struct {
-	mode        int
-	isLeader    bool
-	breadcrumbs []string
-	targets     []registration
+	mode          int
+	isLeader      bool
+	breadcrumbs   []string
+	targets       []registration
+	activeProject *Project
+	projects      []Project
+	showProjects  bool
+	subscriptions map[string]bool
 }
 
 func main() {
@@ -80,9 +90,13 @@ func run(w *app.Window, client *frontend.Client) error {
 		input      widget.Editor
 		sendButton widget.Clickable
 		list       widget.List
+		projList   widget.List
+		projClicks []widget.Clickable
 		gui        guiState
 	)
 	list.Axis = layout.Vertical
+	projList.Axis = layout.Vertical
+	gui.subscriptions = make(map[string]bool)
 
 	// Discovery Loop
 	go func() {
@@ -94,6 +108,48 @@ func run(w *app.Window, client *frontend.Client) error {
 				var dMsg discoveryMsg
 				if err := json.Unmarshal(resp.Payload, &dMsg); err == nil {
 					gui.targets = dMsg.Targets
+
+					// Auto-subscribe to events and fetch active project
+					for _, t := range gui.targets {
+						if t.ID == "plugin-events" && !gui.subscriptions["project:opened"] {
+							subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
+							subReq, _ := json.Marshal(map[string]string{"topic": "project:opened"})
+							_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq)
+							subCancel()
+							gui.subscriptions["project:opened"] = true
+						}
+						if t.ID == "plugin-project-manager" {
+							if gui.activeProject == nil {
+								go func() {
+									pCtx, pCancel := context.WithTimeout(context.Background(), time.Second)
+									defer pCancel()
+									pResp, err := client.Send(pCtx, "plugin-project-manager", "active", nil)
+									if err == nil && pResp.ID != "" {
+										var p Project
+										if err := json.Unmarshal(pResp.Payload, &p); err == nil {
+											gui.activeProject = &p
+											w.Invalidate()
+										}
+									}
+								}()
+							}
+							// Always refresh the project list
+							go func() {
+								pCtx, pCancel := context.WithTimeout(context.Background(), time.Second)
+								defer pCancel()
+								pResp, err := client.Send(pCtx, "plugin-project-manager", "list", nil)
+								if err == nil {
+									var resp struct {
+										Projects []Project `json:"projects"`
+									}
+									if err := json.Unmarshal(pResp.Payload, &resp); err == nil {
+										gui.projects = resp.Projects
+										w.Invalidate()
+									}
+								}
+							}()
+						}
+					}
 					w.Invalidate()
 				}
 			}
@@ -103,6 +159,15 @@ func run(w *app.Window, client *frontend.Client) error {
 
 	// Refresh UI on incoming messages
 	client.OnMessage(func(msg api.Message) {
+		if msg.Sender == "plugin-events" {
+			var ev struct {
+				Topic string  `json:"topic"`
+				Data  Project `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &ev); err == nil && ev.Topic == "project:opened" {
+				gui.activeProject = &ev.Data
+			}
+		}
 		w.Invalidate()
 	})
 
@@ -189,6 +254,21 @@ func run(w *app.Window, client *frontend.Client) error {
 				}
 			}
 
+			// Ensure we have enough clickables
+			if len(projClicks) < len(gui.projects) {
+				for i := len(projClicks); i < len(gui.projects); i++ {
+					projClicks = append(projClicks, widget.Clickable{})
+				}
+			}
+
+			// Handle project clicks
+			for i, p := range gui.projects {
+				if projClicks[i].Clicked(gtx) {
+					executeCommand(client, &gui, "plugin-project-manager open "+p.ID, w)
+					gui.showProjects = false
+				}
+			}
+
 			layout.Flex{
 				Axis: layout.Vertical,
 			}.Layout(gtx,
@@ -196,9 +276,36 @@ func run(w *app.Window, client *frontend.Client) error {
 					return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								title := material.H4(th, "Alloy Core")
-								title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
-								return title.Layout(gtx)
+								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										title := material.H4(th, "Alloy Core")
+										title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
+										return title.Layout(gtx)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										projectName := "No Project"
+										if gui.activeProject != nil {
+											projectName = gui.activeProject.Name
+										}
+										return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											p := material.Body1(th, "Project: "+projectName)
+											p.Color = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+											return layout.Stack{}.Layout(gtx,
+												layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+													return widget.Border{
+														Color: color.NRGBA{R: 0x44, G: 0xcc, B: 0x44, A: 0xff},
+														Width: unit.Dp(1),
+													}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return layout.Dimensions{Size: gtx.Constraints.Min}
+													})
+												}),
+												layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(4)).Layout(gtx, p.Layout)
+												}),
+											)
+										})
+									}),
+								)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								modeStr := "NORMAL"
@@ -217,6 +324,19 @@ func run(w *app.Window, client *frontend.Client) error {
 								return d.Layout(gtx)
 							}),
 						)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !gui.showProjects {
+						return layout.Dimensions{}
+					}
+					return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return material.List(th, &projList).Layout(gtx, len(gui.projects), func(gtx layout.Context, i int) layout.Dimensions {
+							p := gui.projects[i]
+							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return material.Button(th, &projClicks[i], p.Name).Layout(gtx)
+							})
+						})
 					})
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -292,6 +412,12 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 		payload := ""
 		if len(parts) > 2 {
 			payload = strings.Join(parts[2:], " ")
+		}
+
+		if target == "plugin-project-manager" && method == "open" && payload == "" {
+			gui.showProjects = !gui.showProjects
+			w.Invalidate()
+			return
 		}
 
 		go func() {

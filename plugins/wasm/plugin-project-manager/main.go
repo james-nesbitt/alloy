@@ -184,6 +184,15 @@ func handleMessage(msg wasm.Message) wasm.Message {
 func saveProjects() {
 	data, _ := json.Marshal(projects)
 	wasm.KVSet("all-projects", data)
+
+	for _, p := range projects {
+		if p.Active {
+			pData, _ := json.Marshal(p)
+			wasm.KVSet("shared:active-project", pData)
+			return
+		}
+	}
+	wasm.KVSet("shared:active-project", nil)
 }
 
 func publishEvent(topic string, data any) {

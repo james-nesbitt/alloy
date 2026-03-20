@@ -140,14 +140,39 @@ func performLLMQuery(prompt string) (string, error) {
 		json.Unmarshal(cfgData, &cfg)
 	}
 
+	// Fetch project context
+	var projectContext string
+	if projData := wasm.KVGet("shared:active-project"); projData != nil {
+		var proj struct {
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Buffers     []string `json:"buffers"`
+			Channels    []string `json:"channels"`
+		}
+		if err := json.Unmarshal(projData, &proj); err == nil {
+			projectContext = fmt.Sprintf("\nYou are currently working on project '%s' (%s).\n"+
+				"This project includes these buffers: [%s] and these channels: [%s].\n",
+				proj.Name, proj.Description, strings.Join(proj.Buffers, ", "), strings.Join(proj.Channels, ", "))
+		}
+	}
+
+	fullPrompt := prompt
+	if projectContext != "" {
+		fullPrompt = projectContext + "\nUser Question: " + prompt
+	}
+
 	// Generic LLM fetch logic
 	switch cfg.Type {
 	case "mock":
+		if projectContext != "" {
+			return fmt.Sprintf("Mock AI response (with project context '%s') to: %s",
+				projectContext[:20]+"...", prompt), nil
+		}
 		return "Mock AI response to: " + prompt, nil
 	case "ollama":
 		reqBody, _ := json.Marshal(map[string]any{
 			"model":  cfg.Model,
-			"prompt": prompt,
+			"prompt": fullPrompt,
 			"stream": false,
 		})
 		resp, err := wasm.Fetch(wasm.FetchRequest{

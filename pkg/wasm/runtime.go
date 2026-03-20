@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
@@ -180,7 +181,13 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 			kBuf, kOk := mod.Memory().Read(kPtr, kLen)
 			vBuf, vOk := mod.Memory().Read(vPtr, vLen)
 			if !kOk || !vOk { return 1 }
-			if err := r.kv.Set(mod.Name(), string(kBuf), vBuf); err != nil { return 1 }
+			key := string(kBuf)
+			namespace := mod.Name()
+			if strings.HasPrefix(key, "shared:") {
+				namespace = "shared"
+				key = key[7:]
+			}
+			if err := r.kv.Set(namespace, key, vBuf); err != nil { return 1 }
 			return 0
 		}).
 		Export("kv_set").
@@ -188,7 +195,13 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vMaxLen uint32) uint32 {
 			kBuf, ok := mod.Memory().Read(kPtr, kLen)
 			if !ok { return 0 }
-			val, err := r.kv.Get(mod.Name(), string(kBuf))
+			key := string(kBuf)
+			namespace := mod.Name()
+			if strings.HasPrefix(key, "shared:") {
+				namespace = "shared"
+				key = key[7:]
+			}
+			val, err := r.kv.Get(namespace, key)
 			if err != nil || val == nil { return 0 }
 			if uint32(len(val)) > vMaxLen { return uint32(len(val)) }
 			if !mod.Memory().Write(vPtr, val) { return 0 }
@@ -199,7 +212,13 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen uint32) uint32 {
 			kBuf, ok := mod.Memory().Read(kPtr, kLen)
 			if !ok { return 1 }
-			if err := r.kv.Delete(mod.Name(), string(kBuf)); err != nil { return 1 }
+			key := string(kBuf)
+			namespace := mod.Name()
+			if strings.HasPrefix(key, "shared:") {
+				namespace = "shared"
+				key = key[7:]
+			}
+			if err := r.kv.Delete(namespace, key); err != nil { return 1 }
 			return 0
 		}).
 		Export("kv_delete").

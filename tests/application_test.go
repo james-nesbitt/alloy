@@ -30,6 +30,7 @@ func TestApplicationPlugins(t *testing.T) {
 			{"id": "plugin-kv", "type": "native"},
 			{"id": "plugin-logger", "type": "native"},
 			{"id": "plugin-buffer-manager", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
+			{"id": "plugin-project-manager", "type": "wasm", "path": filepath.Join(buildDir, "project.wasm")},
 			{"id": "plugin-chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
 			{"id": "plugin-ai-agent", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm"), "memory_limit_mb": 64},
 		},
@@ -41,7 +42,7 @@ func TestApplicationPlugins(t *testing.T) {
 
 	t.Log("Polling for WASM plugins to register...")
 	expected := []string{
-		"plugin-chat", "plugin-ai-agent", "plugin-buffer-manager",
+		"plugin-chat", "plugin-ai-agent", "plugin-buffer-manager", "plugin-project-manager",
 	}
 	waitForPlugins(t, conn, collector, expected, 30*time.Second)
 	t.Log("All WASM plugins registered")
@@ -72,6 +73,32 @@ func TestApplicationPlugins(t *testing.T) {
 	// 2. Clear old collector messages before test
 	time.Sleep(100 * time.Millisecond)
 
+	// 2.5. Setup an active project
+	projReq, _ := json.Marshal(map[string]string{
+		"name":        "Test Project",
+		"description": "Integration Test Project",
+	})
+	sendMsg(t, conn, api.Message{
+		ID:      "proj-create-1",
+		Sender:  "user-1",
+		Target:  "plugin-project-manager",
+		Method:  "create",
+		Payload: projReq,
+	})
+	resp := awaitResponse(t, collector, "proj-create-1-resp")
+	var project struct{ ID string `json:"id"` }
+	json.Unmarshal(resp.Payload, &project)
+
+	openReq, _ := json.Marshal(map[string]string{"id": project.ID})
+	sendMsg(t, conn, api.Message{
+		ID:      "proj-open-1",
+		Sender:  "user-1",
+		Target:  "plugin-project-manager",
+		Method:  "open",
+		Payload: openReq,
+	})
+	awaitResponse(t, collector, "proj-open-1-resp")
+
 	// 3. User sends a message that should trigger AI response
 	chatReq, _ := json.Marshal(map[string]string{
 		"channel": "test-channel",
@@ -99,11 +126,14 @@ func TestApplicationPlugins(t *testing.T) {
 	if !found {
 		t.Fatal("never received AI agent response event")
 	}
-	
+
 	var aiMsg ChatMessage
 	json.Unmarshal(aiEvt.Payload, &aiMsg)
 	if !strings.Contains(aiMsg.Content, "Mock AI response") {
 		t.Errorf("unexpected AI message content: %s", aiMsg.Content)
+	}
+	if !strings.Contains(aiMsg.Content, "project context") {
+		t.Errorf("AI response did not include project context: %s", aiMsg.Content)
 	}
 
 	// 5. Verify Chat history

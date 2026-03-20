@@ -50,7 +50,14 @@ type model struct {
 	selectedCmdIdx int
 
 	activeProject *Project
+	projects      []Project
+	selectType    int
 }
+
+const (
+	SelectNone = iota
+	SelectProject
+)
 
 type Project struct {
 	ID          string   `json:"id"`
@@ -175,6 +182,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var p Project
 			if err := json.Unmarshal(msg.Payload, &p); err == nil {
 				m.activeProject = &p
+			}
+		}
+
+		if displayMsg == "" && msg.Sender == "plugin-project-manager" && msg.Method == "list-resp" {
+			var resp struct {
+				Projects []Project `json:"projects"`
+			}
+			if err := json.Unmarshal(msg.Payload, &resp); err == nil {
+				m.projects = resp.Projects
+				// If we were waiting for projects, don't display the raw JSON
+				return m, m.listenForMessages()
 			}
 		}
 
@@ -355,6 +373,19 @@ func (m model) fetchActiveProject() tea.Cmd {
 	}
 }
 
+func (m model) fetchProjects() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		resp, _ := m.client.Send(ctx, "plugin-project-manager", "list", nil)
+		if resp.ID != "" {
+			resp.Method = "list-resp"
+			return messageMsg(resp)
+		}
+		return nil
+	}
+}
+
 func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	// First, let the input handle the key unless it's navigation
 	switch msg.Type {
@@ -389,6 +420,13 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		filtered := m.filteredCommands()
 		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
 			opt := filtered[m.selectedCmdIdx]
+			if m.selectType == SelectProject {
+				m.mode = ModeNormal
+				m.commandInput.Blur()
+				m.selectType = SelectNone
+				m.commandInput.SetValue("")
+				return m.executeCommand(fmt.Sprintf("plugin-project-manager open %s", opt.Raw))
+			}
 			if m.isLeader {
 				if opt.IsDir {
 					m.breadcrumbs = append(m.breadcrumbs, opt.Display)
@@ -485,6 +523,17 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 
 	verb := parts[0]
 	switch verb {
+	case "p", "plugin-project-manager":
+		if len(parts) >= 2 && parts[1] == "open" {
+			if len(parts) == 2 {
+				m.mode = ModeCommand
+				m.selectType = SelectProject
+				m.commandInput.Focus()
+				m.commandInput.SetValue("")
+				return m, m.fetchProjects()
+			}
+			// if len(parts) > 2, it falls through to the default plugin call
+		}
 	case "q", "quit":
 		return m, tea.Quit
 	case "b", "buffer":
@@ -557,7 +606,18 @@ type CommandOption struct {
 func (m model) filteredCommands() []CommandOption {
 	var results []CommandOption
 
-	if m.mode == ModeCommand && !m.isLeader {
+	if m.mode == ModeCommand && m.selectType == SelectProject {
+		input := m.commandInput.Value()
+		for _, p := range m.projects {
+			if fuzzyMatch(p.Name, input) {
+				results = append(results, CommandOption{
+					Raw:         p.ID,
+					Display:     p.Name,
+					Description: p.Description,
+				})
+			}
+		}
+	} else if m.mode == ModeCommand && !m.isLeader {
 		input := m.commandInput.Value()
 		if len(input) > 0 && input[0] == ':' {
 			input = input[1:]
