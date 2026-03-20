@@ -18,7 +18,7 @@ for plugin_dir in plugins/wasm/*; do
         
         # Determine output name
         case "$plugin_name" in
-            "chat-manager")
+            "plugin-chat")
                 target_name="chat"
                 ;;
             "buffer-manager")

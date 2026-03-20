@@ -1,4 +1,4 @@
-module github.com/jnesbitt/alloy-go/plugins/wasm/chat-manager
+module github.com/jnesbitt/alloy-go/plugins/wasm/plugin-chat
 
 go 1.25.8
 

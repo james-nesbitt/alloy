@@ -71,7 +71,7 @@ Logic-heavy plugins and the user interface.
     - [ ] **Visual Mnemonic Feedback**: "Breadcrumb" display in the minibuffer during multi-key sequences.
 - [ ] **WASM SDK Standard Library**: Formally abstracted plugin development Kit.
 - [ ] **Security Hardening**: RBAC and fine-grained capability routing.
-- [ ] **Group Chat**: Real-time communication and presence.
+- [x] **Group Chat**: Real-time communication and presence.
 - [ ] **AI Agent**: LLM integration and tool-use orchestration.
 
 ## Phase 5: Advanced Refinement & Deployment
