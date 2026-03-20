@@ -61,7 +61,10 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
 Logic-heavy plugins and the user interface.
 
 - [x] **Alloy TUI**: Terminal-based client (Bubbletea) with **Dynamic Command Discovery**.
-- [ ] **Buffer Manager**: Shared state and concurrent editing.
+- [x] **Buffer Manager**: Shared state and concurrent editing.
+- [ ] **Alloy TUI/GUI Refinement**: Multi-plugin unified interface.
+- [ ] **WASM SDK Standard Library**: Formally abstracted plugin development Kit.
+- [ ] **Security Hardening**: RBAC and fine-grained capability routing.
 - [ ] **Group Chat**: Real-time communication and presence.
 - [ ] **AI Agent**: LLM integration and tool-use orchestration.
 

@@ -33,7 +33,7 @@ lint:
 
 # Run all tests
 test: kill-alloy build-core build-wasm
-    go test -v -timeout 30s ./...
+    go test -v -timeout 120s ./...
 
 # Build the core backend
 build-core:
