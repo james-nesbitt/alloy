@@ -37,7 +37,7 @@ test: kill-alloy build-core build-wasm
 
 # Build the core backend
 build-core:
-    go build -o build/core cmd/alloy-core/main.go
+    go build -o build/core ./cmd/alloy-core
 
 # Run the insecure test script
 test-smoke:
@@ -51,19 +51,19 @@ test-uds:
 
 # Build the CLI
 build-cli:
-    go build -o build/cli cmd/alloy-cli/main.go
+    go build -o build/cli ./cmd/alloy-cli
 
 # Build the TUI
 build-tui:
-    go build -o build/tui cmd/alloy-tui/main.go
+    go build -o build/tui ./cmd/alloy-tui
 
 # Build the Gio GUI
 build-gui-gio:
-	go build -tags gui -o build/gui-gio cmd/alloy-gui-gio/main.go
+	go build -tags gui -o build/gui-gio ./cmd/alloy-gui-gio
 
 # Build the Pure Go Wayland Native GUI (X11-free, Experimental)
 build-gui-wayland:
-	go build -tags experimental_wayland -o build/gui-wayland cmd/alloy-gui-wayland-native/main.go
+	go build -tags experimental_wayland -o build/gui-wayland ./cmd/alloy-gui-wayland-native
 
 # Build everything
 build-all: build-core build-cli build-tui build-gui-wayland build-wasm
@@ -109,8 +109,8 @@ build-wasm:
                 *) target_name="$plugin_name" ;;
             esac
             echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"
-            # Use Standard Go wasip1 with c-shared buildmode for stability (Go 1.24+)
-            GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o "build/wasm/$target_name.wasm" "$plugin_dir/main.go"
+            # Use Standard Go wasip1 for stability (Go 1.25+)
+            GOOS=wasip1 GOARCH=wasm go build -o "build/wasm/$target_name.wasm" "./$plugin_dir"
         fi
     done
 
