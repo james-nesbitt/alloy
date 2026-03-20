@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"image/color"
@@ -13,14 +14,38 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/frontend"
 )
+
+type registration struct {
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Capabilities []api.Capability `json:"capabilities,omitempty"`
+}
+
+type discoveryMsg struct {
+	Targets []registration `json:"targets"`
+}
+
+const (
+	ModeNormal = iota
+	ModeCommand
+)
+
+type guiState struct {
+	mode        int
+	isLeader    bool
+	breadcrumbs []string
+	targets     []registration
+}
 
 func main() {
 	name := flag.String("name", "alloy-gui", "Frontend instance name")
@@ -54,7 +79,7 @@ func run(w *app.Window, client *frontend.Client) error {
 		input      widget.Editor
 		sendButton widget.Clickable
 		list       widget.List
-		discovery  string
+		gui        guiState
 	)
 	list.Axis = layout.Vertical
 
@@ -65,8 +90,11 @@ func run(w *app.Window, client *frontend.Client) error {
 			resp, err := client.Send(ctx, "plugin-command-manager", "discover", nil)
 			cancel()
 			if err == nil {
-				discovery = strings.Join(strings.Split(string(resp.Payload), "\n"), "  ")
-				w.Invalidate()
+				var dMsg discoveryMsg
+				if err := json.Unmarshal(resp.Payload, &dMsg); err == nil {
+					gui.targets = dMsg.Targets
+					w.Invalidate()
+				}
 			}
 			time.Sleep(5 * time.Second)
 		}
@@ -85,27 +113,64 @@ func run(w *app.Window, client *frontend.Client) error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
+			// Capture keyboard events through the editor if possible or globally
+			for {
+				ev, ok := gtx.Event(key.Filter{
+					Focus: &input, // Focus the editor for now
+				})
+				if !ok {
+					break
+				}
+				if ke, ok := ev.(key.Event); ok && ke.State == key.Press {
+					switch ke.Name {
+					case key.NameEscape:
+						gui.mode = ModeNormal
+						gui.isLeader = false
+						gui.breadcrumbs = nil
+						gtx.Execute(key.FocusCmd{Tag: nil}) // Blur
+					case " ":
+						if gui.mode == ModeNormal {
+							gui.mode = ModeCommand
+							gui.isLeader = true
+							gui.breadcrumbs = nil
+							gtx.Execute(key.FocusCmd{Tag: &input})
+						} else if gui.isLeader {
+							// continue
+						}
+					default:
+						if gui.isLeader && len(string(ke.Name)) == 1 {
+							gui.breadcrumbs = append(gui.breadcrumbs, strings.ToLower(string(ke.Name)))
+							sequence := strings.Join(gui.breadcrumbs, " ")
+
+							// Check for matches
+							for _, target := range gui.targets {
+								for _, cap := range target.Capabilities {
+									if cap.Shortcut == sequence {
+										executeCommand(client, &gui, fmt.Sprintf("%s %s", target.ID, cap.Method), w)
+										gui.mode = ModeNormal
+										gui.isLeader = false
+										gui.breadcrumbs = nil
+										input.SetText("")
+										goto skipInput
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+		skipInput:
 			if sendButton.Clicked(gtx) {
 				content := input.Text()
 				if content != "" {
-					parts := strings.SplitN(content, " ", 3)
-					if len(parts) >= 2 {
-						target := parts[0]
-						method := parts[1]
-						payload := ""
-						if len(parts) == 3 {
-							payload = parts[2]
-						}
-						
-						go func() {
-							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-							defer cancel()
-							_, _ = client.Send(ctx, target, method, []byte(payload))
-							w.Invalidate()
-						}()
-						input.SetText("")
-					}
+					executeCommand(client, &gui, content, w)
+					input.SetText("")
 				}
+			}
+
+			if gui.mode == ModeCommand {
+				gtx.Execute(key.FocusCmd{Tag: &input})
 			}
 
 			layout.Flex{
@@ -115,13 +180,24 @@ func run(w *app.Window, client *frontend.Client) error {
 					return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								title := material.H4(th, "Alloy Core Monitor")
+								title := material.H4(th, "Alloy Core")
 								title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
 								return title.Layout(gtx)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								d := material.Caption(th, "Commands: "+discovery)
-								d.Color = color.NRGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xff}
+								modeStr := "NORMAL"
+								modeColor := color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
+								if gui.mode == ModeCommand {
+									if gui.isLeader {
+										modeStr = "LEADER: " + strings.Join(gui.breadcrumbs, " > ")
+										modeColor = color.NRGBA{R: 0xee, G: 0xaa, B: 0x00, A: 0xff}
+									} else {
+										modeStr = "COMMAND"
+										modeColor = color.NRGBA{R: 0xaa, G: 0x00, B: 0xee, A: 0xff}
+									}
+								}
+								d := material.Caption(th, modeStr)
+								d.Color = modeColor
 								return d.Layout(gtx)
 							}),
 						)
@@ -133,9 +209,32 @@ func run(w *app.Window, client *frontend.Client) error {
 						msg := msgs[i]
 						return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return material.Body1(th, fmt.Sprintf("[%s] %s: %s", 
-								time.Unix(msg.Timestamp, 0).Format(time.Kitchen), 
+								time.Unix(msg.Timestamp, 0).Format("15:04:05"), 
 								msg.Sender, string(msg.Payload))).Layout(gtx)
 						})
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !gui.isLeader {
+						return layout.Dimensions{}
+					}
+					// Show filtered command hints
+					prefix := strings.Join(gui.breadcrumbs, " ")
+					var hints []string
+					for _, t := range gui.targets {
+						for _, c := range t.Capabilities {
+							if prefix == "" || strings.HasPrefix(c.Shortcut, prefix) {
+								reminder := strings.TrimPrefix(c.Shortcut, prefix)
+								reminder = strings.TrimSpace(reminder)
+								hints = append(hints, fmt.Sprintf("%-2s %s", reminder, c.Method))
+							}
+						}
+					}
+					if len(hints) == 0 {
+						return layout.Dimensions{}
+					}
+					return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return material.Caption(th, "Hints: "+strings.Join(hints, " | ")).Layout(gtx)
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -153,8 +252,37 @@ func run(w *app.Window, client *frontend.Client) error {
 						)
 					})
 				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					// Status bar at bottom
+					return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return material.Caption(th, "Alloy GUI | F1: help | "+fmt.Sprintf("%d messages", len(client.Messages()))).Layout(gtx)
+					})
+				}),
 			)
 			e.Frame(gtx.Ops)
 		}
+	}
+}
+
+func executeCommand(client *frontend.Client, gui *guiState, content string, w *app.Window) {
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, ":") {
+		content = content[1:]
+	}
+	parts := strings.Fields(content)
+	if len(parts) >= 2 {
+		target := parts[0]
+		method := parts[1]
+		payload := ""
+		if len(parts) > 2 {
+			payload = strings.Join(parts[2:], " ")
+		}
+
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = client.Send(ctx, target, method, []byte(payload))
+			w.Invalidate()
+		}()
 	}
 }
