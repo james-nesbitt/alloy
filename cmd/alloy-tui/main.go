@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -28,7 +29,7 @@ type model struct {
 	messages  []string
 	viewport  viewport.Model
 	textarea  textarea.Model
-	discovery []string
+	targets   []registration
 	err       error
 	width     int
 	height    int
@@ -40,11 +41,21 @@ type model struct {
 	commandInput textarea.Model
 	activeBuffer string
 	isLeader     bool
+	breadcrumbs  []string
+}
+
+type registration struct {
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Capabilities []api.Capability `json:"capabilities,omitempty"`
+}
+
+type discoveryMsg struct {
+	Targets []registration `json:"targets"`
 }
 
 type messageMsg api.Message
 type errMsg error
-type discoveryMsg string
 type tickMsg time.Time
 
 func (m model) Init() tea.Cmd {
@@ -99,14 +110,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case discoveryMsg:
-		lines := strings.Split(string(msg), "\n")
-		var valid []string
-		for _, l := range lines {
-			if strings.TrimSpace(l) != "" {
-				valid = append(valid, l)
-			}
-		}
-		m.discovery = valid
+		m.targets = msg.Targets
 		return m, nil
 
 	case tea.KeyMsg:
@@ -176,14 +180,42 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		m.mode = ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
+		m.breadcrumbs = nil
 		return m, nil
 	case tea.KeyEnter:
 		cmd := m.commandInput.Value()
 		m.mode = ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
+		m.breadcrumbs = nil
 		return m.executeCommand(cmd)
+	case tea.KeyBackspace:
+		if m.commandInput.Value() == "" && len(m.breadcrumbs) > 0 {
+			m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
+		}
 	}
+
+	// Dynamic sequence handling for Leader mode
+	if m.isLeader && msg.Type == tea.KeyRunes {
+		char := string(msg.Runes)
+		m.breadcrumbs = append(m.breadcrumbs, char)
+		sequence := strings.Join(m.breadcrumbs, " ")
+
+		// Check for shortcut matches
+		for _, target := range m.targets {
+			for _, cap := range target.Capabilities {
+				if cap.Shortcut == sequence {
+					// We found a match! Execute it.
+					m.mode = ModeNormal
+					m.commandInput.Blur()
+					m.commandInput.SetValue("")
+					m.breadcrumbs = nil
+					return m.executeCommand(fmt.Sprintf("%s %s", target.ID, cap.Method))
+				}
+			}
+		}
+	}
+
 	return m, ciCmd
 }
 
@@ -194,7 +226,11 @@ func (m model) doDiscovery() tea.Msg {
 	if err != nil {
 		return nil
 	}
-	return discoveryMsg(string(resp.Payload))
+	var dMsg discoveryMsg
+	if err := json.Unmarshal(resp.Payload, &dMsg); err != nil {
+		return nil
+	}
+	return dMsg
 }
 
 func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
@@ -246,6 +282,31 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) filteredCommands() []string {
+	if !m.isLeader {
+		return nil
+	}
+	prefix := strings.Join(m.breadcrumbs, " ")
+	var matched []string
+	for _, t := range m.targets {
+		for _, c := range t.Capabilities {
+			if prefix == "" || strings.HasPrefix(c.Shortcut, prefix) {
+				shortcutPart := strings.TrimPrefix(c.Shortcut, prefix)
+				shortcutPart = strings.TrimSpace(shortcutPart)
+
+				annotation := ""
+				if group, ok := c.Annotations["group"]; ok {
+					annotation = fmt.Sprintf("[%s] ", group)
+				}
+
+				matched = append(matched, fmt.Sprintf(" %-2s  %s%-15s %s",
+					shortcutPart, annotation, c.Method, c.Description))
+			}
+		}
+	}
+	return matched
+}
+
 func (m model) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
@@ -287,6 +348,22 @@ func (m model) View() string {
 	)
 
 	if m.mode == ModeCommand {
+		prompt := ":"
+		if m.isLeader {
+			prompt = strings.Join(m.breadcrumbs, " > ")
+			if prompt != "" {
+				prompt += " > "
+			}
+
+			// Add filtered commands above the command bar
+			filtered := m.filteredCommands()
+			if len(filtered) > 0 {
+				listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
+				listStr := "\n" + strings.Join(filtered, "\n")
+				view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
+			}
+		}
+		m.commandInput.Placeholder = prompt
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
 	}
 

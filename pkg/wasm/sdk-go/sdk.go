@@ -17,13 +17,51 @@ type Message struct {
 	Timestamp int64           `json:"timestamp"`
 }
 
+// Capability describes a functionality provided by a component.
+type Capability struct {
+	Method      string            `json:"method,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Shortcut    string            `json:"shortcut,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
 type MessageHandler func(msg Message) Message
 
-var handler MessageHandler
+var (
+	handler      MessageHandler
+	capabilities []Capability
+)
 
 // SetHandler registers the plugin's message handler.
 func SetHandler(h MessageHandler) {
 	handler = h
+}
+
+// SetCapabilities registers the plugin's capabilities.
+func SetCapabilities(caps []Capability) {
+	capabilities = caps
+}
+
+// ... original alloy_malloc and other exports ...
+
+// alloy_capabilities is exported for the host to query the plugin's capabilities.
+//export alloy_capabilities
+//go:wasmexport alloy_capabilities
+func Alloy_capabilities() uint64 {
+	if capabilities == nil {
+		return 0
+	}
+	data, err := json.Marshal(capabilities)
+	if err != nil {
+		return 0
+	}
+	ptr := Alloy_malloc(uint32(len(data)))
+	if ptr == 0 {
+		return 0
+	}
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), uint32(len(data)))
+	copy(buf, data)
+	return uint64(uintptr(ptr))<<32 | uint64(len(data))
 }
 
 //go:wasmimport alloy log

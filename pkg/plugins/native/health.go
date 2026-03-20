@@ -29,7 +29,12 @@ func (h *HealthManager) ID() string { return "plugin-health" }
 
 func (h *HealthManager) Capabilities() []api.Capability {
 	return []api.Capability{
-		{Method: "status", Description: "Get current system and kernel health metrics"},
+		{
+			Method:      "status",
+			Description: "Get current system and kernel health metrics",
+			Shortcut:    "h s",
+			Annotations: map[string]string{"group": "system"},
+		},
 	}
 }
 

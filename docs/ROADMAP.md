@@ -60,9 +60,15 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
 ## Phase 4: Application Plugins & Frontends
 Logic-heavy plugins and the user interface.
 
-- [x] **Alloy TUI**: Terminal-based client (Bubbletea) with **Dynamic Command Discovery**.
-- [x] **Buffer Manager**: Shared state and concurrent editing.
-- [ ] **Alloy TUI/GUI Refinement**: Multi-plugin unified interface.
+- [x] **Alloy TUI**: Terminal-based client (Bubbletea).
+    - [x] **Modal Interface**: Normal, Insert, and Command modes.
+    - [x] **Leader-Key Support**: `<space>` as a primary command entry point.
+- [x] **Buffer Manager**: Shared state and concurrent editing via `plugin-buffer-manager`.
+- [ ] **Advanced Interface & Discoverability**:
+    - [ ] **Hierarchical Command Trees**: Support for nested key sequences (e.g., `<space> b l`) and namespaced plugin commands.
+    - [ ] **Command Metadata**: Extend `plugin-command-manager` to store shortcut keys and "Marginalia"-style annotations.
+    - [ ] **Smart Command Bar (Consult/Vertico model)**: Fuzzy-filtering, multi-column results, and live previews.
+    - [ ] **Visual Mnemonic Feedback**: "Breadcrumb" display in the minibuffer during multi-key sequences.
 - [ ] **WASM SDK Standard Library**: Formally abstracted plugin development Kit.
 - [ ] **Security Hardening**: RBAC and fine-grained capability routing.
 - [ ] **Group Chat**: Real-time communication and presence.

@@ -92,6 +92,8 @@ type Interceptor interface {
 
 // Capability describes a functionality provided by a component.
 type Capability struct {
-	Method      string `json:"method"`
-	Description string `json:"description,omitempty"`
+	Method      string            `json:"method,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Shortcut    string            `json:"shortcut,omitempty"`    // Keyboard shortcut/mnemonic (e.g., "b l")
+	Annotations map[string]string `json:"annotations,omitempty"` // Additional metadata (e.g., {"group": "buffers"})
 }

@@ -49,6 +49,15 @@ func findRootBuffer(id string) (*Buffer, bool) {
 
 func init() {
 	wasm.SetHandler(handleMessage)
+	wasm.SetCapabilities([]wasm.Capability{
+		{Method: "create", Description: "Create a new buffer", Shortcut: "b c", Annotations: map[string]string{"group": "buffer"}},
+		{Method: "list", Description: "List all buffers", Shortcut: "b l", Annotations: map[string]string{"group": "buffer"}},
+		{Method: "read", Description: "Read buffer content", Shortcut: "b r", Annotations: map[string]string{"group": "buffer"}},
+		{Method: "write", Description: "Write buffer content", Shortcut: "b w", Annotations: map[string]string{"group": "buffer"}},
+		{Method: "delete", Description: "Delete a buffer", Shortcut: "b d", Annotations: map[string]string{"group": "buffer"}},
+		{Method: "save", Description: "Save buffer to persistent storage", Shortcut: "b s", Annotations: map[string]string{"group": "buffer"}},
+		{Method: "load", Description: "Load buffers from persistent storage", Shortcut: "b o", Annotations: map[string]string{"group": "buffer"}},
+	})
 }
 
 func main() {}

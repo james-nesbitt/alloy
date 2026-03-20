@@ -107,7 +107,41 @@ func (i *Instance) ID() string {
 }
 
 func (i *Instance) Capabilities() []api.Capability {
-	return nil
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	fn := i.mod.ExportedFunction("alloy_capabilities")
+	if fn == nil {
+		return nil
+	}
+
+	results, err := fn.Call(ctx)
+	if err != nil || len(results) == 0 {
+		return nil
+	}
+
+	packed := results[0]
+	ptr := uint32(packed >> 32)
+	size := uint32(packed)
+
+	if size == 0 {
+		return nil
+	}
+
+	buf, ok := i.mod.Memory().Read(ptr, size)
+	if !ok {
+		return nil
+	}
+
+	var caps []api.Capability
+	if err := json.Unmarshal(buf, &caps); err != nil {
+		return nil
+	}
+
+	return caps
 }
 
 func (i *Instance) Shutdown(ctx context.Context) error {

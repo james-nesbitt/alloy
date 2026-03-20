@@ -24,7 +24,7 @@ func (k *KVManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "get", Description: "Retrieve value for a key"},
 		{Method: "set", Description: "Store a value for a key"},
-		{Method: "list", Description: "List keys with a prefix"},
+		{Method: "list", Description: "List keys with a prefix", Shortcut: "k l", Annotations: map[string]string{"group": "storage"}},
 	}
 }
 
