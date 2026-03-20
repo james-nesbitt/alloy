@@ -43,7 +43,9 @@ func init() {
 	})
 }
 
-func main() {}
+func main() {
+	wasm.SleepForever()
+}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	switch msg.Method {

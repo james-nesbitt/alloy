@@ -9,6 +9,7 @@ import (
 
 func main() {
     wasm.SetHandler(handleMessage)
+    wasm.SleepForever()
 }
 
 func handleMessage(msg wasm.Message) wasm.Message {

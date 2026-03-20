@@ -60,7 +60,9 @@ func init() {
 	})
 }
 
-func main() {}
+func main() {
+	wasm.SleepForever()
+}
 
 func handleMessage(msg wasm.Message) wasm.Message {
 	// If it's a response to one of our own requests

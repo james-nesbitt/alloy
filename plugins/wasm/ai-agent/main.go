@@ -21,8 +21,7 @@ func init() {
 }
 
 func main() {
-    // Standard Go wasmexport doesn't need SleepForever if using Reactor pattern,
-    // but we can keep it as a no-op just in case.
+	wasm.SleepForever()
 }
 
 func handleMessage(msg wasm.Message) wasm.Message {
