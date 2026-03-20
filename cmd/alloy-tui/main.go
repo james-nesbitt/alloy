@@ -48,6 +48,14 @@ type model struct {
 	subscriptions map[string]bool
 	commandTree   *CommandNode
 	selectedCmdIdx int
+
+	activeProject *Project
+}
+
+type Project struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
 }
 
 type registration struct {
@@ -125,9 +133,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.subscribe("chat:message"))
 				cmds = append(cmds, m.subscribe("chat:direct"))
 				cmds = append(cmds, m.subscribe("chat:presence"))
+				cmds = append(cmds, m.subscribe("project:opened"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
+				m.subscriptions["project:opened"] = true
+			}
+			if t.ID == "plugin-project-manager" && m.activeProject == nil {
+				cmds = append(cmds, m.fetchActiveProject())
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -147,7 +160,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messageMsg:
 		var displayMsg string
-		if msg.Sender == "plugin-events" {
+		if msg.Sender == "plugin-events" && msg.Method == "project:opened" {
+			var event struct {
+				Topic string  `json:"topic"`
+				Data  Project `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &event); err == nil {
+				m.activeProject = &event.Data
+				displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.activeProject.Name)
+			}
+		}
+
+		if displayMsg == "" && msg.Sender == "plugin-project-manager" && msg.Method == "active-resp" {
+			var p Project
+			if err := json.Unmarshal(msg.Payload, &p); err == nil {
+				m.activeProject = &p
+			}
+		}
+
+		if displayMsg == "" && msg.Sender == "plugin-events" {
 			switch msg.Method {
 			case "chat:message":
 				var chatMsg struct {
@@ -307,6 +338,19 @@ func (m model) sendPresenceHeartbeat() tea.Cmd {
 			"status": "online",
 		})
 		_, _ = m.client.Send(ctx, "plugin-chat", "presence:update", payload)
+		return nil
+	}
+}
+
+func (m model) fetchActiveProject() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		resp, _ := m.client.Send(ctx, "plugin-project-manager", "active", nil)
+		if resp.ID != "" {
+			resp.Method = "active-resp"
+			return messageMsg(resp)
+		}
 		return nil
 	}
 }
@@ -592,9 +636,14 @@ func (m model) View() string {
 	}
 
 	statusStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("15"))
+	projectStr := " No Project "
+	if m.activeProject != nil {
+		projectStr = " Project: " + m.activeProject.Name + " "
+	}
 	statusLine := lipgloss.JoinHorizontal(lipgloss.Center,
 		modeStyle.Render(modeStr),
-		statusStyle.Width(m.width-len(modeStr)).Render(fmt.Sprintf(" Buffer: %s | Channel: #%s", m.activeBuffer, m.activeChannel)),
+		statusStyle.Width(m.width-len(modeStr)-len(projectStr)).Render(fmt.Sprintf(" Buffer: %s | Channel: #%s", m.activeBuffer, m.activeChannel)),
+		modeStyle.Background(lipgloss.Color("12")).Render(projectStr),
 	)
 
 	var mainView string

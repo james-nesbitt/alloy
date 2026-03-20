@@ -25,6 +25,7 @@ func init() {
 	wasm.SetCapabilities([]wasm.Capability{
 		{Method: "create", Description: "Create a new project", Shortcut: "p c", Annotations: map[string]string{"group": "project"}},
 		{Method: "list", Description: "List all projects", Shortcut: "p l", Annotations: map[string]string{"group": "project"}},
+		{Method: "active", Description: "Get current active project", Shortcut: "p a", Annotations: map[string]string{"group": "project"}},
 		{Method: "add:buffer", Description: "Add a buffer to the current project", Shortcut: "p a b", Annotations: map[string]string{"group": "project"}},
 		{Method: "add:channel", Description: "Add a chat channel to the current project", Shortcut: "p a c", Annotations: map[string]string{"group": "project"}},
 		{Method: "open", Description: "Open a project", Shortcut: "p o", Annotations: map[string]string{"group": "project"}},
@@ -33,6 +34,11 @@ func init() {
 }
 
 func main() {
+	// Restore from KV on startup
+	if data := wasm.KVGet("all-projects"); data != nil {
+		json.Unmarshal(data, &projects)
+	}
+
 	wasm.SleepForever()
 }
 
@@ -44,7 +50,7 @@ func handleMessage(msg wasm.Message) wasm.Message {
 			Description string `json:"description"`
 		}
 		json.Unmarshal(msg.Payload, &req)
-		
+
 		id := fmt.Sprintf("proj-%d", time.Now().UnixNano())
 		p := &Project{
 			ID:          id,
@@ -52,13 +58,30 @@ func handleMessage(msg wasm.Message) wasm.Message {
 			Description: req.Description,
 		}
 		projects[id] = p
-		
+		saveProjects() // Persistent saving
+
 		return wasm.Message{
 			ID:     msg.ID + "-resp",
 			Type:   "response",
 			Sender: "plugin-project-manager",
 			Target: msg.Sender,
 			Payload: mustMarshal(p),
+		}
+
+	case "active":
+		var active *Project
+		for _, p := range projects {
+			if p.Active {
+				active = p
+				break
+			}
+		}
+		if active == nil {
+			return errorResponse(msg, "no active project")
+		}
+		return wasm.Message{
+			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
+			Payload: mustMarshal(active),
 		}
 
 	case "list":
@@ -82,9 +105,21 @@ func handleMessage(msg wasm.Message) wasm.Message {
 			BufferID  string `json:"buffer_id"`
 		}
 		json.Unmarshal(msg.Payload, &req)
-		p, ok := projects[req.ProjectID]
+		
+		targetID := req.ProjectID
+		if targetID == "" {
+			for _, p := range projects {
+				if p.Active {
+					targetID = p.ID
+					break
+				}
+			}
+		}
+
+		p, ok := projects[targetID]
 		if !ok { return errorResponse(msg, "project not found") }
 		p.Buffers = append(p.Buffers, req.BufferID)
+		saveProjects()
 		return wasm.Message{
 			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
 			Payload: []byte(`{"status":"ok"}`),
@@ -96,9 +131,21 @@ func handleMessage(msg wasm.Message) wasm.Message {
 			Channel string `json:"channel"`
 		}
 		json.Unmarshal(msg.Payload, &req)
-		p, ok := projects[req.ProjectID]
+
+		targetID := req.ProjectID
+		if targetID == "" {
+			for _, p := range projects {
+				if p.Active {
+					targetID = p.ID
+					break
+				}
+			}
+		}
+
+		p, ok := projects[targetID]
 		if !ok { return errorResponse(msg, "project not found") }
 		p.Channels = append(p.Channels, req.Channel)
+		saveProjects()
 		return wasm.Message{
 			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
 			Payload: []byte(`{"status":"ok"}`),
@@ -112,6 +159,7 @@ func handleMessage(msg wasm.Message) wasm.Message {
 		
 		for _, proj := range projects { proj.Active = false }
 		p.Active = true
+		saveProjects()
 		
 		// Notify frontends via event
 		publishEvent("project:opened", p)
@@ -122,8 +170,7 @@ func handleMessage(msg wasm.Message) wasm.Message {
 		}
 
 	case "save":
-		data, _ := json.Marshal(projects)
-		wasm.KVSet("all-projects", data)
+		saveProjects()
 		return wasm.Message{
 			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
 			Payload: []byte(`{"status":"saved"}`),
@@ -132,6 +179,11 @@ func handleMessage(msg wasm.Message) wasm.Message {
 	default:
 		return wasm.Message{}
 	}
+}
+
+func saveProjects() {
+	data, _ := json.Marshal(projects)
+	wasm.KVSet("all-projects", data)
 }
 
 func publishEvent(topic string, data any) {
