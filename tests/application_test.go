@@ -102,7 +102,7 @@ func TestApplicationPlugins(t *testing.T) {
 	
 	var aiMsg ChatMessage
 	json.Unmarshal(aiEvt.Payload, &aiMsg)
-	if !strings.Contains(aiMsg.Content, "I processed your request") {
+	if !strings.Contains(aiMsg.Content, "Mock AI response") {
 		t.Errorf("unexpected AI message content: %s", aiMsg.Content)
 	}
 

@@ -110,7 +110,7 @@ build-wasm:
             esac
             echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"
             # Use Standard Go wasip1 for stability (Go 1.25+)
-            GOOS=wasip1 GOARCH=wasm go build -o "build/wasm/$target_name.wasm" "./$plugin_dir"
+            (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm go build -o "../../../build/wasm/$target_name.wasm" .)
         fi
     done
 
