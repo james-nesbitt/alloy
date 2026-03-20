@@ -26,6 +26,7 @@ type Manager struct {
 	
 	mu      sync.Mutex
 	defs    map[string]pluginDef
+	plugins map[string]*Instance
 }
 
 func NewManager(logger *slog.Logger, runtime *Runtime, k KernelInternal) *Manager {
@@ -34,6 +35,7 @@ func NewManager(logger *slog.Logger, runtime *Runtime, k KernelInternal) *Manage
 		runtime: runtime,
 		kernel:  k,
 		defs:    make(map[string]pluginDef),
+		plugins: make(map[string]*Instance),
 	}
 }
 
@@ -43,6 +45,7 @@ func (m *Manager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "load", Description: "Load a WASM plugin"},
 		{Method: "reload", Description: "Reload an already loaded WASM plugin from its original path"},
+		{Method: "status", Description: "Get status of all WASM plugins"},
 	}
 }
 
@@ -72,8 +75,33 @@ func (m *Manager) HandleMessage(ctx context.Context, msg api.Message) (api.Messa
 		}
 		go m.reloadPlugin(req.ID)
 		return m.ack(msg.ID, msg.Sender, "reloading"), nil
+
+	case "status":
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		statusList := make([]map[string]any, 0, len(m.plugins))
+		for id, p := range m.plugins {
+			st, errStr := p.Status()
+			statusList = append(statusList, map[string]any{
+				"id":    id,
+				"status": string(st),
+				"error":  errStr,
+			})
+		}
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  m.ID(),
+			Target:  msg.Sender,
+			Payload: mustMarshal(statusList),
+		}, nil
 	}
 	return api.Message{}, nil
+}
+
+func mustMarshal(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 func (m *Manager) ack(id, target, status string) api.Message {
@@ -95,13 +123,22 @@ func (m *Manager) loadAndRegister(id, path string, mem, fuel uint64) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		m.logger.Error("failed to read wasm file", "id", id, "error", err)
+		m.publishError("plugin:load_failed", id, err.Error())
 		return
 	}
 
 	p, err := m.runtime.LoadPlugin(context.Background(), id, content, mem, fuel)
 	if err != nil {
 		m.logger.Error("failed to instantiate wasm plugin", "id", id, "error", err)
+		m.publishError("plugin:load_failed", id, err.Error())
 		return
+	}
+
+	instance, ok := p.(*Instance)
+	if ok {
+		m.mu.Lock()
+		m.plugins[id] = instance
+		m.mu.Unlock()
 	}
 
 	m.kernel.RegisterPlugin(p)
@@ -118,6 +155,7 @@ func (m *Manager) reloadPlugin(id string) {
 
 	if !ok {
 		m.logger.Error("failed to reload plugin: definition not found", "id", id)
+		m.publishError("plugin:reload_failed", id, "definition not found")
 		return
 	}
 
@@ -125,6 +163,7 @@ func (m *Manager) reloadPlugin(id string) {
 	content, err := os.ReadFile(def.Path)
 	if err != nil {
 		m.logger.Error("failed to read wasm file for reload", "id", id, "error", err)
+		m.publishError("plugin:reload_failed", id, err.Error())
 		return
 	}
 
@@ -132,7 +171,15 @@ func (m *Manager) reloadPlugin(id string) {
 	p, err := m.runtime.LoadPlugin(context.Background(), id, content, def.MemoryLimit, def.FuelLimit)
 	if err != nil {
 		m.logger.Error("failed to swap wasm plugin on reload", "id", id, "error", err)
+		m.publishError("plugin:reload_failed", id, err.Error())
 		return
+	}
+
+	instance, ok := p.(*Instance)
+	if ok {
+		m.mu.Lock()
+		m.plugins[id] = instance
+		m.mu.Unlock()
 	}
 
 	// Update the kernel registry (hot swap)
@@ -155,6 +202,22 @@ func (m *Manager) registerWithCommandManager(id string, caps []api.Capability) {
 		Target:  "plugin-command-manager",
 		Method:  "register",
 		Payload: []byte(`{"id":"` + id + `","type":"wasm","capabilities":` + string(capsData) + `}`),
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+func (m *Manager) publishError(method, id, err string) {
+	payload, _ := json.Marshal(map[string]string{
+		"id":    id,
+		"error": err,
+	})
+	m.kernel.RouteMessage(context.Background(), api.Message{
+		ID:        "evt-err-" + id + "-" + fmt.Sprint(time.Now().UnixNano()),
+		Type:      "event",
+		Sender:    m.ID(),
+		Target:    "plugin-events",
+		Method:    method,
+		Payload:   payload,
 		Timestamp: time.Now().Unix(),
 	})
 }

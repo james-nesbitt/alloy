@@ -152,6 +152,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		mod:         mod,
 		logger:      r.logger,
 		defaultFuel: fuelLimit,
+		status:      StatusRunning,
 	}, nil
 }
 

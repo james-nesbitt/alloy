@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -152,6 +153,12 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			if err != nil {
 				k.logger.Error("plugin error", "plugin_id", m.Target, "error", err)
 				childSpan.RecordError(err)
+
+				// Status tracking for crash-aware plugins
+				type statusAware interface{ IsCrashed() bool }
+				if sa, ok := p.(statusAware); ok && sa.IsCrashed() {
+					k.publishCrashEvent(m.Target, err.Error())
+				}
 				return
 			}
 			if resp.ID != "" || resp.Target != "" {
@@ -174,6 +181,18 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	}
 
 	k.logger.Warn("message target not found", "target", msg.Target)
+}
+
+func (k *Kernel) publishCrashEvent(id, err string) {
+	k.RouteMessage(context.WithValue(context.Background(), skipInterceptorsKey, true), api.Message{
+		ID:        "evt-crash-" + id + "-" + fmt.Sprint(time.Now().UnixNano()),
+		Type:      api.TypeEvent,
+		Sender:    "kernel",
+		Target:    "plugin-events",
+		Method:    "publish",
+		Payload:   []byte(`{"topic":"plugin:crashed","data":{"id":"` + id + `","error":"` + err + `"}}`),
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 // RegisterFrontend registers a frontend's response channel.

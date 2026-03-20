@@ -12,6 +12,14 @@ import (
 	wazeroapi "github.com/tetratelabs/wazero/api"
 )
 
+type InstanceStatus string
+
+const (
+	StatusRunning InstanceStatus = "running"
+	StatusCrashed InstanceStatus = "crashed"
+	StatusStopped InstanceStatus = "stopped"
+)
+
 // Instance represents a single loaded WASM plugin.
 type Instance struct {
 	id          string
@@ -19,6 +27,9 @@ type Instance struct {
 	logger      *slog.Logger
 	defaultFuel uint64
 	mu          sync.Mutex
+
+	status    InstanceStatus
+	lastError string
 }
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
@@ -72,6 +83,9 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 
 	handleResults, err := handler.Call(ctx, uint64(ptr), size)
 	if err != nil {
+		i.status = StatusCrashed
+		i.lastError = err.Error()
+		i.logger.Error("wasm plugin crashed", "id", i.id, "error", err)
 		return api.Message{}, fmt.Errorf("failed to call alloy_handle_message: %w", err)
 	}
 
@@ -145,5 +159,20 @@ func (i *Instance) Capabilities() []api.Capability {
 }
 
 func (i *Instance) Shutdown(ctx context.Context) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.status = StatusStopped
 	return i.mod.Close(ctx)
+}
+
+func (i *Instance) Status() (InstanceStatus, string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.status, i.lastError
+}
+
+func (i *Instance) IsCrashed() bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.status == StatusCrashed
 }

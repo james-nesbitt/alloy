@@ -48,6 +48,8 @@ const (
 	ModeNormal = iota
 	ModeCommand
 	ModeProjectCreate
+	ModeAiSwitch
+	ModeAiQuery
 )
 
 type projectCreateState struct {
@@ -55,6 +57,20 @@ type projectCreateState struct {
 	description widget.Editor
 	submit      widget.Clickable
 	cancel      widget.Clickable
+}
+
+type aiSwitchState struct {
+	providerType widget.Editor
+	model        widget.Editor
+	url          widget.Editor
+	submit       widget.Clickable
+	cancel       widget.Clickable
+}
+
+type aiQueryState struct {
+	prompt widget.Editor
+	submit widget.Clickable
+	cancel widget.Clickable
 }
 
 type guiState struct {
@@ -67,6 +83,8 @@ type guiState struct {
 	showProjects  bool
 	subscriptions map[string]bool
 	projectCreate projectCreateState
+	aiSwitch      aiSwitchState
+	aiQuery       aiQueryState
 }
 
 func main() {
@@ -122,12 +140,23 @@ func run(w *app.Window, client *frontend.Client) error {
 
 					// Auto-subscribe to events and fetch active project
 					for _, t := range gui.targets {
-						if t.ID == "plugin-events" && !gui.subscriptions["project:opened"] {
-							subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
-							subReq, _ := json.Marshal(map[string]string{"topic": "project:opened"})
-							_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq)
-							subCancel()
-							gui.subscriptions["project:opened"] = true
+						if t.ID == "plugin-events" {
+							if !gui.subscriptions["project:opened"] {
+								subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
+								subReq, _ := json.Marshal(map[string]string{"topic": "project:opened"})
+								_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq)
+								subCancel()
+								gui.subscriptions["project:opened"] = true
+							}
+							if !gui.subscriptions["plugin:crashed"] {
+								subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
+								subReq, _ := json.Marshal(map[string]string{"topic": "plugin:crashed"})
+								_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq)
+								subReq2, _ := json.Marshal(map[string]string{"topic": "plugin:load_failed"})
+								_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq2)
+								subCancel()
+								gui.subscriptions["plugin:crashed"] = true
+							}
 						}
 						if t.ID == "plugin-project-manager" {
 							if gui.activeProject == nil {
@@ -200,6 +229,14 @@ func run(w *app.Window, client *frontend.Client) error {
 
 			if gui.mode == ModeProjectCreate && !gtx.Focused(&gui.projectCreate.name) && !gtx.Focused(&gui.projectCreate.description) && !gtx.Focused(&gui.projectCreate.submit) && !gtx.Focused(&gui.projectCreate.cancel) {
 				gtx.Execute(key.FocusCmd{Tag: &gui.projectCreate.name})
+			}
+
+			if gui.mode == ModeAiSwitch && !gtx.Focused(&gui.aiSwitch.providerType) && !gtx.Focused(&gui.aiSwitch.model) && !gtx.Focused(&gui.aiSwitch.url) && !gtx.Focused(&gui.aiSwitch.submit) && !gtx.Focused(&gui.aiSwitch.cancel) {
+				gtx.Execute(key.FocusCmd{Tag: &gui.aiSwitch.providerType})
+			}
+
+			if gui.mode == ModeAiQuery && !gtx.Focused(&gui.aiQuery.prompt) && !gtx.Focused(&gui.aiQuery.submit) && !gtx.Focused(&gui.aiQuery.cancel) {
+				gtx.Execute(key.FocusCmd{Tag: &gui.aiQuery.prompt})
 			}
 
 			// Capture keyboard events
@@ -361,9 +398,12 @@ func run(w *app.Window, client *frontend.Client) error {
 							return material.List(th, &list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
 								msg := msgs[i]
 								return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return material.Body1(th, fmt.Sprintf("[%s] %s: %s",
-										time.Unix(msg.Timestamp, 0).Format("15:04:05"),
-										msg.Sender, string(msg.Payload))).Layout(gtx)
+									formatted := formatMessage(msg)
+									label := material.Body1(th, formatted)
+									if msg.Method == "plugin:crashed" || msg.Method == "plugin:load_failed" {
+										label.Color = color.NRGBA{R: 255, G: 0, B: 0, A: 255}
+									}
+									return label.Layout(gtx)
 								})
 							})
 						}),
@@ -487,6 +527,80 @@ func run(w *app.Window, client *frontend.Client) error {
 						})
 					})
 				}),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					if gui.mode != ModeAiSwitch {
+						return layout.Dimensions{}
+					}
+					paintOverlay(gtx, color.NRGBA{A: 150})
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return widget.Border{Color: color.NRGBA{A: 255}, Width: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(material.H6(th, "Switch AI Provider").Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return material.Editor(th, &gui.aiSwitch.providerType, "Type (ollama|openai|anthropic)").Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return material.Editor(th, &gui.aiSwitch.model, "Model").Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return material.Editor(th, &gui.aiSwitch.url, "URL (e.g. for ollama)").Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if gui.aiSwitch.submit.Clicked(gtx) {
+												t := gui.aiSwitch.providerType.Text()
+												m := gui.aiSwitch.model.Text()
+												u := gui.aiSwitch.url.Text()
+												payload, _ := json.Marshal(map[string]string{"type": t, "model": m, "url": u})
+												go client.Send(context.Background(), "plugin-ai-agent", "provider:set", payload)
+												gui.mode = ModeNormal
+											}
+											return material.Button(th, &gui.aiSwitch.submit, "Switch").Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if gui.aiSwitch.cancel.Clicked(gtx) { gui.mode = ModeNormal }
+											return material.Button(th, &gui.aiSwitch.cancel, "Cancel").Layout(gtx)
+										}),
+									)
+								})
+							})
+						})
+					})
+				}),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					if gui.mode != ModeAiQuery {
+						return layout.Dimensions{}
+					}
+					paintOverlay(gtx, color.NRGBA{A: 150})
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return widget.Border{Color: color.NRGBA{A: 255}, Width: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(material.H6(th, "AI Query").Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return material.Editor(th, &gui.aiQuery.prompt, "Ask the AI...").Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if gui.aiQuery.submit.Clicked(gtx) {
+												p := gui.aiQuery.prompt.Text()
+												payload, _ := json.Marshal(map[string]string{"prompt": p})
+												go client.Send(context.Background(), "plugin-ai-agent", "query", payload)
+												gui.mode = ModeNormal
+											}
+											return material.Button(th, &gui.aiQuery.submit, "Ask").Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if gui.aiQuery.cancel.Clicked(gtx) { gui.mode = ModeNormal }
+											return material.Button(th, &gui.aiQuery.cancel, "Cancel").Layout(gtx)
+										}),
+									)
+								})
+							})
+						})
+					})
+				}),
 			)
 			e.Frame(gtx.Ops)
 		}
@@ -495,6 +609,43 @@ func run(w *app.Window, client *frontend.Client) error {
 
 func paintOverlay(gtx layout.Context, c color.NRGBA) {
 	paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Max}.Op())
+}
+
+func formatMessage(msg api.Message) string {
+	ts := time.Unix(msg.Timestamp, 0).Format("15:04:05")
+	if msg.Sender == "plugin-events" {
+		switch msg.Method {
+		case "plugin:crashed", "plugin:load_failed":
+			var ev struct {
+				Topic string `json:"topic"`
+				Data  struct {
+					ID    string `json:"id"`
+					Error string `json:"error"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+				return fmt.Sprintf("[%s] !!! %s (%s): %s", ts, strings.ToUpper(msg.Method[7:]), ev.Data.ID, ev.Data.Error)
+			}
+		case "chat:message":
+			var chatMsg struct {
+				Sender  string `json:"sender"`
+				Channel string `json:"channel"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(msg.Payload, &chatMsg); err == nil {
+				return fmt.Sprintf("[%s] #%s <%s> %s", ts, chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
+			}
+		case "project:opened":
+			var ev struct {
+				Topic string  `json:"topic"`
+				Data  Project `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+				return fmt.Sprintf("[%s] Project opened: %s", ts, ev.Data.Name)
+			}
+		}
+	}
+	return fmt.Sprintf("[%s] %s: %s", ts, msg.Sender, string(msg.Payload))
 }
 
 func executeCommand(client *frontend.Client, gui *guiState, content string, w *app.Window) {
@@ -519,6 +670,18 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 
 		if target == "plugin-project-manager" && method == "create" && payload == "" {
 			gui.mode = ModeProjectCreate
+			w.Invalidate()
+			return
+		}
+
+		if (target == "plugin-ai-agent" || target == "ai") && (method == "switch" || method == "provider:set") && payload == "" {
+			gui.mode = ModeAiSwitch
+			w.Invalidate()
+			return
+		}
+
+		if (target == "plugin-ai-agent" || target == "ai") && method == "query" && payload == "" {
+			gui.mode = ModeAiQuery
 			w.Invalidate()
 			return
 		}

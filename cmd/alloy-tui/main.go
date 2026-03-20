@@ -153,6 +153,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
+				cmds = append(cmds, m.subscribe("plugin:crashed"))
+				cmds = append(cmds, m.subscribe("plugin:load_failed"))
 			}
 			if t.ID == "plugin-project-manager" && m.activeProject == nil {
 				cmds = append(cmds, m.fetchActiveProject())
@@ -208,6 +210,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if displayMsg == "" && msg.Sender == "plugin-events" {
 			switch msg.Method {
+			case "plugin:crashed":
+				var ev struct {
+					Topic string `json:"topic"`
+					Data  struct {
+						ID    string `json:"id"`
+						Error string `json:"error"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+					displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render(
+						fmt.Sprintf("[%s] !!! Plugin %s CRASHED: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
+				}
+			case "plugin:load_failed":
+				var ev struct {
+					Topic string `json:"topic"`
+					Data  struct {
+						ID    string `json:"id"`
+						Error string `json:"error"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+					displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(
+						fmt.Sprintf("[%s] !!! Plugin %s Load Failed: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
+				}
 			case "chat:message":
 				var chatMsg struct {
 					Sender  string `json:"sender"`
@@ -515,20 +541,51 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 			m.mode = ModeNormal
 			m.commandInput.Blur()
 			m.commandInput.SetValue("")
-			
-			// Action: Create project
-			name := m.formValues[0]
-			desc := m.formValues[1]
-			payload, _ := json.Marshal(map[string]string{
-				"name":        name,
-				"description": desc,
-			})
-			return m, func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				resp, _ := m.client.Send(ctx, "plugin-project-manager", "create", payload)
-				return messageMsg(resp)
+
+			switch m.formTitle {
+			case "Create New Project":
+				name := m.formValues[0]
+				desc := m.formValues[1]
+				payload, _ := json.Marshal(map[string]string{
+					"name":        name,
+					"description": desc,
+				})
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					resp, _ := m.client.Send(ctx, "plugin-project-manager", "create", payload)
+					return messageMsg(resp)
+				}
+
+			case "Switch AI Provider":
+				t := m.formValues[0]
+				model := m.formValues[1]
+				url := m.formValues[2]
+				payload, _ := json.Marshal(map[string]string{
+					"type":  t,
+					"model": model,
+					"url":   url,
+				})
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					resp, _ := m.client.Send(ctx, "plugin-ai-agent", "provider:set", payload)
+					return messageMsg(resp)
+				}
+
+			case "AI Query":
+				prompt := m.formValues[0]
+				payload, _ := json.Marshal(map[string]string{
+					"prompt": prompt,
+				})
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					resp, _ := m.client.Send(ctx, "plugin-ai-agent", "query", payload)
+					return messageMsg(resp)
+				}
 			}
+			return m, nil
 		}
 		m.commandInput.SetValue("")
 		m.commandInput.Placeholder = m.formFields[m.formIdx] + "..."
@@ -570,6 +627,31 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 
 	verb := parts[0]
 	switch verb {
+	case "ai", "plugin-ai-agent":
+		if len(parts) >= 2 && (parts[1] == "switch" || parts[1] == "provider:set") {
+			m.mode = ModeForm
+			m.formTitle = "Switch AI Provider"
+			m.formFields = []string{"Type (ollama|openai|anthropic)", "Model", "URL (optional)"}
+			m.formValues = make([]string, 3)
+			m.formIdx = 0
+			m.commandInput.SetValue("")
+			m.commandInput.Placeholder = "Provider Type..."
+			m.commandInput.Focus()
+			return m, nil
+		}
+		if len(parts) >= 2 && parts[1] == "query" {
+			if len(parts) == 2 {
+				m.mode = ModeForm
+				m.formTitle = "AI Query"
+				m.formFields = []string{"Prompt"}
+				m.formValues = make([]string, 1)
+				m.formIdx = 0
+				m.commandInput.SetValue("")
+				m.commandInput.Placeholder = "Ask the AI..."
+				m.commandInput.Focus()
+				return m, nil
+			}
+		}
 	case "p", "plugin-project-manager":
 		if len(parts) >= 2 && parts[1] == "open" {
 			if len(parts) == 2 {
