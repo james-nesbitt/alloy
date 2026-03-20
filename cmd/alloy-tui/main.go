@@ -19,12 +19,6 @@ import (
 )
 
 // TUI Layout components
-const (
-	ModeNormal  = 0
-	ModeInsert  = 1
-	ModeCommand = 2
-	ModeChat    = 3
-)
 
 type model struct {
 	client    *frontend.Client
@@ -52,11 +46,25 @@ type model struct {
 	activeProject *Project
 	projects      []Project
 	selectType    int
+
+	// Form state
+	formTitle  string
+	formFields []string
+	formValues []string
+	formIdx    int
 }
 
 const (
 	SelectNone = iota
 	SelectProject
+)
+
+const (
+	ModeNormal  = 0
+	ModeInsert  = 1
+	ModeCommand = 2
+	ModeChat    = 3
+	ModeForm    = 4
 )
 
 type Project struct {
@@ -163,6 +171,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleChatMode(msg, tiCmd)
 		case ModeCommand:
 			return m.handleCommandMode(msg, ciCmd)
+		case ModeForm:
+			return m.handleFormMode(msg, ciCmd)
 		}
 
 	case messageMsg:
@@ -491,6 +501,43 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 	return m, ciCmd
 }
 
+func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlG:
+		m.mode = ModeNormal
+		m.commandInput.Blur()
+		m.commandInput.SetValue("")
+		return m, nil
+	case tea.KeyEnter:
+		m.formValues[m.formIdx] = m.commandInput.Value()
+		m.formIdx++
+		if m.formIdx >= len(m.formFields) {
+			m.mode = ModeNormal
+			m.commandInput.Blur()
+			m.commandInput.SetValue("")
+			
+			// Action: Create project
+			name := m.formValues[0]
+			desc := m.formValues[1]
+			payload, _ := json.Marshal(map[string]string{
+				"name":        name,
+				"description": desc,
+			})
+			return m, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				resp, _ := m.client.Send(ctx, "plugin-project-manager", "create", payload)
+				return messageMsg(resp)
+			}
+		}
+		m.commandInput.SetValue("")
+		m.commandInput.Placeholder = m.formFields[m.formIdx] + "..."
+		return m, nil
+	}
+	m.commandInput, ciCmd = m.commandInput.Update(msg)
+	return m, ciCmd
+}
+
 func (m model) doDiscovery() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -533,6 +580,18 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 				return m, m.fetchProjects()
 			}
 			// if len(parts) > 2, it falls through to the default plugin call
+		} else if len(parts) >= 2 && parts[1] == "create" {
+			if len(parts) == 2 {
+				m.mode = ModeForm
+				m.formTitle = "Create New Project"
+				m.formFields = []string{"Name", "Description"}
+				m.formValues = make([]string, 2)
+				m.formIdx = 0
+				m.commandInput.SetValue("")
+				m.commandInput.Placeholder = "Project Name..."
+				m.commandInput.Focus()
+				return m, nil
+			}
 		}
 	case "q", "quit":
 		return m, tea.Quit
@@ -685,6 +744,9 @@ func (m model) View() string {
 	case ModeChat:
 		modeStr = " CHAT "
 		modeStyle = modeStyle.Background(lipgloss.Color("6"))
+	case ModeForm:
+		modeStr = " FORM "
+		modeStyle = modeStyle.Background(lipgloss.Color("13"))
 	case ModeCommand:
 		if m.isLeader {
 			modeStr = " LEADER "
@@ -766,6 +828,27 @@ func (m model) View() string {
 			listStr := "\n" + strings.Join(rows, "\n")
 			view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
 		}
+		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
+	} else if m.mode == ModeForm {
+		formStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
+		labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
+
+		var rows []string
+		rows = append(rows, lipgloss.NewStyle().Bold(true).Underline(true).Render(m.formTitle))
+
+		for i, field := range m.formFields {
+			val := m.formValues[i]
+			if i == m.formIdx {
+				rows = append(rows, labelStyle.Render("> "+field+": ")+m.commandInput.Value())
+			} else if i < m.formIdx {
+				rows = append(rows, "  "+field+": "+val)
+			} else {
+				rows = append(rows, "  "+field+": ")
+			}
+		}
+
+		listStr := "\n" + strings.Join(rows, "\n")
+		view = lipgloss.JoinVertical(lipgloss.Left, view, formStyle.Render(listStr))
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
 	}
 

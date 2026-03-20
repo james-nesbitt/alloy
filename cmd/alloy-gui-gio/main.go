@@ -18,6 +18,8 @@ import (
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -45,7 +47,15 @@ type discoveryMsg struct {
 const (
 	ModeNormal = iota
 	ModeCommand
+	ModeProjectCreate
 )
+
+type projectCreateState struct {
+	name        widget.Editor
+	description widget.Editor
+	submit      widget.Clickable
+	cancel      widget.Clickable
+}
 
 type guiState struct {
 	mode          int
@@ -56,6 +66,7 @@ type guiState struct {
 	projects      []Project
 	showProjects  bool
 	subscriptions map[string]bool
+	projectCreate projectCreateState
 }
 
 func main() {
@@ -187,6 +198,10 @@ func run(w *app.Window, client *frontend.Client) error {
 				gtx.Execute(key.FocusCmd{Tag: &gui})
 			}
 
+			if gui.mode == ModeProjectCreate && !gtx.Focused(&gui.projectCreate.name) && !gtx.Focused(&gui.projectCreate.description) && !gtx.Focused(&gui.projectCreate.submit) && !gtx.Focused(&gui.projectCreate.cancel) {
+				gtx.Execute(key.FocusCmd{Tag: &gui.projectCreate.name})
+			}
+
 			// Capture keyboard events
 			for {
 				ev, ok := gtx.Event(key.Filter{Focus: &gui}, key.Filter{Focus: &input})
@@ -269,135 +284,217 @@ func run(w *app.Window, client *frontend.Client) error {
 				}
 			}
 
-			layout.Flex{
-				Axis: layout.Vertical,
-			}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-										title := material.H4(th, "Alloy Core")
-										title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
-										return title.Layout(gtx)
+			layout.Stack{Alignment: layout.S}.Layout(gtx,
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{
+						Axis: layout.Vertical,
+					}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+											layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+												title := material.H4(th, "Alloy Core")
+												title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
+												return title.Layout(gtx)
+											}),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												projectName := "No Project"
+												if gui.activeProject != nil {
+													projectName = gui.activeProject.Name
+												}
+												return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+													p := material.Body1(th, "Project: "+projectName)
+													p.Color = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+													return layout.Stack{}.Layout(gtx,
+														layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+															return widget.Border{
+																Color: color.NRGBA{R: 0x44, G: 0xcc, B: 0x44, A: 0xff},
+																Width: unit.Dp(1),
+															}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+																return layout.Dimensions{Size: gtx.Constraints.Min}
+															})
+														}),
+														layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+															return layout.UniformInset(unit.Dp(4)).Layout(gtx, p.Layout)
+														}),
+													)
+												})
+											}),
+										)
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										projectName := "No Project"
-										if gui.activeProject != nil {
-											projectName = gui.activeProject.Name
+										modeStr := "NORMAL"
+										modeColor := color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
+										if gui.mode == ModeCommand {
+											if gui.isLeader {
+												modeStr = "LEADER: " + strings.Join(gui.breadcrumbs, " > ")
+												modeColor = color.NRGBA{R: 0xee, G: 0xaa, B: 0x00, A: 0xff}
+											} else {
+												modeStr = "COMMAND"
+												modeColor = color.NRGBA{R: 0xaa, G: 0x00, B: 0xee, A: 0xff}
+											}
 										}
-										return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											p := material.Body1(th, "Project: "+projectName)
-											p.Color = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
-											return layout.Stack{}.Layout(gtx,
-												layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-													return widget.Border{
-														Color: color.NRGBA{R: 0x44, G: 0xcc, B: 0x44, A: 0xff},
-														Width: unit.Dp(1),
-													}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-														return layout.Dimensions{Size: gtx.Constraints.Min}
+										d := material.Caption(th, modeStr)
+										d.Color = modeColor
+										return d.Layout(gtx)
+									}),
+								)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !gui.showProjects {
+								return layout.Dimensions{}
+							}
+							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return material.List(th, &projList).Layout(gtx, len(gui.projects), func(gtx layout.Context, i int) layout.Dimensions {
+									p := gui.projects[i]
+									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return material.Button(th, &projClicks[i], p.Name).Layout(gtx)
+									})
+								})
+							})
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							msgs := client.Messages()
+							return material.List(th, &list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
+								msg := msgs[i]
+								return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return material.Body1(th, fmt.Sprintf("[%s] %s: %s",
+										time.Unix(msg.Timestamp, 0).Format("15:04:05"),
+										msg.Sender, string(msg.Payload))).Layout(gtx)
+								})
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !gui.isLeader {
+								return layout.Dimensions{}
+							}
+							// Show filtered command hints
+							prefix := strings.Join(gui.breadcrumbs, " ")
+							var hints []string
+							for _, t := range gui.targets {
+								for _, c := range t.Capabilities {
+									if prefix == "" || strings.HasPrefix(c.Shortcut, prefix) {
+										reminder := strings.TrimPrefix(c.Shortcut, prefix)
+										reminder = strings.TrimSpace(reminder)
+										hints = append(hints, fmt.Sprintf("%-2s %s", reminder, c.Method))
+									}
+								}
+							}
+							if len(hints) == 0 {
+								return layout.Dimensions{}
+							}
+							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return material.Caption(th, "Hints: "+strings.Join(hints, " | ")).Layout(gtx)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										ed := material.Editor(th, &input, "target method payload...")
+										return ed.Layout(gtx)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return material.Button(th, &sendButton, "Send").Layout(gtx)
+										})
+									}),
+								)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							// Status bar at bottom
+							return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return material.Caption(th, "Alloy GUI | F1: help | "+fmt.Sprintf("%d messages", len(client.Messages()))).Layout(gtx)
+							})
+						}),
+					)
+				}),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					if gui.mode != ModeProjectCreate {
+						return layout.Dimensions{}
+					}
+					// Background dimming
+					paintOverlay(gtx, color.NRGBA{A: 150})
+
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return widget.Border{
+								Color: color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+								Width: unit.Dp(2),
+							}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Stack{}.Layout(gtx,
+									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+										return widget.Border{
+											Color: color.NRGBA{R: 255, G: 255, B: 255, A: 255},
+											Width: unit.Dp(1),
+										}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return layout.Dimensions{Size: gtx.Constraints.Min}
+										})
+									}),
+									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+										return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return material.H6(th, "Create New Project").Layout(gtx)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return material.Editor(th, &gui.projectCreate.name, "Name").Layout(gtx)
 													})
 												}),
-												layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-													return layout.UniformInset(unit.Dp(4)).Layout(gtx, p.Layout)
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return material.Editor(th, &gui.projectCreate.description, "Description").Layout(gtx)
+													})
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEvenly}.Layout(gtx,
+														layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+															if gui.projectCreate.submit.Clicked(gtx) {
+																name := gui.projectCreate.name.Text()
+																description := gui.projectCreate.description.Text()
+																if name != "" {
+																	payload, _ := json.Marshal(map[string]string{
+																		"name":        name,
+																		"description": description,
+																	})
+																	go client.Send(context.Background(), "plugin-project-manager", "create", payload)
+																	gui.mode = ModeNormal
+																	gui.projectCreate.name.SetText("")
+																	gui.projectCreate.description.SetText("")
+																}
+															}
+															return material.Button(th, &gui.projectCreate.submit, "Create").Layout(gtx)
+														}),
+														layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+														layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+															if gui.projectCreate.cancel.Clicked(gtx) {
+																gui.mode = ModeNormal
+															}
+															return material.Button(th, &gui.projectCreate.cancel, "Cancel").Layout(gtx)
+														}),
+													)
 												}),
 											)
 										})
 									}),
 								)
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								modeStr := "NORMAL"
-								modeColor := color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
-								if gui.mode == ModeCommand {
-									if gui.isLeader {
-										modeStr = "LEADER: " + strings.Join(gui.breadcrumbs, " > ")
-										modeColor = color.NRGBA{R: 0xee, G: 0xaa, B: 0x00, A: 0xff}
-									} else {
-										modeStr = "COMMAND"
-										modeColor = color.NRGBA{R: 0xaa, G: 0x00, B: 0xee, A: 0xff}
-									}
-								}
-								d := material.Caption(th, modeStr)
-								d.Color = modeColor
-								return d.Layout(gtx)
-							}),
-						)
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !gui.showProjects {
-						return layout.Dimensions{}
-					}
-					return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return material.List(th, &projList).Layout(gtx, len(gui.projects), func(gtx layout.Context, i int) layout.Dimensions {
-							p := gui.projects[i]
-							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.Button(th, &projClicks[i], p.Name).Layout(gtx)
 							})
 						})
-					})
-				}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					msgs := client.Messages()
-					return material.List(th, &list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
-						msg := msgs[i]
-						return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return material.Body1(th, fmt.Sprintf("[%s] %s: %s", 
-								time.Unix(msg.Timestamp, 0).Format("15:04:05"), 
-								msg.Sender, string(msg.Payload))).Layout(gtx)
-						})
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !gui.isLeader {
-						return layout.Dimensions{}
-					}
-					// Show filtered command hints
-					prefix := strings.Join(gui.breadcrumbs, " ")
-					var hints []string
-					for _, t := range gui.targets {
-						for _, c := range t.Capabilities {
-							if prefix == "" || strings.HasPrefix(c.Shortcut, prefix) {
-								reminder := strings.TrimPrefix(c.Shortcut, prefix)
-								reminder = strings.TrimSpace(reminder)
-								hints = append(hints, fmt.Sprintf("%-2s %s", reminder, c.Method))
-							}
-						}
-					}
-					if len(hints) == 0 {
-						return layout.Dimensions{}
-					}
-					return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return material.Caption(th, "Hints: "+strings.Join(hints, " | ")).Layout(gtx)
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								ed := material.Editor(th, &input, "target method payload...")
-								return ed.Layout(gtx)
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return material.Button(th, &sendButton, "Send").Layout(gtx)
-								})
-							}),
-						)
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					// Status bar at bottom
-					return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return material.Caption(th, "Alloy GUI | F1: help | "+fmt.Sprintf("%d messages", len(client.Messages()))).Layout(gtx)
 					})
 				}),
 			)
 			e.Frame(gtx.Ops)
 		}
 	}
+}
+
+func paintOverlay(gtx layout.Context, c color.NRGBA) {
+	paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Max}.Op())
 }
 
 func executeCommand(client *frontend.Client, gui *guiState, content string, w *app.Window) {
@@ -416,6 +513,12 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 
 		if target == "plugin-project-manager" && method == "open" && payload == "" {
 			gui.showProjects = !gui.showProjects
+			w.Invalidate()
+			return
+		}
+
+		if target == "plugin-project-manager" && method == "create" && payload == "" {
+			gui.mode = ModeProjectCreate
 			w.Invalidate()
 			return
 		}
