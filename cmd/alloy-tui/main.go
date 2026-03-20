@@ -47,6 +47,7 @@ type model struct {
 	breadcrumbs   []string
 	subscriptions map[string]bool
 	commandTree   *CommandNode
+	selectedCmdIdx int
 }
 
 type registration struct {
@@ -87,7 +88,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// In Command mode, only update the command input.
 	if m.mode == ModeCommand {
-		m.commandInput, ciCmd = m.commandInput.Update(msg)
+		// skip manual update here as it's handled in handleCommandMode specifically
 	} else if m.mode == ModeInsert {
 		m.textarea, tiCmd = m.textarea.Update(msg)
 	}
@@ -206,7 +207,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case ":":
+	case ":", "alt+x":
 		m.mode = ModeCommand
 		m.isLeader = false
 		m.commandInput.SetValue(":")
@@ -311,19 +312,73 @@ func (m model) sendPresenceHeartbeat() tea.Cmd {
 }
 
 func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
+	// First, let the input handle the key unless it's navigation
 	switch msg.Type {
-	case tea.KeyEsc:
+	case tea.KeyDown, tea.KeyCtrlN, tea.KeyUp, tea.KeyCtrlP, tea.KeyEnter, tea.KeyEsc, tea.KeyCtrlG:
+		// Navigation/Termination handled below
+	default:
+		m.commandInput, ciCmd = m.commandInput.Update(msg)
+		m.selectedCmdIdx = 0
+	}
+
+	filteredCount := len(m.filteredCommands())
+
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlG:
 		m.mode = ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		m.breadcrumbs = nil
+		m.selectedCmdIdx = 0
+		return m, nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		if filteredCount > 0 {
+			m.selectedCmdIdx = (m.selectedCmdIdx + 1) % filteredCount
+		}
+		return m, nil
+	case tea.KeyUp, tea.KeyCtrlP:
+		if filteredCount > 0 {
+			m.selectedCmdIdx = (m.selectedCmdIdx - 1 + filteredCount) % filteredCount
+		}
 		return m, nil
 	case tea.KeyEnter:
+		filtered := m.filteredCommands()
+		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
+			opt := filtered[m.selectedCmdIdx]
+			if m.isLeader {
+				if opt.IsDir {
+					m.breadcrumbs = append(m.breadcrumbs, opt.Display)
+					m.selectedCmdIdx = 0
+					m.commandInput.SetValue("")
+					return m, nil
+				} else {
+					// Find the node to execute it properly
+					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
+					if node != nil {
+						m.mode = ModeNormal
+						m.commandInput.Blur()
+						m.commandInput.SetValue("")
+						m.breadcrumbs = nil
+						m.selectedCmdIdx = 0
+						return m.executeCommand(fmt.Sprintf("%s %s", node.Target, node.Method))
+					}
+				}
+			} else {
+				m.mode = ModeNormal
+				m.commandInput.Blur()
+				m.commandInput.SetValue("")
+				m.breadcrumbs = nil
+				m.selectedCmdIdx = 0
+				return m.executeCommand(opt.Raw)
+			}
+		}
+
 		cmd := m.commandInput.Value()
 		m.mode = ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		m.breadcrumbs = nil
+		m.selectedCmdIdx = 0
 		return m.executeCommand(cmd)
 	case tea.KeyBackspace:
 		if m.commandInput.Value() == "" && len(m.breadcrumbs) > 0 {
@@ -331,27 +386,23 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		}
 	}
 
-	// Dynamic sequence handling for Leader mode
 	if m.isLeader && msg.Type == tea.KeyRunes {
 		char := string(msg.Runes)
-		m.breadcrumbs = append(m.breadcrumbs, char)
-
-		// Check for shortcut matches in the tree
+		// If typing the exact shortcut key of a child, drill down immediately
 		node := m.commandTree.Find(m.breadcrumbs)
 		if node != nil {
-			if len(node.Children) == 0 {
-				// We found a leaf match! Execute it.
-				m.mode = ModeNormal
-				m.commandInput.Blur()
+			if child, ok := node.Children[char]; ok {
+				m.breadcrumbs = append(m.breadcrumbs, char)
 				m.commandInput.SetValue("")
-				m.breadcrumbs = nil
-				return m.executeCommand(fmt.Sprintf("%s %s", node.Target, node.Method))
+				if len(child.Children) == 0 {
+					m.mode = ModeNormal
+					m.commandInput.Blur()
+					m.breadcrumbs = nil
+					m.selectedCmdIdx = 0
+					return m.executeCommand(fmt.Sprintf("%s %s", child.Target, child.Method))
+				}
+				return m, nil
 			}
-			// Otherwise just stay in leader mode and wait for the rest of the sequence
-		} else {
-			// No match, clear breadcrumbs or just stay?
-			// Emacs style: keep waiting but show it's invalid
-			m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
 		}
 	}
 
@@ -431,60 +482,88 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) filteredCommands() []string {
+func fuzzyMatch(target, input string) bool {
+	if input == "" {
+		return true
+	}
+	target = strings.ToLower(target)
+	input = strings.ToLower(input)
+
+	inputIdx := 0
+	for targetIdx := 0; targetIdx < len(target); targetIdx++ {
+		if target[targetIdx] == input[inputIdx] {
+			inputIdx++
+		}
+		if inputIdx == len(input) {
+			return true
+		}
+	}
+	return false
+}
+
+type CommandOption struct {
+	Raw         string
+	Display     string
+	Description string
+	Annotation  string
+	IsDir       bool
+	Method      string
+}
+
+func (m model) filteredCommands() []CommandOption {
+	var results []CommandOption
+
 	if m.mode == ModeCommand && !m.isLeader {
 		input := m.commandInput.Value()
 		if len(input) > 0 && input[0] == ':' {
 			input = input[1:]
 		}
 		
-		var matched []string
 		for _, t := range m.targets {
 			for _, c := range t.Capabilities {
 				full := t.ID + " " + c.Method
-				if strings.Contains(full, input) || input == "" {
-					matched = append(matched, fmt.Sprintf(" %-20s %s", full, c.Description))
+				if fuzzyMatch(full, input) {
+					results = append(results, CommandOption{
+						Raw:         full,
+						Display:     full,
+						Description: c.Description,
+					})
 				}
 			}
 		}
-		if len(matched) > 10 {
-			matched = matched[:10]
+	} else if m.mode == ModeCommand && m.isLeader && m.commandTree != nil {
+		node := m.commandTree.Find(m.breadcrumbs)
+		if node != nil {
+			input := m.commandInput.Value()
+			keys := make([]string, 0, len(node.Children))
+			for k := range node.Children {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			for _, k := range keys {
+				child := node.Children[k]
+				
+				// Label to match against can be the key (k) or the Method 
+				matchStr := k + " " + child.Method
+				if fuzzyMatch(matchStr, input) {
+					results = append(results, CommandOption{
+						Raw:         child.Key,
+						Display:     k,
+						Description: child.Description,
+						Annotation:  child.Annotation,
+						IsDir:       len(child.Children) > 0,
+						Method:      child.Method,
+					})
+				}
+			}
 		}
-		return matched
 	}
 
-	if !m.isLeader || m.commandTree == nil {
-		return nil
+	if len(results) > 10 {
+		results = results[:10]
 	}
-
-	node := m.commandTree.Find(m.breadcrumbs)
-	if node == nil {
-		return nil
-	}
-
-	var matched []string
-	keys := make([]string, 0, len(node.Children))
-	for k := range node.Children {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		child := node.Children[k]
-		annotation := ""
-		if child.Annotation != "" {
-			annotation = fmt.Sprintf("[%s] ", child.Annotation)
-		}
-
-		label := child.Method
-		if len(child.Children) > 0 {
-			label = "..."
-		}
-
-		matched = append(matched, fmt.Sprintf(" %-2s  %s%-15s %s",
-			k, annotation, label, child.Description))
-	}
-	return matched
+	return results
 }
 
 func (m model) View() string {
@@ -537,27 +616,47 @@ func (m model) View() string {
 			if prompt != "" {
 				prompt += " > "
 			}
-
-	// Add filtered commands above the command bar
-	filtered := m.filteredCommands()
-	if len(filtered) > 0 {
-		listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
-		
-		// multi-column if many results
-		var matchedRows []string
-		for i := 0; i < len(filtered); i += 2 {
-			row := filtered[i]
-			if i+1 < len(filtered) {
-				row = fmt.Sprintf("%-45s %s", row, filtered[i+1])
-			}
-			matchedRows = append(matchedRows, row)
-		}
-		
-		listStr := "\n" + strings.Join(matchedRows, "\n")
-		view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
-	}
 		}
 		m.commandInput.Placeholder = prompt
+
+		// Add filtered commands above the command bar
+		filtered := m.filteredCommands()
+		if len(filtered) > 0 {
+			// Live Preview Panel
+			selected := filtered[m.selectedCmdIdx]
+			previewStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("7")).Padding(0, 1).Width(m.width)
+			previewView := previewStyle.Render(fmt.Sprintf("\n PREVIEW: %s\n Description: %s\n", selected.Display, selected.Description))
+			view = lipgloss.JoinVertical(lipgloss.Left, view, previewView)
+
+			listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
+			selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
+
+			var rows []string
+			for i, opt := range filtered {
+				label := opt.Display
+				if m.isLeader {
+					annotation := ""
+					if opt.Annotation != "" {
+						annotation = fmt.Sprintf("[%s] ", opt.Annotation)
+					}
+					method := opt.Method
+					if opt.IsDir {
+						method = "..."
+					}
+					label = fmt.Sprintf("%-2s  %s%-15s", opt.Display, annotation, method)
+				}
+
+				line := fmt.Sprintf(" %-20s %s", label, opt.Description)
+				if i == m.selectedCmdIdx {
+					rows = append(rows, selectedStyle.Render(line))
+				} else {
+					rows = append(rows, line)
+				}
+			}
+
+			listStr := "\n" + strings.Join(rows, "\n")
+			view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
+		}
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
 	}
 
