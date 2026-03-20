@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -106,18 +107,24 @@ func run(w *app.Window, client *frontend.Client) error {
 	})
 
 	for {
-		event := w.Event()
-		switch e := event.(type) {
+		eventEv := w.Event()
+		switch e := eventEv.(type) {
 		case app.DestroyEvent:
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
-			// Capture keyboard events through the editor if possible or globally
+			// Declare interest in events for the 'gui' tag
+			event.Op(gtx.Ops, &gui)
+
+			// Initial focus at startup
+			if gui.mode == ModeNormal && !gtx.Focused(&gui) && !gtx.Focused(&input) {
+				gtx.Execute(key.FocusCmd{Tag: &gui})
+			}
+
+			// Capture keyboard events
 			for {
-				ev, ok := gtx.Event(key.Filter{
-					Focus: &input, // Focus the editor for now
-				})
+				ev, ok := gtx.Event(key.Filter{Focus: &gui}, key.Filter{Focus: &input})
 				if !ok {
 					break
 				}
@@ -127,19 +134,31 @@ func run(w *app.Window, client *frontend.Client) error {
 						gui.mode = ModeNormal
 						gui.isLeader = false
 						gui.breadcrumbs = nil
-						gtx.Execute(key.FocusCmd{Tag: nil}) // Blur
-					case " ":
+						gtx.Execute(key.FocusCmd{Tag: &gui})
+					case key.NameReturn:
+						if gui.mode == ModeCommand {
+							content := input.Text()
+							if content != "" {
+								executeCommand(client, &gui, content, w)
+								input.SetText("")
+								gui.mode = ModeNormal
+								gui.isLeader = false
+								gui.breadcrumbs = nil
+								gtx.Execute(key.FocusCmd{Tag: &gui})
+							}
+						}
+					case key.NameSpace, " ":
 						if gui.mode == ModeNormal {
 							gui.mode = ModeCommand
 							gui.isLeader = true
 							gui.breadcrumbs = nil
 							gtx.Execute(key.FocusCmd{Tag: &input})
-						} else if gui.isLeader {
-							// continue
 						}
 					default:
-						if gui.isLeader && len(string(ke.Name)) == 1 {
-							gui.breadcrumbs = append(gui.breadcrumbs, strings.ToLower(string(ke.Name)))
+						// Handle leader sequence (runes only if len name is actually short or name is Space)
+						nameStr := string(ke.Name)
+						if gui.isLeader && len(nameStr) == 1 {
+							gui.breadcrumbs = append(gui.breadcrumbs, strings.ToLower(nameStr))
 							sequence := strings.Join(gui.breadcrumbs, " ")
 
 							// Check for matches
@@ -151,6 +170,7 @@ func run(w *app.Window, client *frontend.Client) error {
 										gui.isLeader = false
 										gui.breadcrumbs = nil
 										input.SetText("")
+										gtx.Execute(key.FocusCmd{Tag: &gui})
 										goto skipInput
 									}
 								}
@@ -167,10 +187,6 @@ func run(w *app.Window, client *frontend.Client) error {
 					executeCommand(client, &gui, content, w)
 					input.SetText("")
 				}
-			}
-
-			if gui.mode == ModeCommand {
-				gtx.Execute(key.FocusCmd{Tag: &input})
 			}
 
 			layout.Flex{
