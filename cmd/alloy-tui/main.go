@@ -22,6 +22,7 @@ const (
 	ModeNormal  = 0
 	ModeInsert  = 1
 	ModeCommand = 2
+	ModeChat    = 3
 )
 
 type model struct {
@@ -37,11 +38,13 @@ type model struct {
 	msgCh     chan api.Message
 
 	// Modal interface state
-	mode         int
-	commandInput textarea.Model
-	activeBuffer string
-	isLeader     bool
-	breadcrumbs  []string
+	mode          int
+	commandInput  textarea.Model
+	activeBuffer  string
+	activeChannel string
+	isLeader      bool
+	breadcrumbs   []string
+	subscriptions map[string]bool
 }
 
 type registration struct {
@@ -105,13 +108,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		return m, tea.Batch(
-			tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+			tea.Tick(time.Minute, func(t time.Time) tea.Msg { return tickMsg(t) }),
 			m.doDiscovery,
+			m.sendPresenceHeartbeat(),
 		)
 
 	case discoveryMsg:
 		m.targets = msg.Targets
-		return m, nil
+		var cmds []tea.Cmd
+		for _, t := range m.targets {
+			if t.ID == "plugin-events" && !m.subscriptions["chat:message"] {
+				cmds = append(cmds, m.subscribe("chat:message"))
+				cmds = append(cmds, m.subscribe("chat:presence"))
+				m.subscriptions["chat:message"] = true
+				m.subscriptions["chat:presence"] = true
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		// Top-level key handling based on mode
@@ -120,13 +133,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleNormalMode(msg)
 		case ModeInsert:
 			return m.handleInsertMode(msg, tiCmd)
+		case ModeChat:
+			return m.handleChatMode(msg, tiCmd)
 		case ModeCommand:
 			return m.handleCommandMode(msg, ciCmd)
 		}
 
 	case messageMsg:
-		m.messages = append(m.messages, fmt.Sprintf("[%s] %s: %s",
-			time.Now().Format("15:04:05"), msg.Sender, string(msg.Payload)))
+		var displayMsg string
+		if msg.Sender == "plugin-events" {
+			switch msg.Method {
+			case "chat:message":
+				var chatMsg struct {
+					Sender  string `json:"sender"`
+					Channel string `json:"channel"`
+					Content string `json:"content"`
+				}
+				if err := json.Unmarshal(msg.Payload, &chatMsg); err == nil {
+					displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
+						time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
+				}
+			case "chat:presence":
+				var pres struct {
+					User   string `json:"user"`
+					Status string `json:"status"`
+				}
+				if err := json.Unmarshal(msg.Payload, &pres); err == nil {
+					displayMsg = fmt.Sprintf("[%s] * %s is now %s",
+						time.Now().Format("15:04:05"), pres.User, pres.Status)
+				}
+			}
+		}
+
+		if displayMsg == "" {
+			if msg.Type == api.TypeResponse {
+				displayMsg = fmt.Sprintf("[%s] < %s", time.Now().Format("15:04:05"), string(msg.Payload))
+			} else {
+				displayMsg = fmt.Sprintf("[%s] %s: %s",
+					time.Now().Format("15:04:05"), msg.Sender, string(msg.Payload))
+			}
+		}
+
+		m.messages = append(m.messages, displayMsg)
 		m.viewport.SetContent(strings.Join(m.messages, "\n"))
 		m.viewport.GotoBottom()
 		return m, m.listenForMessages()
@@ -159,6 +207,11 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = ModeInsert
 		m.textarea.Focus()
 		return m, nil
+	case "c":
+		m.mode = ModeChat
+		m.textarea.Placeholder = "Type message to #" + m.activeChannel + "..."
+		m.textarea.Focus()
+		return m, nil
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	}
@@ -172,6 +225,60 @@ func (m model) handleInsertMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.C
 		return m, nil
 	}
 	return m, tiCmd
+}
+
+func (m model) handleChatMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.mode = ModeNormal
+		m.textarea.Blur()
+		return m, nil
+	case tea.KeyEnter:
+		content := m.textarea.Value()
+		if content != "" {
+			m.textarea.SetValue("")
+			return m, m.sendChatMessage(content)
+		}
+	}
+	return m, tiCmd
+}
+
+func (m model) subscribe(topic string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		payload, _ := json.Marshal(map[string]string{"topic": topic})
+		_, _ = m.client.Send(ctx, "plugin-events", "subscribe", payload)
+		return nil
+	}
+}
+
+func (m model) sendChatMessage(content string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		payload, _ := json.Marshal(map[string]string{
+			"channel": m.activeChannel,
+			"content": content,
+		})
+		_, err := m.client.Send(ctx, "plugin-chat", "send", payload)
+		if err != nil {
+			return errMsg(err)
+		}
+		return nil
+	}
+}
+
+func (m model) sendPresenceHeartbeat() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		payload, _ := json.Marshal(map[string]string{
+			"status": "online",
+		})
+		_, _ = m.client.Send(ctx, "plugin-chat", "presence:update", payload)
+		return nil
+	}
 }
 
 func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
@@ -257,6 +364,10 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 		if len(parts) > 1 {
 			m.activeBuffer = parts[1]
 		}
+	case "join":
+		if len(parts) > 1 {
+			m.activeChannel = parts[1]
+		}
 	case "ls":
 		// List logic...
 	default:
@@ -319,6 +430,9 @@ func (m model) View() string {
 	case ModeInsert:
 		modeStr = " INSERT "
 		modeStyle = modeStyle.Background(lipgloss.Color("2"))
+	case ModeChat:
+		modeStr = " CHAT "
+		modeStyle = modeStyle.Background(lipgloss.Color("6"))
 	case ModeCommand:
 		if m.isLeader {
 			modeStr = " LEADER "
@@ -332,11 +446,11 @@ func (m model) View() string {
 	statusStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("15"))
 	statusLine := lipgloss.JoinHorizontal(lipgloss.Center,
 		modeStyle.Render(modeStr),
-		statusStyle.Width(m.width-len(modeStr)).Render(fmt.Sprintf(" Buffer: %s", m.activeBuffer)),
+		statusStyle.Width(m.width-len(modeStr)).Render(fmt.Sprintf(" Buffer: %s | Channel: #%s", m.activeBuffer, m.activeChannel)),
 	)
 
 	var mainView string
-	if m.mode == ModeInsert {
+	if m.mode == ModeInsert || m.mode == ModeChat {
 		mainView = m.textarea.View()
 	} else {
 		mainView = m.viewport.View()
@@ -396,10 +510,12 @@ func main() {
 	ci.SetHeight(1)
 
 	m := model{
-		client:       client,
-		textarea:     ta,
-		commandInput: ci,
-		msgCh:        msgCh,
+		client:        client,
+		textarea:      ta,
+		commandInput:  ci,
+		msgCh:         msgCh,
+		activeChannel: "general",
+		subscriptions: make(map[string]bool),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
