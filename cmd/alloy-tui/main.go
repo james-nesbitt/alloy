@@ -119,8 +119,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, t := range m.targets {
 			if t.ID == "plugin-events" && !m.subscriptions["chat:message"] {
 				cmds = append(cmds, m.subscribe("chat:message"))
+				cmds = append(cmds, m.subscribe("chat:direct"))
 				cmds = append(cmds, m.subscribe("chat:presence"))
 				m.subscriptions["chat:message"] = true
+				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
 			}
 		}
@@ -152,6 +154,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := json.Unmarshal(msg.Payload, &chatMsg); err == nil {
 					displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
 						time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
+				}
+			case "chat:direct":
+				var dm struct {
+					From    string `json:"from"`
+					To      string `json:"to"`
+					Content string `json:"content"`
+				}
+				if err := json.Unmarshal(msg.Payload, &dm); err == nil {
+					displayMsg = fmt.Sprintf("[%s] DM (%s > %s) %s",
+						time.Now().Format("15:04:05"), dm.From, dm.To, dm.Content)
 				}
 			case "chat:presence":
 				var pres struct {
@@ -257,11 +269,25 @@ func (m model) sendChatMessage(content string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		payload, _ := json.Marshal(map[string]string{
-			"channel": m.activeChannel,
-			"content": content,
-		})
-		_, err := m.client.Send(ctx, "plugin-chat", "send", payload)
+
+		var method string
+		var payload []byte
+
+		if strings.HasPrefix(m.activeChannel, "dm:") {
+			method = "direct:send"
+			payload, _ = json.Marshal(map[string]string{
+				"to":      m.activeChannel[3:],
+				"content": content,
+			})
+		} else {
+			method = "send"
+			payload, _ = json.Marshal(map[string]string{
+				"channel": m.activeChannel,
+				"content": content,
+			})
+		}
+
+		_, err := m.client.Send(ctx, "plugin-chat", method, payload)
 		if err != nil {
 			return errMsg(err)
 		}
@@ -367,6 +393,12 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	case "join":
 		if len(parts) > 1 {
 			m.activeChannel = parts[1]
+		}
+	case "dm":
+		if len(parts) > 1 {
+			target := parts[1]
+			// The plugin expects dm:A:B where A < B
+			m.activeChannel = "dm:" + target
 		}
 	case "ls":
 		// List logic...
