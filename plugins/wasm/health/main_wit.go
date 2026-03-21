@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin := guest.NewPlugin("health-plugin").
+	plugin := guest.NewPlugin("health").
 		WithMetadata(
 			"Health Plugin", 
 			"Provides health status information for the WASM instance",

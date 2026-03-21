@@ -134,6 +134,13 @@ test-wit-integration: build-wasm
     
     @echo "WIT integration test completed!"
 
+# Run WIT plugin tests
+test-wit-plugins: build-wasm
+    @echo "Running WIT plugin tests..."
+    go test -v ./tests -run "TestWITPlugins" -timeout 120s
+    
+    @echo "WIT plugin tests completed!"
+
 # Generate WIT bindings for WASM plugins
 generate-wit-bindings:
     mkdir -p pkg/wasm/bindings/host/wit-rust pkg/wasm/bindings/guest
@@ -162,14 +169,8 @@ build-wasm:
     for plugin_dir in plugins/wasm/*; do
         if [ -d "$plugin_dir" ]; then
             plugin_name=$(basename "$plugin_dir")
-            case "$plugin_name" in
-                "plugin-chat") target_name="chat" ;;
-                "buffer-manager") target_name="buffer" ;;
-                "ai-agent") target_name="ai" ;;
-                "health-wasm") target_name="health" ;;
-                "plugin-project-manager") target_name="project" ;;
-                *) target_name="$plugin_name" ;;
-            esac
+            target_name="$plugin_name"  # Default to plugin_name
+            
             echo "Building WASM with WIT: $plugin_name -> build/wasm/$target_name.wasm"
             
             # Copy WIT bindings to the plugin directory

@@ -1,0 +1,439 @@
+package tests
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/jnesbitt/alloy-go/api"
+	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/jnesbitt/alloy-go/pkg/wasm2"
+)
+
+func TestWITPlugins(t *testing.T) {
+	// Skip for now - this would require a complete test environment
+	t.Skip("WIT plugin test - requires complete test environment")
+
+	// Create a temporary directory for test data
+	tempDir, err := os.MkdirTemp("", "wit-plugins-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Set up logger
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Set up storage
+	storagePath := filepath.Join(tempDir, "storage")
+	kv, err := storage.NewBadgerStore(storagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kv.Close()
+
+	// Create message router
+	var receivedMessages []api.Message
+	router := func(ctx context.Context, msg api.Message) {
+		receivedMessages = append(receivedMessages, msg)
+	}
+
+	// Create call function
+	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
+		resp := api.Message{
+			ID:      msg.ID + "-response",
+			Type:    "response",
+			Method:  msg.Method,
+			Sender:  msg.Target,
+			Target:  msg.Sender,
+			Payload: json.RawMessage(`{"result":"success"}`),
+		}
+		return resp, nil
+	}
+
+	// Create manager
+	manager, err := wasm2.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+
+	// Build all plugins
+	justBuildAll := exec.Command("just", "build-wasm")
+	if err := justBuildAll.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test each plugin
+	testPlugins := []struct {
+		name     string
+		wasmFile string
+		caps     []api.Capability
+		tests    func(t *testing.T, manager *wasm2.Manager)
+	}{
+		{
+			name:     "health",
+			wasmFile: "build/wasm/health.wasm",
+			caps:     []api.Capability{{Method: "status", Description: "Get health status"}},
+			tests:    testHealthPlugin,
+		},
+		{
+			name:     "buffer",
+			wasmFile: "build/wasm/buffer.wasm",
+			caps:     []api.Capability{
+				{Method: "create", Description: "Create buffer"},
+				{Method: "list", Description: "List buffers"},
+			},
+			tests:    testBufferPlugin,
+		},
+		{
+			name:     "chat",
+			wasmFile: "build/wasm/chat.wasm",
+			caps:     []api.Capability{
+				{Method: "send", Description: "Send message"},
+				{Method: "history", Description: "Get history"},
+			},
+			tests:    testChatPlugin,
+		},
+		{
+			name:     "ai",
+			wasmFile: "build/wasm/ai.wasm",
+			caps:     []api.Capability{
+				{Method: "query", Description: "Query AI"},
+				{Method: "config:get", Description: "Get AI config"},
+			},
+			tests:    testAIPlugin,
+		},
+		{
+			name:     "project",
+			wasmFile: "build/wasm/project.wasm",
+			caps:     []api.Capability{
+				{Method: "create", Description: "Create project"},
+				{Method: "list", Description: "List projects"},
+			},
+			tests:    testProjectPlugin,
+		},
+		{
+			name:     "iam",
+			wasmFile: "build/wasm/iam.wasm",
+			caps:     []api.Capability{
+				{Method: "check", Description: "Check authorization"},
+			},
+			tests:    testIAMPlugin,
+		},
+		{
+			name:     "secrets",
+			wasmFile: "build/wasm/secrets.wasm",
+			caps:     []api.Capability{
+				{Method: "store_secret", Description: "Store secret"},
+				{Method: "get_secret", Description: "Get secret"},
+			},
+			tests:    testSecretsPlugin,
+		},
+		{
+			name:     "tasks",
+			wasmFile: "build/wasm/tasks.wasm",
+			caps:     []api.Capability{
+				{Method: "create", Description: "Create task"},
+				{Method: "list", Description: "List tasks"},
+			},
+			tests:    testTasksPlugin,
+		},
+	}
+
+	// Test each plugin
+	for _, tp := range testPlugins {
+		t.Run(tp.name, func(t *testing.T) {
+			// Read the WASM file
+			wasmBytes, err := os.ReadFile(tp.wasmFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Load the plugin
+			err = manager.LoadPlugin(context.Background(), tp.name, wasmBytes, tp.caps)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Wait for plugin to initialize
+			time.Sleep(200 * time.Millisecond)
+
+			// Run plugin-specific tests
+			tp.tests(t, manager)
+		})
+	}
+
+	t.Log("All WIT plugin tests completed successfully!")
+}
+
+// Test functions for each plugin
+
+func testHealthPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test health status
+	testMsg := api.Message{
+		ID:      "test-health",
+		Method:  "status",
+		Sender:  "test-client",
+		Target:  "health",
+		Payload: json.RawMessage(`{}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "health", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "health")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-health-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	if payload["status"] != "healthy" {
+		t.Errorf("unexpected status: %s", payload["status"])
+	}
+}
+
+func testBufferPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test buffer creation
+	testMsg := api.Message{
+		ID:      "test-buffer-create",
+		Method:  "create",
+		Sender:  "test-client",
+		Target:  "buffer",
+		Payload: json.RawMessage(`{"name":"test-buffer","type":"ephemeral"}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "buffer", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "buffer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-buffer-create-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	var buffer struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(resp.Payload, &buffer); err != nil {
+		t.Fatal(err)
+	}
+
+	if buffer.ID == "" {
+		t.Error("buffer ID should not be empty")
+	}
+}
+
+func testChatPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test sending a message
+	testMsg := api.Message{
+		ID:      "test-chat-send",
+		Method:  "send",
+		Sender:  "test-client",
+		Target:  "chat",
+		Payload: json.RawMessage(`{"channel":"general","content":"Hello, world!"}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "chat", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-chat-send-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+}
+
+func testAIPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test getting AI config
+	testMsg := api.Message{
+		ID:      "test-ai-config",
+		Method:  "config:get",
+		Sender:  "test-client",
+		Target:  "ai",
+		Payload: json.RawMessage(`{}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "ai", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "ai")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-ai-config-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	var config struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(resp.Payload, &config); err != nil {
+		t.Fatal(err)
+	}
+
+	if config.Type == "" {
+		t.Error("AI config type should not be empty")
+	}
+}
+
+func testProjectPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test project creation
+	testMsg := api.Message{
+		ID:      "test-project-create",
+		Method:  "create",
+		Sender:  "test-client",
+		Target:  "project",
+		Payload: json.RawMessage(`{"name":"test-project","description":"Test project"}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "project", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-project-create-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	var project struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(resp.Payload, &project); err != nil {
+		t.Fatal(err)
+	}
+
+	if project.ID == "" {
+		t.Error("project ID should not be empty")
+	}
+}
+
+func testIAMPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test authorization check
+	testMsg := api.Message{
+		ID:      "test-iam-check",
+		Method:  "check",
+		Sender:  "test-client",
+		Target:  "iam",
+		Payload: json.RawMessage(`{"actor":"test-user","target":"chat","method":"send"}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "iam", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "iam")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-iam-check-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	var result struct {
+		Allowed bool `json:"allowed"`
+	}
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be allowed (guest role has default permissions)
+	if !result.Allowed {
+		t.Error("authorization should be allowed")
+	}
+}
+
+func testSecretsPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test storing a secret
+	testMsg := api.Message{
+		ID:      "test-secrets-store",
+		Method:  "store_secret",
+		Sender:  "test-client",
+		Target:  "secrets",
+		Payload: json.RawMessage(`{"id":"test-secret","value":"secret-value"}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "secrets", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-secrets-store-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+}
+
+func testTasksPlugin(t *testing.T, manager *wasm2.Manager) {
+	// Test creating a task
+	testMsg := api.Message{
+		ID:      "test-tasks-create",
+		Method:  "create",
+		Sender:  "test-client",
+		Target:  "tasks",
+		Payload: json.RawMessage(`{"title":"Test task","description":"Test description"}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "tasks", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "tasks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-tasks-create-response" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Status != "created" {
+		t.Errorf("unexpected status: %s", result.Status)
+	}
+}
