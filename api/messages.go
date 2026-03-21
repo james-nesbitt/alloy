@@ -59,6 +59,12 @@ type Plugin interface {
 	Shutdown(ctx context.Context) error
 }
 
+// ReadinessProvider is an optional interface for plugins that need time to 
+// initialize after loading but before receiving their first message.
+type ReadinessProvider interface {
+	Ready(ctx context.Context) error
+}
+
 func (m Message) ToSpanAttributes() []attribute.KeyValue {
 	return []attribute.KeyValue{
 		attribute.String("alloy.msg.id", m.ID),

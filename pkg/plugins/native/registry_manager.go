@@ -145,6 +145,14 @@ func (r *RegistryManager) LoadPlugin(ctx context.Context, id string) (api.Plugin
 		s.SetRouter(r.kernel.RouteMessage)
 	}
 
+	// Wait for plugin readiness if implemented
+	if ready, ok := instance.(api.ReadinessProvider); ok {
+		r.logger.Info("waiting for native plugin readiness", "plugin_id", id)
+		if err := ready.Ready(ctx); err != nil {
+			return nil, fmt.Errorf("native plugin %s failed readiness check: %w", id, err)
+		}
+	}
+
 	// Native registration with CM
 	caps := p.Capabilities()
 	if caps == nil {

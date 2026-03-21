@@ -71,11 +71,45 @@ func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore,
 	}, nil
 }
 
+type logWriter struct {
+	logger *slog.Logger
+	plugin string
+	isErr  bool
+	buf    bytes.Buffer
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	n = len(p)
+	for _, b := range p {
+		if b == '\n' {
+			w.flush()
+		} else {
+			w.buf.WriteByte(b)
+			if w.buf.Len() > 4096 {
+				w.flush()
+			}
+		}
+	}
+	return n, nil
+}
+
+func (w *logWriter) flush() {
+	msg := strings.TrimSpace(w.buf.String())
+	if msg != "" {
+		if w.isErr {
+			w.logger.Error("wasm_stderr", "plugin", w.plugin, "msg", msg)
+		} else {
+			w.logger.Info("wasm_stdout", "plugin", w.plugin, "msg", msg)
+		}
+	}
+	w.buf.Reset()
+}
+
 func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, memoryLimitMB uint64, fuelLimit uint64, caps []api.Capability) (api.Plugin, error) {
 	config := wazero.NewModuleConfig().
 		WithName(id).
-		WithStdout(os.Stdout).
-		WithStderr(os.Stderr).
+		WithStdout(&logWriter{logger: r.logger, plugin: id}).
+		WithStderr(&logWriter{logger: r.logger, plugin: id, isErr: true}).
 		WithSysWalltime().
 		WithSysNanotime()
 
@@ -156,8 +190,7 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, offset, byteCount uint32) {
 			buf, ok := mod.Memory().Read(offset, byteCount)
 			if ok {
-				fmt.Fprintf(os.Stderr, "[WASM LOG] %s: %s\n", mod.Name(), string(buf))
-				r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", string(buf))
+				r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", strings.TrimSpace(string(buf)))
 			}
 		}).
 		Export("log").
