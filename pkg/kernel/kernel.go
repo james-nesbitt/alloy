@@ -37,10 +37,13 @@ type Kernel struct {
 
 	// stopCh is used to signal the kernel to shut down
 	stopCh chan struct{}
+
+	telemetry *Telemetry
 }
 
 // New creates a new instance of the Alloy Kernel.
 func New(logger *slog.Logger) *Kernel {
+	tel, _ := initTelemetry()
 	return &Kernel{
 		logger:       logger,
 		plugins:      make(map[string]api.Plugin),
@@ -48,6 +51,7 @@ func New(logger *slog.Logger) *Kernel {
 		interceptors: make([]api.Interceptor, 0),
 		stopCh:       make(chan struct{}),
 		tracer:       otel.Tracer(tracerName),
+		telemetry:    tel,
 	}
 }
 
@@ -67,6 +71,9 @@ func (k *Kernel) Stop(ctx context.Context) error {
 // RegisterPlugin attaches a plugin to the kernel.
 func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	k.mu.Lock()
+	if _, exists := k.plugins[p.ID()]; !exists {
+		k.telemetry.PluginCountChange(context.Background(), 1)
+	}
 	k.plugins[p.ID()] = p
 	// Automatically register if it implements Interceptor
 	if i, ok := p.(api.Interceptor); ok {
@@ -113,6 +120,7 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	defer span.End()
 
 	k.logger.Debug("routing message", "id", msg.ID, "sender", msg.Sender, "method", msg.Method, "target", msg.Target)
+	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
 
 	// Pre-Route Interception
 	if ctx.Value(skipInterceptorsKey) == nil {
@@ -169,11 +177,13 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			newMsg, allow, err := interceptor.PreRoute(ctx, msg)
 			if err != nil {
 				k.logger.Error("interceptor error", "error", err, "target", msg.Target)
+				k.telemetry.RecordError(ctx, msg.Target, "interceptor_fail")
 				span.RecordError(err)
 				return
 			}
 			if !allow {
 				k.logger.Warn("routing denied by interceptor", "sender", msg.Sender, "target", msg.Target)
+				k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
 				span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
 				return
 			}
