@@ -45,6 +45,7 @@ type model struct {
 	frequency     map[string]int
 	statuses      map[string]string
 	selectedCmdIdx int
+	leaderMenuWidth int
 
 	activeProject *Project
 	projects      []Project
@@ -498,27 +499,47 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		m.selectedCmdIdx = 0
 		return m.executeCommand(cmd)
 	case tea.KeyBackspace:
-		if m.commandInput.Value() == "" && len(m.breadcrumbs) > 0 {
-			m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
+		if m.commandInput.Value() == "" && m.isLeader {
+			if len(m.breadcrumbs) > 0 {
+				m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
+				m.selectedCmdIdx = 0
+				return m, nil
+			} else {
+				m.isLeader = false
+				m.commandInput.SetValue(":")
+				return m, nil
+			}
 		}
 	}
 
-	if m.isLeader && msg.Type == tea.KeyRunes {
+	if m.isLeader && msg.Type == tea.KeyRunes && m.commandInput.Value() == "" {
 		char := string(msg.Runes)
+		if char == ":" {
+			m.isLeader = false
+			m.breadcrumbs = nil
+			m.commandInput.SetValue(":")
+			m.selectedCmdIdx = 0
+			return m, nil
+		}
+
 		// If typing the exact shortcut key of a child, drill down immediately
 		node := m.commandTree.Find(m.breadcrumbs)
 		if node != nil {
 			if child, ok := node.Children[char]; ok {
-				m.breadcrumbs = append(m.breadcrumbs, char)
-				m.commandInput.SetValue("")
 				if len(child.Children) == 0 {
 					m.mode = ModeNormal
-					m.commandInput.Blur()
+					m.isLeader = false
 					m.breadcrumbs = nil
 					m.selectedCmdIdx = 0
+					m.commandInput.Blur()
+					m.commandInput.SetValue("")
 					return m.executeCommand(fmt.Sprintf("%s %s", child.Target, child.Method))
+				} else {
+					m.breadcrumbs = append(m.breadcrumbs, char)
+					m.selectedCmdIdx = 0
+					m.commandInput.SetValue("")
+					return m, nil
 				}
-				return m, nil
 			}
 		}
 	}
@@ -809,8 +830,8 @@ func (m model) filteredCommands() []CommandOption {
 
 			for _, k := range keys {
 				child := node.Children[k]
-				// Match against key or shortcut representation
-				if frontend.FuzzyMatch(k, input) {
+				// Match against key or method name
+				if frontend.FuzzyMatch(k, input) || frontend.FuzzyMatch(child.Method, input) {
 					status := "running"
 					if s, ok := m.statuses[child.Target]; ok {
 						status = s
@@ -848,6 +869,71 @@ func (m model) filteredCommands() []CommandOption {
 		results = results[:10]
 	}
 	return results
+}
+
+func (m model) leaderMenuView() string {
+	if !m.isLeader {
+		return ""
+	}
+	
+	node := m.commandTree.Find(m.breadcrumbs)
+	if node == nil {
+		return ""
+	}
+
+	keys := make([]string, 0, len(node.Children))
+	for k := range node.Children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var items []string
+	for _, k := range keys {
+		child := node.Children[k]
+		label := k
+		desc := child.Description
+		if len(child.Children) > 0 {
+			desc = "..."
+		}
+		
+		item := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).Bold(true).Render(label) + " " + 
+			lipgloss.NewStyle().Foreground(lipgloss.Color("200")).Render("→") + " " +
+			lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render(desc)
+		
+		items = append(items, item)
+	}
+
+	// Calculate column layout - simple for now, but better than flat list
+	columnCount := 3
+	if len(items) < 5 { columnCount = 1 }
+	
+	var rows []string
+	for i := 0; i < len(items); i += columnCount {
+		rowItems := items[i:min(i+columnCount, len(items))]
+		row := ""
+		for _, ri := range rowItems {
+			row += fmt.Sprintf("%-25s", ri) + "  "
+		}
+		rows = append(rows, row)
+	}
+
+	title := " " + strings.Join(append([]string{"Leader"}, m.breadcrumbs...), " > ") + " "
+	titleStyle := lipgloss.NewStyle().Background(lipgloss.Color("62")).Foreground(lipgloss.Color("255")).Bold(true)
+	
+	menuBody := strings.Join(rows, "\n")
+	
+	menuStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(0, 1)
+
+	return "\n" + titleStyle.Render(title) + "\n" + menuStyle.Render(menuBody)
+}
+
+func min(a, b int) int {
+	if a < b { return a }
+	return b
 }
 
 func (m model) View() string {
@@ -911,55 +997,59 @@ func (m model) View() string {
 		}
 		m.commandInput.Placeholder = prompt
 
-		// Add filtered commands above the command bar
-		filtered := m.filteredCommands()
-		if len(filtered) > 0 {
-			// Live Preview Panel
-			selected := filtered[m.selectedCmdIdx]
-			previewStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("7")).Padding(0, 1).Width(m.width)
-			previewView := previewStyle.Render(fmt.Sprintf("\n PREVIEW: %s\n Description: %s\n", selected.Display, selected.Description))
-			view = lipgloss.JoinVertical(lipgloss.Left, view, previewView)
+		// Add Leader Menu or Filtered Commands above the command bar
+		if m.isLeader && m.commandInput.Value() == "" {
+			view = lipgloss.JoinVertical(lipgloss.Left, view, m.leaderMenuView())
+		} else {
+			filtered := m.filteredCommands()
+			if len(filtered) > 0 {
+				// Live Preview Panel
+				selected := filtered[m.selectedCmdIdx]
+				previewStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("7")).Padding(0, 1).Width(m.width)
+				previewView := previewStyle.Render(fmt.Sprintf("\n PREVIEW: %s\n Description: %s\n", selected.Display, selected.Description))
+				view = lipgloss.JoinVertical(lipgloss.Left, view, previewView)
 
-			listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
-			selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
+				listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
+				selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
 
-			var rows []string
-			for i, opt := range filtered {
-				label := opt.Display
-				
-				statusStr := ""
-				if opt.Status == "crashed" {
-					statusStr = " (CRASHED)"
-				}
-
-				if m.isLeader {
-					annotation := ""
-					if opt.Annotation != "" {
-						annotation = fmt.Sprintf("[%s] ", opt.Annotation)
-					}
-					method := opt.Method
-					if opt.IsDir {
-						method = "..."
-					}
-					label = fmt.Sprintf("%-2s  %s%-15s%s", opt.Display, annotation, method, statusStr)
-				} else {
-					label = fmt.Sprintf("%-20s%s", opt.Display, statusStr)
-				}
-
-				line := fmt.Sprintf(" %-20s %s", label, opt.Description)
-				if i == m.selectedCmdIdx {
-					rows = append(rows, selectedStyle.Render(line))
-				} else {
+				var rows []string
+				for i, opt := range filtered {
+					label := opt.Display
+					
+					statusStr := ""
 					if opt.Status == "crashed" {
-						rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(line))
+						statusStr = " (CRASHED)"
+					}
+
+					if m.isLeader {
+						annotation := ""
+						if opt.Annotation != "" {
+							annotation = fmt.Sprintf("[%s] ", opt.Annotation)
+						}
+						method := opt.Method
+						if opt.IsDir {
+							method = "..."
+						}
+						label = fmt.Sprintf("%-2s  %s%-15s%s", opt.Display, annotation, method, statusStr)
 					} else {
-						rows = append(rows, line)
+						label = fmt.Sprintf("%-20s%s", opt.Display, statusStr)
+					}
+
+					line := fmt.Sprintf(" %-20s %s", label, opt.Description)
+					if i == m.selectedCmdIdx {
+						rows = append(rows, selectedStyle.Render(line))
+					} else {
+						if opt.Status == "crashed" {
+							rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(line))
+						} else {
+							rows = append(rows, line)
+						}
 					}
 				}
-			}
 
-			listStr := "\n" + strings.Join(rows, "\n")
-			view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
+				listStr := "\n" + strings.Join(rows, "\n")
+				view = lipgloss.JoinVertical(lipgloss.Left, view, listStyle.Render(listStr))
+			}
 		}
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
 	} else if m.mode == ModeForm {
