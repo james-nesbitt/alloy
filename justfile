@@ -114,6 +114,19 @@ run-wit-example: build-core build-wit-example
 install-wit-bindgen:
     cargo install wit-bindgen-cli --version 0.24.0
 
+# Test WIT implementation
+test-wit: generate-wit-bindings build-test-wasm
+    @echo "Running WIT runtime tests..."
+    cd pkg/wasm2/runtime && go test -v
+    
+    @echo "Running WIT manager tests..."
+    cd pkg/wasm2 && go test -v
+    
+    @echo "Running WIT kernel tests..."
+    cd pkg/kernel && go test -v -run "TestWIT.*"
+    
+    @echo "WIT implementation tests completed!"
+
 # Generate WIT bindings for WASM plugins
 generate-wit-bindings:
     mkdir -p pkg/wasm/bindings/host/wit-rust pkg/wasm/bindings/guest
