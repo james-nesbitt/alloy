@@ -153,14 +153,23 @@ func (m *Manager) HandleMessage(ctx context.Context, msg api.Message) (api.Messa
 	case "status":
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		statusList := make([]map[string]any, 0, len(m.plugins))
-		for id, p := range m.plugins {
-			st, errStr := p.Status()
-			statusList = append(statusList, map[string]any{
-				"id":    id,
-				"status": string(st),
-				"error":  errStr,
-			})
+		statusList := make([]map[string]any, 0, len(m.defs))
+		for id, def := range m.defs {
+			if p, active := m.plugins[id]; active {
+				st, errStr := p.Status()
+				statusList = append(statusList, map[string]any{
+					"id":     id,
+					"status": string(st),
+					"error":  errStr,
+					"path":   def.Path,
+				})
+			} else {
+				statusList = append(statusList, map[string]any{
+					"id":     id,
+					"status": "dormant",
+					"path":   def.Path,
+				})
+			}
 		}
 		return api.Message{
 			ID:      msg.ID + "-resp",
@@ -210,9 +219,7 @@ func (m *Manager) LoadPlugin(ctx context.Context, id string) (api.Plugin, error)
 
 	instance, ok := p.(*Instance)
 	if ok {
-		m.mu.Lock()
 		m.plugins[id] = instance
-		m.mu.Unlock()
 	}
 
 	// Note: We don't call registerWithCommandManager here anymore because 

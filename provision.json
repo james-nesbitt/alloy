@@ -23,10 +23,7 @@
     {
       "id": "plugin-health",
       "type": "native",
-      "load_time": "boot",
-      "capabilities": [
-        {"method": "system:health", "description": "Get native system health status"}
-      ]
+      "load_time": "boot"
     },
     {
       "id": "plugin-chat",
@@ -34,48 +31,7 @@
       "path": "build/wasm/chat.wasm",
       "load_time": "lazy",
       "capabilities": [
-        {"method": "send", "description": "Send a chat message"},
-        {"method": "list_channels", "description": "List available chat channels"}
-      ]
-    },
-    {
-      "id": "plugin-project-manager",
-      "type": "wasm",
-      "path": "build/wasm/project.wasm",
-      "load_time": "lazy",
-      "capabilities": [
-        {"method": "list_projects", "description": "List all tracked projects"},
-        {"method": "open_project", "description": "Open a project by path"}
-      ]
-    },
-    {
-      "id": "plugin-ai-agent",
-      "type": "wasm",
-      "path": "build/wasm/ai.wasm",
-      "load_time": "lazy",
-      "capabilities": [
-        {"method": "query", "description": "Ask the AI agent a question"},
-        {"method": "summarize", "description": "Summarize a text buffer"}
-      ]
-    },
-    {
-      "id": "plugin-buffer-manager",
-      "type": "wasm",
-      "path": "build/wasm/buffer.wasm",
-      "load_time": "lazy",
-      "capabilities": [
-        {"method": "create", "description": "Create a new text buffer"},
-        {"method": "list", "description": "List open buffers"}
-      ]
-    },
-    {
-      "id": "plugin-secrets",
-      "type": "wasm",
-      "path": "build/wasm/secrets.wasm",
-      "load_time": "lazy",
-      "capabilities": [
-        {"method": "get", "description": "Retrieve a secret by key"},
-        {"method": "set", "description": "Store a secret securely"}
+        {"method": "send", "description": "Send a chat message"}
       ]
     }
   ]

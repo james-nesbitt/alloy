@@ -32,6 +32,13 @@ type MessageHandler func(msg Message) Message
 var (
 	handler      MessageHandler
 	capabilities []Capability
+    
+    // pinned holds references to allocated buffers to prevent GC collection
+    pinned = make(map[uint32][]byte)
+
+    // Global buffers for message passing to avoid allocation in exports
+    inBuffer  [64 * 1024]byte
+    outBuffer [64 * 1024]byte
 )
 
 // SetHandler registers the plugin's message handler.
@@ -42,26 +49,6 @@ func SetHandler(h MessageHandler) {
 // SetCapabilities registers the plugin's capabilities.
 func SetCapabilities(caps []Capability) {
 	capabilities = caps
-}
-
-// alloy_capabilities is exported for the host to query the plugin's capabilities.
-//export alloy_capabilities
-//go:wasmexport alloy_capabilities
-func Alloy_capabilities() uint64 {
-	if capabilities == nil {
-		return 0
-	}
-	data, err := json.Marshal(capabilities)
-	if err != nil {
-		return 0
-	}
-	ptr := Alloy_malloc(uint32(len(data)))
-	if ptr == 0 {
-		return 0
-	}
-	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), uint32(len(data)))
-	copy(buf, data)
-	return uint64(uintptr(ptr))<<32 | uint64(len(data))
 }
 
 //go:wasmimport alloy log
@@ -159,7 +146,8 @@ func Fetch(req FetchRequest) (*FetchResponse, error) {
 	)
 
 	if res != 0 {
-		return nil, json.Unmarshal([]byte(`{"error":"fetch_failed"}`), &struct{}{}) // Just a placeholder error
+		// Mock error response for failed fetch
+		return nil, json.Unmarshal([]byte(`{"error":"fetch_failed"}`), &struct{}{})
 	}
 
 	// Read response data from allocated memory
@@ -168,9 +156,6 @@ func Fetch(req FetchRequest) (*FetchResponse, error) {
 	if err := json.Unmarshal(respBuf, &resp); err != nil {
 		return nil, err
 	}
-
-	// Free the memory allocated by the host
-	Alloy_free(uintptr(respPtr))
 
 	return &resp, nil
 }
@@ -185,50 +170,54 @@ func RouteMessage(msg Message) bool {
 	return alloyRouteMessage(uint32(ptr), uint32(len(data))) == 0
 }
 
-// A simple bump allocator on a global buffer.
-// We avoid Go's heap for exports to prevent "panic on system stack".
-var (
-    simpleHeap [1024 * 1024]byte
-    heapIdx    int
-)
+// alloy_get_in_ptr returns the address of the input buffer.
+//go:wasmexport alloy_get_in_ptr
+func Alloy_get_in_ptr() uint32 {
+	return uint32(uintptr(unsafe.Pointer(&inBuffer[0])))
+}
+
+// alloy_get_out_ptr returns the address of the output buffer.
+//go:wasmexport alloy_get_out_ptr
+func Alloy_get_out_ptr() uint32 {
+	return uint32(uintptr(unsafe.Pointer(&outBuffer[0])))
+}
 
 // alloy_malloc is exported for the host to allocate memory in the guest.
-//export alloy_malloc
 //go:wasmexport alloy_malloc
-func Alloy_malloc(size uint32) uintptr {
+func Alloy_malloc(size uint32) uint32 {
 	if size == 0 {
 		return 0
 	}
-    
-    if heapIdx + int(size) > len(simpleHeap) {
-        heapIdx = 0 // Reset
-    }
-    
-    ptr := uintptr(unsafe.Pointer(&simpleHeap[heapIdx]))
-    heapIdx += int(size)
+	buf := make([]byte, size)
+	ptr := uint32(uintptr(unsafe.Pointer(&buf[0])))
+	pinned[ptr] = buf
 	return ptr
 }
 
 // alloy_free is exported for the host to free memory in the guest.
-//export alloy_free
 //go:wasmexport alloy_free
-func Alloy_free(ptr uintptr) {
-    // No-op bump allocator
+func Alloy_free(ptr uint32) {
+	delete(pinned, ptr)
 }
 
 // alloy_handle_message is exported for the host to send messages to the guest.
-//export alloy_handle_message
 //go:wasmexport alloy_handle_message
-func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
-	// 1. Read message from guest memory
-	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)
-	var msg Message
-	if err := json.Unmarshal(buf, &msg); err != nil {
+func Alloy_handle_message(size uint32) uint32 {
+	if size > uint32(len(inBuffer)) {
 		return 0
 	}
+	// 1. Read message from guest memory (inBuffer)
+	buf := inBuffer[:size]
+	var msg Message
+	if err := json.Unmarshal(buf, &msg); err != nil {
+		Log("Guest Unmarshal error: " + err.Error())
+		return 0
+	}
+	Log("Guest received: " + msg.ID + " method: " + msg.Method)
 
 	// 2. Call the registered handler
 	if handler == nil {
+		Log("Guest error: handler is nil")
 		return 0
 	}
 	resp := handler(msg)
@@ -239,18 +228,35 @@ func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
 	// 3. Serialize response
 	respBuf, err := json.Marshal(resp)
 	if err != nil {
+		Log("Guest Marshal error: " + err.Error())
 		return 0
 	}
 
-	// 4. Copy response to an allocated buffer
-	respSize := uint32(len(respBuf))
-	outPtr := Alloy_malloc(respSize)
-	if outPtr == 0 {
+	if len(respBuf) > len(outBuffer) {
+		Log("Guest error: response too large")
 		return 0
 	}
-	outBuf := unsafe.Slice((*byte)(unsafe.Pointer(outPtr)), respSize)
-	copy(outBuf, respBuf)
 
-	// 5. Return packed offset and size
-	return uint64(uintptr(outPtr))<<32 | uint64(respSize)
+	// 4. Copy response to output buffer
+	copy(outBuffer[:], respBuf)
+
+	// 5. Return size
+	return uint32(len(respBuf))
+}
+
+// alloy_capabilities is exported for the host to query the plugin's capabilities.
+//go:wasmexport alloy_capabilities
+func Alloy_capabilities() uint32 {
+	if capabilities == nil {
+		return 0
+	}
+	data, err := json.Marshal(capabilities)
+	if err != nil {
+		return 0
+	}
+	if len(data) > len(outBuffer) {
+		return 0
+	}
+	copy(outBuffer[:], data)
+	return uint32(len(data))
 }

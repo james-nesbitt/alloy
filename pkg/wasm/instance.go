@@ -47,34 +47,29 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, err
 	}
 
-	size := uint64(len(payload))
-	malloc := i.mod.ExportedFunction("alloy_malloc")
-	if malloc == nil {
-		return api.Message{}, fmt.Errorf("plugin missing 'alloy_malloc' export")
+	// 1. Get input buffer pointer
+	getInPtr := i.mod.ExportedFunction("alloy_get_in_ptr")
+	if getInPtr == nil {
+		return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_in_ptr' export")
 	}
-
-	results, err := malloc.Call(ctx, size)
+	results, err := getInPtr.Call(ctx)
 	if err != nil {
-		return api.Message{}, fmt.Errorf("failed to allocate memory in guest: %w", err)
+		return api.Message{}, fmt.Errorf("failed to get input pointer: %w", err)
 	}
-	ptr := uint32(results[0])
+	inPtr := uint32(results[0])
 
-	defer func() {
-		if free := i.mod.ExportedFunction("alloy_free"); free != nil {
-			_, _ = free.Call(ctx, uint64(ptr))
-		}
-	}()
-
-	if !i.mod.Memory().Write(ptr, payload) {
+	// 2. Write payload to guest input buffer
+	if !i.mod.Memory().Write(inPtr, payload) {
 		return api.Message{}, fmt.Errorf("failed to write payload to guest memory")
 	}
 
+	// 3. Call handler
 	handler := i.mod.ExportedFunction("alloy_handle_message")
 	if handler == nil {
 		return api.Message{}, fmt.Errorf("plugin missing 'alloy_handle_message' export")
 	}
 
-	handleResults, err := handler.Call(ctx, uint64(ptr), size)
+	handleResults, err := handler.Call(ctx, uint64(len(payload)))
 	if err != nil {
 		i.status = StatusCrashed
 		i.lastError = err.Error()
@@ -82,21 +77,23 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, fmt.Errorf("failed to call alloy_handle_message: %w", err)
 	}
 
-	packed := handleResults[0]
-	respPtr := uint32(packed >> 32)
-	respSize := uint32(packed)
-
+	respSize := uint32(handleResults[0])
 	if respSize == 0 {
 		return api.Message{}, nil
 	}
 
-	respBuf, ok := i.mod.Memory().Read(respPtr, respSize)
+	// 4. Get output buffer pointer
+	getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
+	results, err = getOutPtr.Call(ctx)
+	if err != nil {
+		return api.Message{}, fmt.Errorf("failed to get output pointer: %w", err)
+	}
+	outPtr := uint32(results[0])
+
+	// 5. Read response
+	respBuf, ok := i.mod.Memory().Read(outPtr, respSize)
 	if !ok {
 		return api.Message{}, fmt.Errorf("failed to read response from guest memory")
-	}
-
-	if free := i.mod.ExportedFunction("alloy_free"); free != nil {
-		_, _ = free.Call(ctx, uint64(respPtr))
 	}
 
 	var resp api.Message
@@ -115,6 +112,10 @@ func (i *Instance) Capabilities() []api.Capability {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+    if len(i.capabilities) > 0 {
+        return i.capabilities
+    }
+
 	fn := i.mod.ExportedFunction("alloy_capabilities")
 	if fn == nil {
 		return nil
@@ -125,15 +126,16 @@ func (i *Instance) Capabilities() []api.Capability {
 		return nil
 	}
 
-	packed := results[0]
-	ptr := uint32(packed >> 32)
-	size := uint32(packed)
-
-	if size == 0 {
+	side := uint32(results[0])
+	if side == 0 {
 		return nil
 	}
 
-	buf, ok := i.mod.Memory().Read(ptr, size)
+	getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
+	ptrResults, _ := getOutPtr.Call(context.Background())
+	ptr := uint32(ptrResults[0])
+
+	buf, ok := i.mod.Memory().Read(ptr, side)
 	if !ok {
 		return nil
 	}
