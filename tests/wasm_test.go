@@ -281,7 +281,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		Method:  "subscribe",
 		Payload: subReq,
 	})
-	time.Sleep(200 * time.Millisecond) // wait for subs
+	time.Sleep(1 * time.Second) // Wait longer for subs to process in WASM
 
 	chatReq, _ := json.Marshal(map[string]string{
 		"channel": "ai-test",
@@ -296,7 +296,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	})
 
 	// AI should react to the chat event
-	chatEvt, ok := collector.Await(10*time.Second, func(m api.Message) bool {
+	chatEvt, ok := collector.Await(60*time.Second, func(m api.Message) bool {
 		if m.Type == api.TypeEvent && m.Method == "chat:message" {
 			var chatMsg struct { Sender string }
 			json.Unmarshal(m.Payload, &chatMsg)

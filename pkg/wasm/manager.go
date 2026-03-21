@@ -224,19 +224,14 @@ func (m *Manager) LoadPlugin(ctx context.Context, id string) (api.Plugin, error)
 		return nil, fmt.Errorf("failed to read wasm file: %w", err)
 	}
 
-	p, err := m.runtime.LoadPlugin(ctx, id, content, def.MemoryLimit, def.FuelLimit, def.Capabilities)
+	p, err := m.runtime.LoadPlugin(ctx, id, content, def.FuelLimit, Pages(def.MemoryLimit), def.Capabilities)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate wasm plugin: %w", err)
 	}
 
-	instance, ok := p.(*Instance)
-	if ok {
-		m.plugins[id] = instance
-	}
-
-	// Note: We don't call registerWithCommandManager here anymore because 
-	// Kernel.RegisterPlugin now emits a component:registered event with 
-	// actual capabilities once the plugin is active.
+	m.mu.Lock()
+	m.plugins[id] = p
+	m.mu.Unlock()
 
 	return p, nil
 }
@@ -358,33 +353,30 @@ func (m *Manager) reloadPlugin(id string) {
 	}
 
 	// 3. Load new plugin
-	p, err := m.runtime.LoadPlugin(context.Background(), id, content, def.MemoryLimit, def.FuelLimit, def.Capabilities)
+	p, err := m.runtime.LoadPlugin(context.Background(), id, content, def.FuelLimit, Pages(def.MemoryLimit), def.Capabilities)
 	if err != nil {
 		m.logger.Error("failed to swap wasm plugin on reload", "id", id, "error", err)
 		m.publishError("plugin:reload_failed", id, err.Error())
 		return
 	}
 
-	instance, ok := p.(*Instance)
-	if ok {
-		m.mu.Lock()
-		m.plugins[id] = instance
-		m.mu.Unlock()
+	m.mu.Lock()
+	m.plugins[id] = p
+	m.mu.Unlock()
 
-		// 4. Restore state if we have it
-		if len(state) > 0 {
-			m.logger.Info("restoring state for plugin", "id", id)
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = instance.HandleMessage(ctx, api.Message{
-				ID:      "reload-load-" + id,
-				Type:    api.TypeRequest,
-				Sender:  m.ID(),
-				Target:  id,
-				Method:  "system:load_state",
-				Payload: state,
-			})
-			cancel()
-		}
+	// 4. Restore state if we have it
+	if len(state) > 0 {
+		m.logger.Info("restoring state for plugin", "id", id)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = p.HandleMessage(ctx, api.Message{
+			ID:      "reload-load-" + id,
+			Type:    api.TypeRequest,
+			Sender:  m.ID(),
+			Target:  id,
+			Method:  "system:load_state",
+			Payload: state,
+		})
+		cancel()
 	}
 
 	// Update the kernel registry (hot swap)

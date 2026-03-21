@@ -18,7 +18,7 @@ func TestWasmGoOrchestration(t *testing.T) {
 	dataDir, _ := os.MkdirTemp("", "alloy-wasm-test-*")
 	defer os.RemoveAll(dataDir)
 
-	r, err := NewRuntime(ctx, logger, kv, dataDir, nil)
+	r, err := NewRuntime(ctx, logger, kv, dataDir, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}

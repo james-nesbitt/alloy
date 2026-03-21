@@ -1,17 +1,13 @@
 package wasm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
+	"sync"
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
@@ -20,114 +16,51 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
-const (
-	HostModuleName = "alloy"
-	WasmPageSize   = 65536 // 64KB
-)
+// RouterFunc is a function that routes messages to their targets.
+type RouterFunc func(ctx context.Context, msg api.Message)
 
-// Runtime manages the wazero WASM environment.
+// CallFunc is a function that performs a synchronous call to another plugin.
+type CallFunc func(ctx context.Context, msg api.Message) (api.Message, error)
+
+// Runtime manages the WASM runtime environment.
 type Runtime struct {
-	logger   *slog.Logger
-	r        wazero.Runtime
-	kv       storage.StateStore
-	dataDir  string
-	routerFn func(context.Context, api.Message)
-	callFn   func(context.Context, api.Message) (api.Message, error)
+	r          wazero.Runtime
+	logger     *slog.Logger
+	kv         storage.StateStore
+	dataDir    string
+	routerFn   RouterFunc
+	callFn     CallFunc
+	
+	// Map to look up active plugin instances by name for host callbacks
+	mu      sync.RWMutex
+	plugins map[string]*Instance
 }
 
-// NewRuntime creates a new Alloy WASM runtime.
-func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore, dataDir string, router func(context.Context, api.Message), call func(context.Context, api.Message) (api.Message, error)) (*Runtime, error) {
-	// Use Compiler for better performance.
-	nc := wazero.NewRuntimeConfigCompiler().
-		WithCoreFeatures(wazeroapi.CoreFeaturesV2)
-
-	rt := wazero.NewRuntimeWithConfig(ctx, nc)
-
-	// Ensure dataDir exists
-	if dataDir != "" {
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create runtime data directory: %w", err)
-		}
-	}
-
-	// Instantiate WASI properly
-	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
-
-	// Instantiate Asyncify stub (needed by TinyGo in some configurations)
-	if _, err := rt.NewHostModuleBuilder("asyncify").
-		NewFunctionBuilder().WithFunc(func(i int32) {}).Export("start_unwind").
-		NewFunctionBuilder().WithFunc(func() {}).Export("stop_unwind").
-		NewFunctionBuilder().WithFunc(func(i int32) {}).Export("start_rewind").
-		NewFunctionBuilder().WithFunc(func() {}).Export("stop_rewind").
-		NewFunctionBuilder().WithFunc(func() int32 { return 0 }).Export("get_state").
-		Instantiate(ctx); err != nil {
-		return nil, fmt.Errorf("failed to instantiate asyncify stub: %w", err)
-	}
-
-	return &Runtime{
+// NewRuntime creates a new WASM runtime.
+func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore, dataDir string, router RouterFunc, call CallFunc) (*Runtime, error) {
+	r := wazero.NewRuntime(ctx)
+	
+	rt := &Runtime{
+		r:        r,
 		logger:   logger,
-		r:        rt,
 		kv:       kv,
 		dataDir:  dataDir,
 		routerFn: router,
 		callFn:   call,
-	}, nil
-}
-
-func (r *Runtime) recoverPanic(id string) {
-	if err := recover(); err != nil {
-		r.logger.Error("WASM host-guest call panic recovered", "plugin", id, "error", err)
+		plugins:  make(map[string]*Instance),
 	}
+
+	return rt, nil
 }
 
-type logWriter struct {
-	logger *slog.Logger
-	plugin string
-	isErr  bool
-	buf    bytes.Buffer
-}
-
-func (w *logWriter) Write(p []byte) (n int, err error) {
-	n = len(p)
-	for _, b := range p {
-		if b == '\n' {
-			w.flush()
-		} else {
-			w.buf.WriteByte(b)
-			if w.buf.Len() > 4096 {
-				w.flush()
-			}
-		}
-	}
-	return n, nil
-}
-
-func (w *logWriter) flush() {
-	msg := strings.TrimSpace(w.buf.String())
-	if msg != "" {
-		if w.isErr {
-			w.logger.Error("wasm_stderr", "plugin", w.plugin, "msg", msg)
-		} else {
-			w.logger.Info("wasm_stdout", "plugin", w.plugin, "msg", msg)
-		}
-	}
-	w.buf.Reset()
-}
-
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, memoryLimitMB uint64, fuelLimit uint64, caps []api.Capability) (api.Plugin, error) {
+// LoadPlugin instantiates a WASM plugin.
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, fuelLimit uint64, memoryLimit Pages, caps []api.Capability) (*Instance, error) {
 	config := wazero.NewModuleConfig().
 		WithName(id).
-		WithStdout(&logWriter{logger: r.logger, plugin: id}).
-		WithStderr(&logWriter{logger: r.logger, plugin: id, isErr: true}).
-		WithSysWalltime().
-		WithSysNanotime()
-
-	if memoryLimitMB > 0 {
-		// 1 MB = 1024 * 1024 / 65536 = 16 pages
-		// Note: wazero v1.x does not support setting per-module memory limits via ModuleConfig.
-		// These must be defined in the WASM binary or set globally for the runtime.
-		// _ = uint32(memoryLimitMB * 1024 * 1024 / WasmPageSize)
-	}
+		WithStdout(r.newLoggerWriter(id, "stdout")).
+		WithStderr(r.newLoggerWriter(id, "stderr")).
+		WithFS(os.DirFS(".")). // default, replaced if dataDir set
+		WithStartFunctions()
 
 	// Map storage for the plugin
 	if r.dataDir != "" {
@@ -145,57 +78,60 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 	}
 
 	startChan := make(chan [2]uint32, 1)
-	loadCtx := context.WithValue(ctx, "alloy.start_chan", startChan)
+	instCtx, instCancel := context.WithCancel(context.Background())
+	loadCtx := context.WithValue(instCtx, "alloy.start_chan", startChan)
 
-	// Instantiate the module. 
-	// We use WithStartFunctions() with no args to prevent InstantiateModule from 
-	// blocking on _start if it's a command module.
-	mod, err := r.r.InstantiateModule(loadCtx, compiled, config.WithStartFunctions())
+	// Instantiate the module
+	mod, err := r.r.InstantiateModule(loadCtx, compiled, config)
 	if err != nil {
+		instCancel()
 		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
 	}
 
-	if startFunc := mod.ExportedFunction("_start"); startFunc != nil {
-		// Command mode - call _start in a goroutine
-		r.logger.Info("starting wasm command goroutine", "id", id)
-		go func() {
-			defer r.recoverPanic(id)
-			_, _ = startFunc.Call(loadCtx)
-		}()
-		
-		// Wait for the plugin to signal it's started
-		var ptrs [2]uint32
-		select {
-		case ptrs = <-startChan:
-			r.logger.Info("wasm plugin ready", "id", id, "in_ptr", ptrs[0], "out_ptr", ptrs[1])
-			// Wait a tiny bit more for TinyGo stack/scheduler to settle
-			time.Sleep(5 * time.Millisecond)
-		case <-ctx.Done():
-			return nil, fmt.Errorf("timed out waiting for plugin %s to start", id)
-		}
-
-		r.logger.Info("instantiated wasm module", "id", id)
-
-		return &Instance{
-			id:           id,
-			mod:          mod,
-			logger:       r.logger,
-			inPtr:        ptrs[0],
-			outPtr:       ptrs[1],
-			defaultFuel:  fuelLimit,
-			status:       StatusRunning,
-			capabilities: caps,
-		}, nil
-	}
-
-	return &Instance{
+	// Create the instance
+	instance := &Instance{
 		id:           id,
+		ctx:          instCtx,
+		cancel:       instCancel,
 		mod:          mod,
 		logger:       r.logger,
+		msgChan:      make(chan api.Message, 32),
+		respChan:     make(chan api.Message, 32),
 		defaultFuel:  fuelLimit,
 		status:       StatusRunning,
 		capabilities: caps,
-	}, nil
+	}
+
+	// Register it so host functions can find it
+	r.mu.Lock()
+	r.plugins[id] = instance
+	r.mu.Unlock()
+
+	// Wait for readiness handshake if it was a command module
+	if startFunc := mod.ExportedFunction("_start"); startFunc != nil {
+		// We use a background context for the long-running _start function
+		// but we still want the startChan from loadCtx.
+		startCtx := context.WithValue(context.Background(), "alloy.start_chan", startChan)
+		go func() {
+			if _, err := startFunc.Call(startCtx); err != nil {
+				r.logger.Error("plugin _start exited with error", "id", id, "error", err)
+				instance.status = StatusCrashed
+				instance.lastError = err.Error()
+			}
+		}()
+
+		// Wait for the plugin to signal it's started
+		select {
+		case ptrs := <-startChan:
+			r.logger.Info("wasm plugin ready", "id", id, "in_ptr", ptrs[0], "out_ptr", ptrs[1])
+			instance.inPtr = ptrs[0]
+			instance.outPtr = ptrs[1]
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timed out waiting for plugin %s to start", id)
+		}
+	}
+
+	return instance, nil
 }
 
 // Close shuts down the runtime.
@@ -204,304 +140,290 @@ func (r *Runtime) Close(ctx context.Context) error {
 }
 
 // InstantiateAlloyHost defines the host-side functions available to plugins.
-// alloy_kv_delete(kPtr, kLen uint32) uint32
-func (r *Runtime) alloyKVDelete(ctx context.Context, mod wazeroapi.Module, stack []uint64) {
-	kPtr := uint32(stack[0])
-	kLen := uint32(stack[1])
-
-	mem := mod.Memory()
-	keyBuf, ok := mem.Read(kPtr, kLen)
-	if !ok {
-		stack[0] = 1
-		return
-	}
-
-	key := string(keyBuf)
-	namespace := mod.Name()
-	if strings.HasPrefix(key, "shared:") {
-		namespace = "shared"
-		key = key[7:]
-	}
-
-	if err := r.kv.Delete(namespace, key); err != nil {
-		r.logger.Error("kv delete failed", "namespace", namespace, "key", key, "error", err)
-		stack[0] = 1
-		return
-	}
-	stack[0] = 0
-}
-
-// alloy_kv_list(pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32
-func (r *Runtime) alloyKVList(ctx context.Context, mod wazeroapi.Module, stack []uint64) {
-	pPtr := uint32(stack[0])
-	pLen := uint32(stack[1])
-	respPtrPtr := uint32(stack[2])
-	respSizePtr := uint32(stack[3])
-
-	mem := mod.Memory()
-	pBuf, ok := mem.Read(pPtr, pLen)
-	if !ok {
-		stack[0] = 1
-		return
-	}
-
-	prefix := string(pBuf)
-	namespace := mod.Name()
-	if strings.HasPrefix(prefix, "shared:") {
-		namespace = "shared"
-		prefix = prefix[7:]
-	}
-
-	keys, err := r.kv.List(namespace, prefix)
-	if err != nil {
-		r.logger.Error("kv list failed", "namespace", namespace, "prefix", prefix, "error", err)
-		stack[0] = 1
-		return
-	}
-
-	data, err := json.Marshal(keys)
-	if err != nil {
-		stack[0] = 1
-		return
-	}
-
-	// Allocate memory in guest for the response
-	malloc := mod.ExportedFunction("alloy_malloc")
-	if malloc == nil {
-		stack[0] = 1
-		return
-	}
-
-	res, err := malloc.Call(ctx, uint64(len(data)))
-	if err != nil || len(res) == 0 {
-		stack[0] = 1
-		return
-	}
-	ptr := uint32(res[0])
-
-	if !mem.Write(ptr, data) {
-		stack[0] = 1
-		return
-	}
-
-	if !mem.WriteUint32Le(respPtrPtr, ptr) {
-		stack[0] = 1
-		return
-	}
-	if !mem.WriteUint32Le(respSizePtr, uint32(len(data))) {
-		stack[0] = 1
-		return
-	}
-
-	stack[0] = 0
-}
-
 func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, error) {
-	if mod := r.r.Module(HostModuleName); mod != nil {
-		return mod, nil
-	}
+	_, _ = wasi_snapshot_preview1.Instantiate(ctx, r.r)
 
-	return r.r.NewHostModuleBuilder(HostModuleName).
+	r.logger.Info("Instantiating alloy host module")
+	return r.r.NewHostModuleBuilder("alloy").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, offset, byteCount uint32) {
-			buf, ok := mod.Memory().Read(offset, byteCount)
-			if ok {
-				r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", strings.TrimSpace(string(buf)))
-			}
-		}).
+		WithFunc(r.alloyLog).
 		Export("log").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vLen uint32) uint32 {
-			kBuf, kOk := mod.Memory().Read(kPtr, kLen)
-			vBuf, vOk := mod.Memory().Read(vPtr, vLen)
-			if !kOk || !vOk { return 1 }
-			key := string(kBuf)
-			namespace := mod.Name()
-			if strings.HasPrefix(key, "shared:") {
-				namespace = "shared"
-				key = key[7:]
-			}
-			if err := r.kv.Set(namespace, key, vBuf); err != nil { return 1 }
-			return 0
-		}).
+		WithFunc(r.alloyKVSet).
 		Export("kv_set").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vMaxLen uint32) uint32 {
-			kBuf, ok := mod.Memory().Read(kPtr, kLen)
-			if !ok { return 0 }
-			key := string(kBuf)
-			namespace := mod.Name()
-			if strings.HasPrefix(key, "shared:") {
-				namespace = "shared"
-				key = key[7:]
-			}
-			val, err := r.kv.Get(namespace, key)
-			if err != nil || val == nil { return 0 }
-			if uint32(len(val)) > vMaxLen { return uint32(len(val)) }
-			if !mod.Memory().Write(vPtr, val) { return 0 }
-			return uint32(len(val))
-		}).
+		WithFunc(r.alloyKVGet).
 		Export("kv_get").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, kPtr, kLen uint32) uint32 {
-			kBuf, ok := mod.Memory().Read(kPtr, kLen)
-			if !ok { return 1 }
-			key := string(kBuf)
-			namespace := mod.Name()
-			if strings.HasPrefix(key, "shared:") {
-				namespace = "shared"
-				key = key[7:]
-			}
-			if err := r.kv.Delete(namespace, key); err != nil { return 1 }
-			return 0
-		}).
+		WithFunc(r.alloyKVDelete).
 		Export("kv_delete").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32 {
-			pBuf, ok := mod.Memory().Read(pPtr, pLen)
-			if !ok { return 1 }
-			prefix := string(pBuf)
-			namespace := mod.Name()
-			if strings.HasPrefix(prefix, "shared:") {
-				namespace = "shared"
-				prefix = prefix[7:]
-			}
-			keys, err := r.kv.List(namespace, prefix)
-			if err != nil { return 1 }
-			data, err := json.Marshal(keys)
-			if err != nil { return 1 }
-
-			// Allocate in guest
-			malloc := mod.ExportedFunction("alloy_malloc")
-			if malloc == nil { return 1 }
-			res, err := malloc.Call(ctx, uint64(len(data)))
-			if err != nil || len(res) == 0 { return 1 }
-			ptr := uint32(res[0])
-
-			if !mod.Memory().Write(ptr, data) { return 1 }
-			if !mod.Memory().WriteUint32Le(respPtrPtr, ptr) { return 1 }
-			if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(data))) { return 1 }
-			return 0
-		}).
+		WithFunc(r.alloyKVList).
 		Export("kv_list").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, size, respPtrPtr, respSizePtr uint32) uint32 {
-			buf, ok := mod.Memory().Read(ptr, size)
-			if !ok { return 1 }
-			var msg api.Message
-			if err := json.Unmarshal(buf, &msg); err != nil { return 1 }
-			resp, err := r.callFn(ctx, msg)
-			if err != nil { return 1 }
-			data, err := json.Marshal(resp)
-			if err != nil { return 1 }
-
-			// Allocate in guest
-			malloc := mod.ExportedFunction("alloy_malloc")
-			if malloc == nil { return 1 }
-			res, err := malloc.Call(ctx, uint64(len(data)))
-			if err != nil || len(res) == 0 { return 1 }
-			ptrResp := uint32(res[0])
-
-			if !mod.Memory().Write(ptrResp, data) { return 1 }
-			if !mod.Memory().WriteUint32Le(respPtrPtr, ptrResp) { return 1 }
-			if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(data))) { return 1 }
-			return 0
-		}).
-		Export("call").
-		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, size uint32) uint32 {
-			buf, ok := mod.Memory().Read(ptr, size)
-			if !ok { return 1 }
-			var msg api.Message
-			if err := json.Unmarshal(buf, &msg); err != nil { return 1 }
-			r.routerFn(ctx, msg)
-			return 0
-		}).
+		WithFunc(r.alloyRouteMessage).
 		Export("route_message").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module, inPtr, outPtr uint32) {
-			r.logger.Info("wasm plugin signaled started (host)", "id", mod.Name())
-			// Signal that the plugin has started and initialized its runtime
-			if router, ok := ctx.Value("alloy.start_chan").(chan [2]uint32); ok {
-				select {
-				case router <- [2]uint32{inPtr, outPtr}:
-				default:
-				}
-			}
-		}).
+		WithFunc(r.alloyStarted).
 		Export("started").
+		NewFunctionBuilder().
+		WithFunc(r.hostYield).
+		Export("yield").
+		NewFunctionBuilder().
+		WithFunc(r.hostSleepForever).
+		Export("sleep_forever").
+		NewFunctionBuilder().
+		WithFunc(r.hostGetNextMessage).
+		Export("get_next_message").
+		NewFunctionBuilder().
+		WithFunc(r.alloySendResponse).
+		Export("send_response").
 		NewFunctionBuilder().
 		WithFunc(r.hostFetch).
 		Export("fetch").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context) {
-			// Stay alive until context is cancelled (plugin shutdown)
-			<-ctx.Done()
-		}).
-		Export("sleep_forever").
+		WithFunc(r.alloyCall).
+		Export("call").
 		Instantiate(ctx)
 }
 
-func (r *Runtime) hostFetch(ctx context.Context, mod wazeroapi.Module, reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32 {
-	// 1. Read request from guest
-	reqBuf, ok := mod.Memory().Read(reqPtr, reqSize)
+func (r *Runtime) hostYield(ctx context.Context, mod wazeroapi.Module) {}
+
+func (r *Runtime) hostSleepForever(ctx context.Context, mod wazeroapi.Module) {
+	// Effectively block the main goroutine
+	<-ctx.Done()
+}
+
+func (r *Runtime) hostGetNextMessage(ctx context.Context, mod wazeroapi.Module, ptr, maxSize uint32) uint32 {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	if !ok { return 0 }
+
+	select {
+	case msg := <-instance.msgChan:
+		r.logger.Debug("pulling message for guest", "plugin", mod.Name(), "method", msg.Method, "id", msg.ID)
+		data, err := json.Marshal(msg)
+		if err != nil { return 0 }
+		if uint32(len(data)) > maxSize { return 0 }
+		if mod.Memory().Write(ptr, data) {
+			return uint32(len(data))
+		}
+		return 0
+	case <-ctx.Done():
+		return 0
+	}
+}
+
+func (r *Runtime) alloySendResponse(ctx context.Context, mod wazeroapi.Module, ptr, size uint32) {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	if !ok { return }
+
+	if size == 0 {
+		select {
+		case instance.respChan <- api.Message{}:
+		default:
+		}
+		return
+	}
+
+	buf, ok := mod.Memory().Read(ptr, size)
+	if !ok { return }
+
+	var resp api.Message
+	if err := json.Unmarshal(buf, &resp); err != nil {
+		r.logger.Error("failed to unmarshal guest response", "plugin", mod.Name(), "error", err)
+		return
+	}
+
+	r.logger.Debug("received response from guest", "plugin", mod.Name(), "id", resp.ID)
+	select {
+	case instance.respChan <- resp:
+	default:
+	}
+}
+
+func (r *Runtime) alloyStarted(ctx context.Context, mod wazeroapi.Module, inPtr, outPtr uint32) {
+	r.logger.Info("wasm plugin signaled started (host)", "id", mod.Name())
+	if router, ok := ctx.Value("alloy.start_chan").(chan [2]uint32); ok {
+		select {
+		case router <- [2]uint32{inPtr, outPtr}:
+		default:
+		}
+	}
+}
+
+func (r *Runtime) alloyLog(ctx context.Context, mod wazeroapi.Module, ptr, size uint32) {
+	buf, ok := mod.Memory().Read(ptr, size)
+	if !ok { return }
+	r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", string(buf))
+}
+
+func (r *Runtime) alloyKVSet(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vLen uint32) uint32 {
+	key, ok := mod.Memory().Read(kPtr, kLen)
 	if !ok { return 1 }
-
-	var req struct {
-		Method  string            `json:"method"`
-		URL     string            `json:"url"`
-		Headers map[string]string `json:"headers"`
-		Body    []byte            `json:"body"`
-	}
-	if err := json.Unmarshal(reqBuf, &req); err != nil { return 1 }
-
-	// 2. Perform HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bytes.NewBuffer(req.Body))
-	if err != nil { return 1 }
-	for k, v := range req.Headers {
-		httpReq.Header.Set(k, v)
+	
+	var val []byte
+	if vLen > 0 {
+		val, ok = mod.Memory().Read(vPtr, vLen)
+		if !ok { return 1 }
 	}
 
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		r.logger.Error("host fetch failed", "url", req.URL, "error", err)
+	if err := r.kv.Set(mod.Name(), string(key), val); err != nil {
 		return 1
 	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	
-	// 3. Prepare response for guest
-	result := struct {
-		Status  int               `json:"status"`
-		Headers map[string]string `json:"headers"`
-		Body    []byte            `json:"body"`
-	}{
-		Status:  resp.StatusCode,
-		Headers: make(map[string]string),
-		Body:    respBody,
-	}
-	for k, v := range resp.Header {
-		result.Headers[k] = v[0]
-	}
-
-	resBuf, _ := json.Marshal(result)
-	
-	// 4. Allocate memory in guest via exported Alloy_malloc (this assumes Alloy_malloc exists)
-	// We need to call back into the guest to allocate space for the result.
-	malloc := mod.ExportedFunction("alloy_malloc")
-	if malloc == nil { return 1 }
-
-	results, err := malloc.Call(ctx, uint64(len(resBuf)))
-	if err != nil { return 1 }
-	outPtr := uint32(results[0])
-
-	// 5. Write results into allocated guest memory
-	if !mod.Memory().Write(outPtr, resBuf) { return 1 }
-
-	// 6. Write pointer and size back to out parameters
-	if !mod.Memory().WriteUint32Le(respPtrPtr, outPtr) { return 1 }
-	if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(resBuf))) { return 1 }
-
 	return 0
 }
+
+func (r *Runtime) alloyKVGet(ctx context.Context, mod wazeroapi.Module, kPtr, kLen, vPtr, vMaxLen uint32) uint32 {
+	key, ok := mod.Memory().Read(kPtr, kLen)
+	if !ok { return 0 }
+
+	val, err := r.kv.Get(mod.Name(), string(key))
+	if err != nil {
+		return 0
+	}
+
+	if vMaxLen == 0 {
+		return uint32(len(val))
+	}
+
+	if uint32(len(val)) > vMaxLen {
+		return 0
+	}
+
+	if mod.Memory().Write(vPtr, val) {
+		return uint32(len(val))
+	}
+	return 0
+}
+
+func (r *Runtime) alloyKVDelete(ctx context.Context, mod wazeroapi.Module, kPtr, kLen uint32) uint32 {
+	key, ok := mod.Memory().Read(kPtr, kLen)
+	if !ok { return 1 }
+	if err := r.kv.Delete(mod.Name(), string(key)); err != nil {
+		return 1
+	}
+	return 0
+}
+
+func (r *Runtime) alloyKVList(ctx context.Context, mod wazeroapi.Module, pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32 {
+	prefix, ok := mod.Memory().Read(pPtr, pLen)
+	if !ok { return 1 }
+
+	keys, err := r.kv.List(mod.Name(), string(prefix))
+	if err != nil { return 1 }
+
+	data, err := json.Marshal(keys)
+	if err != nil { return 1 }
+
+	malloc := mod.ExportedFunction("alloy_malloc")
+	if malloc == nil { return 1 }
+	res, err := malloc.Call(ctx, uint64(len(data)))
+	if err != nil || len(res) == 0 { return 1 }
+	ptr := uint32(res[0])
+
+	if !mod.Memory().Write(ptr, data) { return 1 }
+	if !mod.Memory().WriteUint32Le(respPtrPtr, ptr) { return 1 }
+	if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(data))) { return 1 }
+	return 0
+}
+
+func (r *Runtime) alloyRouteMessage(ctx context.Context, mod wazeroapi.Module, ptr, size uint32) {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	buf, ok_mem := mod.Memory().Read(ptr, size)
+	if !ok_mem { return }
+	var msg api.Message
+	if err := json.Unmarshal(buf, &msg); err != nil { return }
+	
+	// Use instance context if available, otherwise wazero ctx
+	routeCtx := ctx
+	if ok {
+		routeCtx = instance.ctx
+	}
+	r.routerFn(routeCtx, msg)
+}
+
+func (r *Runtime) alloyCall(ctx context.Context, mod wazeroapi.Module, ptr, size, respPtrPtr, respSizePtr uint32) uint32 {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	buf, ok_mem := mod.Memory().Read(ptr, size)
+	if !ok_mem { return 1 }
+	var msg api.Message
+	if err := json.Unmarshal(buf, &msg); err != nil { return 1 }
+
+	// Use instance context if available
+	callCtx := ctx
+	if ok {
+		callCtx = instance.ctx
+	}
+	resp, err := r.callFn(callCtx, msg)
+	if err != nil { return 1 }
+
+	data, err := json.Marshal(resp)
+	if err != nil { return 1 }
+
+	malloc := mod.ExportedFunction("alloy_malloc")
+	if malloc == nil { return 1 }
+	res, err := malloc.Call(ctx, uint64(len(data)))
+	if err != nil || len(res) == 0 { return 1 }
+	ptrResp := uint32(res[0])
+
+	if !mod.Memory().Write(ptrResp, data) { return 1 }
+	if !mod.Memory().WriteUint32Le(respPtrPtr, ptrResp) { return 1 }
+	if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(data))) { return 1 }
+	return 0
+}
+
+func (r *Runtime) hostFetch(ctx context.Context, mod wazeroapi.Module, reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32 {
+	// Not implemented yet
+	return 1
+}
+
+type loggerWriter struct {
+	logger *slog.Logger
+	id     string
+	stream string
+	buf    []byte
+}
+
+func (r *Runtime) newLoggerWriter(id, stream string) *loggerWriter {
+	return &loggerWriter{
+		logger: r.logger,
+		id:     id,
+		stream: stream,
+	}
+}
+
+func (l *loggerWriter) Write(p []byte) (n int, err error) {
+	l.buf = append(l.buf, p...)
+	for {
+		idx := -1
+		for i, b := range l.buf {
+			if b == '\n' {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 { break }
+		line := string(l.buf[:idx])
+		l.buf = l.buf[idx+1:]
+		if l.stream == "stdout" {
+			l.logger.Info("wasm_stdout", "plugin", l.id, "msg", line)
+		} else {
+			l.logger.Info("wasm_stderr", "plugin", l.id, "msg", line)
+		}
+	}
+	return len(p), nil
+}
+
+type Pages uint32

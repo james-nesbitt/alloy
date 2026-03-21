@@ -287,8 +287,30 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 }
 
 func (k *Kernel) deliverToPlugin(ctx context.Context, p api.Plugin, msg api.Message) {
-	go func(plugin api.Plugin, m api.Message, c context.Context) {
-		childCtx, childSpan := k.tracer.Start(c, "plugin.HandleMessage",
+	// We use a background context here because we are starting a decoupled delivery goroutine.
+	// However, we want to maintain the tracing span context if possible.
+	go func(plugin api.Plugin, m api.Message, parentCtx context.Context) {
+		// Use context.Background() to ensure the delivery isn't cancelled when the router returns
+		// but preserve the trace span from parentCtx.
+		deliveryCtx := context.Background()
+		if parentCtx != nil {
+			// Copy important values 
+			if audit, ok := parentCtx.Value(auditContextKey).(bool); ok {
+				deliveryCtx = context.WithValue(deliveryCtx, auditContextKey, audit)
+			}
+			if skip, ok := parentCtx.Value(skipInterceptorsKey).(bool); ok {
+				deliveryCtx = context.WithValue(deliveryCtx, skipInterceptorsKey, skip)
+			}
+		}
+
+		// Preserve the trace span from the parent context
+		if parentCtx != nil {
+			if span := trace.SpanFromContext(parentCtx); span.SpanContext().IsValid() {
+				deliveryCtx = trace.ContextWithSpan(deliveryCtx, span)
+			}
+		}
+
+		childCtx, childSpan := k.tracer.Start(deliveryCtx, "plugin.HandleMessage",
 			trace.WithAttributes(attribute.String("alloy.plugin.id", plugin.ID())))
 		defer childSpan.End()
 

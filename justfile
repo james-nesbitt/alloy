@@ -114,13 +114,8 @@ build-wasm:
                 "plugin-project-manager") target_name="project" ;;
                 *) target_name="$plugin_name" ;;
             esac
-            echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"
-            # Use TinyGo if available, otherwise Standard Go wasip1
-            if command -v tinygo >/dev/null 2>&1; then
-                (cd "$plugin_dir" && PATH="$TMP_BIN:$PATH" tinygo build -target=wasip1 -no-debug -stack-size=128kb -o "../../../build/wasm/$target_name.wasm" .)
-            else
-                (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm go build -o "../../../build/wasm/$target_name.wasm" .)
-            fi
+            echo "Building WASM (Standard Go): $plugin_name -> build/wasm/$target_name.wasm"
+            (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm go build -ldflags="-s -w" -o "../../../build/wasm/$target_name.wasm" .)
         fi
     done
     rm -rf .tmp-bin

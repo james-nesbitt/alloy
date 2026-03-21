@@ -7,29 +7,7 @@ import (
 	"unsafe"
 )
 
-// Message is a copy of the api.Message to avoid circular dependencies.
-type Message struct {
-	ID        string          `json:"id"`
-	Type      string          `json:"type"`
-	Sender    string          `json:"sender"`
-	Target    string          `json:"target,omitempty"`
-	Method    string          `json:"method"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	Timestamp int64           `json:"timestamp"`
-	Actor     string          `json:"actor,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-}
-
-// Capability describes a functionality provided by a component.
-type Capability struct {
-	Method      string            `json:"method,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Shortcut    string            `json:"shortcut,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-}
-
-type MessageHandler func(msg Message) Message
-
+// Global state variables for the plugin.
 var (
 	handler      MessageHandler
 	capabilities []Capability
@@ -68,13 +46,19 @@ func alloyKVDelete(kPtr, kLen uint32) uint32
 func alloyKVList(pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32
 
 //go:wasmimport alloy route_message
-func alloyRouteMessage(ptr uint32, size uint32) uint32
+func alloyRouteMessage(ptr uint32, size uint32)
 
 //go:wasmimport alloy fetch
 func alloyFetch(reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32
 
 //go:wasmimport alloy started
 func alloyStarted(inPtr, outPtr uint32)
+
+//go:wasmimport alloy sleep_forever
+func alloySleepForever()
+
+//go:wasmimport alloy yield
+func alloyYield()
 
 //go:wasmimport alloy call
 func alloyCall(ptr, size, respPtrPtr, respSizePtr uint32) uint32
@@ -84,6 +68,11 @@ func PluginStarted() {
 	inPtr := uint32(uintptr(unsafe.Pointer(&inBuffer[0])))
 	outPtr := uint32(uintptr(unsafe.Pointer(&outBuffer[0])))
 	alloyStarted(inPtr, outPtr)
+}
+
+// SleepForever blocks the main goroutine indefinitely via a host call.
+func SleepForever() {
+	alloySleepForever()
 }
 
 // Log sends a string to the host's logger.
@@ -201,7 +190,8 @@ func RouteMessage(msg Message) bool {
 		return false
 	}
 	ptr := uintptr(unsafe.Pointer(&data[0]))
-	return alloyRouteMessage(uint32(ptr), uint32(len(data))) == 0
+	alloyRouteMessage(uint32(ptr), uint32(len(data)))
+	return true
 }
 
 // Call performs a synchronous call to another plugin.
@@ -284,10 +274,13 @@ func Alloy_handle_message(size uint32) uint32 {
 		Log("Guest handler is nil")
 		return 0
 	}
+	Log("Calling guest handler...")
 	resp := handler(msg)
 	if resp.ID == "" && resp.Target == "" {
+		Log("Guest handler returned empty response")
 		return 0
 	}
+	Log("Guest handler returned response: " + resp.Method)
 
 	// 3. Serialize response
 	respBuf, err := json.Marshal(resp)

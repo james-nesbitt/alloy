@@ -23,6 +23,8 @@ const (
 // Instance represents a single loaded WASM plugin.
 type Instance struct {
 	id          string
+	ctx         context.Context
+	cancel      context.CancelFunc
 	mod         wazeroapi.Module
 	logger      *slog.Logger
 	defaultFuel uint64
@@ -31,99 +33,56 @@ type Instance struct {
 	inPtr  uint32 // Pre-provided pointer to guest inBuffer
 	outPtr uint32 // Pre-provided pointer to guest outBuffer
 
+	// Pull model support
+	msgChan  chan api.Message
+	respChan chan api.Message
+
 	status    InstanceStatus
 	lastError string
 
 	capabilities []api.Capability
 }
 
-// HandleMessage passes an Alloy Message to the guest via the Guest ABI.
+// HandleMessage sends a message to the WASM plugin and waits for a response.
 func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
-	// Add a small delay if this is the very first message after loading to avoid 
-	// potential wasip1/tinygo runtime initialization races
-	i.mu.Lock()
-	defer i.mu.Unlock()
-
-	time.Sleep(10 * time.Millisecond)
-
-	i.logger.Debug("wasm HandleMessage start", "id", i.id, "method", msg.Method)
+	// If the message is system:capabilities, return them directly if we have them cached
+	if msg.Method == "system:capabilities" && len(i.capabilities) > 0 {
+		payload, _ := json.Marshal(i.capabilities)
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  i.id,
+			Target:  msg.Sender,
+			Method:  msg.Method,
+			Payload: payload,
+		}, nil
+	}
 
 	if i.status == StatusCrashed {
 		return api.Message{}, fmt.Errorf("plugin %s is crashed: %s", i.id, i.lastError)
 	}
 
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		return api.Message{}, err
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	// 1. Send message to guest via the pull channel
+	select {
+	case i.msgChan <- msg:
+		// success
+	case <-ctx.Done():
+		return api.Message{}, ctx.Err()
 	}
 
-	// 1. Use existing input buffer pointer
-	inPtr := i.inPtr
-	if inPtr == 0 {
-		// Fallback to calling export if not provided during handshake
-		getInPtr := i.mod.ExportedFunction("alloy_get_in_ptr")
-		if getInPtr == nil {
-			return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_in_ptr' export and no inPtr provided")
-		}
-		i.logger.Warn("falling back to exported alloy_get_in_ptr (might be unstable on TinyGo)", "plugin", i.id)
-		results, err := getInPtr.Call(ctx)
-		if err != nil {
-			return api.Message{}, fmt.Errorf("failed to get input pointer: %w", err)
-		}
-		inPtr = uint32(results[0])
+	// 2. Wait for response from guest via the response channel
+	// Note: The guest calls alloy_send_response which populates this channel.
+	select {
+	case resp := <-i.respChan:
+		return resp, nil
+	case <-time.After(1 * time.Minute):
+		return api.Message{}, fmt.Errorf("timed out waiting for guest response (1m)")
+	case <-ctx.Done():
+		return api.Message{}, fmt.Errorf("waiting for guest response failed: %w", ctx.Err())
 	}
-
-	// 2. Write payload to guest input buffer
-	if !i.mod.Memory().Write(inPtr, payload) {
-		return api.Message{}, fmt.Errorf("failed to write payload to guest memory")
-	}
-
-	// 3. Call handler
-	handler := i.mod.ExportedFunction("alloy_handle_message")
-	if handler == nil {
-		return api.Message{}, fmt.Errorf("plugin missing 'alloy_handle_message' export")
-	}
-
-	handleResults, err := handler.Call(ctx, uint64(len(payload)))
-	if err != nil {
-		i.status = StatusCrashed
-		i.lastError = err.Error()
-		i.logger.Error("wasm plugin crashed", "id", i.id, "error", err)
-		return api.Message{}, fmt.Errorf("failed to call alloy_handle_message: %w", err)
-	}
-
-	respSize := uint32(handleResults[0])
-	if respSize == 0 {
-		return api.Message{}, nil
-	}
-
-	// 4. Use existing output buffer pointer
-	outPtr := i.outPtr
-	if outPtr == 0 {
-		// Fallback to calling export
-		getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
-		if getOutPtr == nil {
-			return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_out_ptr' export and no outPtr provided")
-		}
-		results, err := getOutPtr.Call(ctx)
-		if err != nil {
-			return api.Message{}, fmt.Errorf("failed to get output pointer: %w", err)
-		}
-		outPtr = uint32(results[0])
-	}
-
-	// 5. Read response
-	respBuf, ok := i.mod.Memory().Read(outPtr, respSize)
-	if !ok {
-		return api.Message{}, fmt.Errorf("failed to read response from guest memory")
-	}
-
-	var resp api.Message
-	if err := json.Unmarshal(respBuf, &resp); err != nil {
-		return api.Message{}, fmt.Errorf("failed to unmarshal guest response: %w", err)
-	}
-
-	return resp, nil
 }
 
 func (i *Instance) ID() string {
@@ -147,44 +106,34 @@ func (i *Instance) Capabilities() []api.Capability {
 	if err != nil || len(results) == 0 {
 		return nil
 	}
-
-	side := uint32(results[0])
-	if side == 0 {
+	size := uint32(results[0])
+	if size == 0 {
 		return nil
 	}
 
-	ptr := i.outPtr
-	if ptr == 0 {
-		getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
-		ptrResults, _ := getOutPtr.Call(context.Background())
-		ptr = uint32(ptrResults[0])
-	}
+	getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
+	ptrResults, _ := getOutPtr.Call(context.Background())
+	ptr := uint32(ptrResults[0])
 
-	buf, ok := i.mod.Memory().Read(ptr, side)
+	buf, ok := i.mod.Memory().Read(ptr, size)
 	if !ok {
 		return nil
 	}
 
 	var caps []api.Capability
-	_ = json.Unmarshal(buf, &caps)
+	if err := json.Unmarshal(buf, &caps); err != nil {
+		return nil
+	}
+
+	i.capabilities = caps
 	return caps
 }
 
-func (i *Instance) Shutdown(ctx context.Context) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.status = StatusStopped
-	return i.mod.Close(ctx)
-}
-
 func (i *Instance) Status() (InstanceStatus, string) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
 	return i.status, i.lastError
 }
 
-func (i *Instance) IsCrashed() bool {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return i.status == StatusCrashed
+func (i *Instance) Shutdown(ctx context.Context) error {
+	i.status = StatusStopped
+	return i.mod.Close(ctx)
 }

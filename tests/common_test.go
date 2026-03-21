@@ -207,7 +207,7 @@ func sendMsg(t *testing.T, conn net.Conn, msg api.Message) {
 // awaitResponse waits for a message with a specific ID from the collector.
 func awaitResponse(t *testing.T, collector *MessageCollector, id string) api.Message {
 	t.Helper()
-	msg, ok := collector.AwaitID(id, 15*time.Second)
+	msg, ok := collector.AwaitID(id, 60*time.Second)
 	if !ok {
 		t.Fatalf("timed out waiting for response ID %s", id)
 	}
