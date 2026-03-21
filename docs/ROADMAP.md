@@ -83,3 +83,4 @@ Bringing the system to full maturity.
     - [x] Runtime manager reload support.
     - [ ] Automatic file watching.
 - [ ] **Global Resource Limits Configuration**: CLI/Config based limits.
+- [ ] **Telemetry Port Configuration**: Support dynamic or configurable telemetry ports to allow concurrent core instances in multi-tenant or testing environments.

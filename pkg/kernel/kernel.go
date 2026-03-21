@@ -41,6 +41,9 @@ type Kernel struct {
 	// interceptors is a list of components that can filter or modify messages before delivery
 	interceptors []api.Interceptor
 
+	// loading keeps track of plugins currently being lazy-loaded
+	loading map[string]chan struct{}
+
 	// stopCh is used to signal the kernel to shut down
 	stopCh chan struct{}
 
@@ -57,6 +60,7 @@ func New(logger *slog.Logger) *Kernel {
 		loaders:      make(map[string]api.PluginLoader),
 		frontends:    make(map[string]chan<- api.Message),
 		interceptors: make([]api.Interceptor, 0),
+		loading:      make(map[string]chan struct{}),
 		stopCh:       make(chan struct{}),
 		tracer:       otel.Tracer(tracerName),
 		telemetry:    tel,
@@ -329,6 +333,36 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	// 4. Handle lazy loading
 	if !isPlugin && hasMetadata && hasLoader {
 		go func() {
+			k.mu.Lock()
+			if loadCh, inProgress := k.loading[msg.Target]; inProgress {
+				k.mu.Unlock()
+				<-loadCh // Wait for the in-progress load
+				// After waiting, check again if it was successful
+				k.mu.RLock()
+				plugin, isNowActive := k.plugins[msg.Target]
+				k.mu.RUnlock()
+				if isNowActive {
+					k.deliverToPlugin(ctx, plugin, msg)
+				} else {
+					// Load must have failed - previous load would have reported error
+					// but we don't know the exact error here. Let's just retry or report generic error.
+					k.logger.Warn("waiting for lazy-load failed: target not active")
+				}
+				return
+			}
+
+			// First one here: start the load
+			loadCh := make(chan struct{})
+			k.loading[msg.Target] = loadCh
+			k.mu.Unlock()
+
+			defer func() {
+				k.mu.Lock()
+				delete(k.loading, msg.Target)
+				close(loadCh)
+				k.mu.Unlock()
+			}()
+
 			k.logger.Info("lazy loading plugin on message request", "plugin_id", msg.Target)
 			loadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

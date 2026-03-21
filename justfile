@@ -98,7 +98,10 @@ run-health: build-core build-wasm
 build-wasm:
     #!/usr/bin/env bash
     mkdir -p build/wasm
-    WASM_OPT_PATH=$(realpath ./wasm-opt-shim.sh)
+    mkdir -p .tmp-bin
+    cp wasm-opt-shim.sh .tmp-bin/wasm-opt
+    chmod +x .tmp-bin/wasm-opt
+    TMP_BIN=$(realpath .tmp-bin)
 
     for plugin_dir in plugins/wasm/*; do
         if [ -d "$plugin_dir" ]; then
@@ -112,10 +115,15 @@ build-wasm:
                 *) target_name="$plugin_name" ;;
             esac
             echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"
-            # Use Standard Go wasip1 for stability (Go 1.25+)
-            (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm go build -o "../../../build/wasm/$target_name.wasm" .)
+            # Use TinyGo if available, otherwise Standard Go wasip1
+            if command -v tinygo >/dev/null 2>&1; then
+                (cd "$plugin_dir" && PATH="$TMP_BIN:$PATH" tinygo build -target=wasip1 -o "../../../build/wasm/$target_name.wasm" .)
+            else
+                (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm go build -o "../../../build/wasm/$target_name.wasm" .)
+            fi
         fi
     done
+    rm -rf .tmp-bin
 
 # Alias for building plugins
 build-plugins: build-wasm

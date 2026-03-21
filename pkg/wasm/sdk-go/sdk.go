@@ -37,8 +37,8 @@ var (
     pinned = make(map[uint32][]byte)
 
     // Global buffers for message passing to avoid allocation in exports
-    inBuffer  [64 * 1024]byte
-    outBuffer [64 * 1024]byte
+    inBuffer  [1024 * 1024]byte
+    outBuffer [1024 * 1024]byte
 )
 
 // SetHandler registers the plugin's message handler.
@@ -210,14 +210,11 @@ func Alloy_handle_message(size uint32) uint32 {
 	buf := inBuffer[:size]
 	var msg Message
 	if err := json.Unmarshal(buf, &msg); err != nil {
-		Log("Guest Unmarshal error: " + err.Error())
 		return 0
 	}
-	Log("Guest received: " + msg.ID + " method: " + msg.Method)
 
 	// 2. Call the registered handler
 	if handler == nil {
-		Log("Guest error: handler is nil")
 		return 0
 	}
 	resp := handler(msg)
@@ -228,12 +225,10 @@ func Alloy_handle_message(size uint32) uint32 {
 	// 3. Serialize response
 	respBuf, err := json.Marshal(resp)
 	if err != nil {
-		Log("Guest Marshal error: " + err.Error())
 		return 0
 	}
 
 	if len(respBuf) > len(outBuffer) {
-		Log("Guest error: response too large")
 		return 0
 	}
 
