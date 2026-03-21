@@ -29,11 +29,11 @@ type SecretGetResponse struct {
 	Value string `json:"value"`
 }
 
-var plugin *guest.Plugin
+var plugin *Plugin
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = guest.NewPlugin("secrets").
+	plugin = NewPlugin("secrets").
 		WithMetadata(
 			"Secrets Manager", 
 			"Manages sensitive data and secrets for the system",
@@ -61,38 +61,38 @@ func main() {
 }
 
 // handleStoreSecret handles storing a secret.
-func handleStoreSecret(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleStoreSecret(msg AlloyMessage) AlloyMessage {
 	var req SecretStoreRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_request: "+err.Error())
+		return ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	// Store the secret
 	secretKey := "secret:" + req.ID
 	if !plugin.KVSet(secretKey, []byte(req.Value)) {
-		return guest.ErrorReply(msg, "failed_to_store_secret")
+		return ErrorReply(msg, "failed_to_store_secret")
 	}
 
 	plugin.Log("info", "Stored secret: "+req.ID)
 
-	return guest.Reply(msg, SecretStoreResponse{Status: "stored"})
+	return Reply(msg, SecretStoreResponse{Status: "stored"})
 }
 
 // handleGetSecret handles retrieving a secret.
-func handleGetSecret(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleGetSecret(msg AlloyMessage) AlloyMessage {
 	var req SecretGetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_request: "+err.Error())
+		return ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	// Get the secret
 	secretKey := "secret:" + req.ID
 	secretValue, ok := plugin.KVGet(secretKey)
 	if !ok || secretValue == nil {
-		return guest.ErrorReply(msg, "secret_not_found")
+		return ErrorReply(msg, "secret_not_found")
 	}
 
 	plugin.Log("debug", "Retrieved secret: "+req.ID)
 
-	return guest.Reply(msg, SecretGetResponse{Value: string(secretValue)})
+	return Reply(msg, SecretGetResponse{Value: string(secretValue)})
 }

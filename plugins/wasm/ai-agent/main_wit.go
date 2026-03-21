@@ -62,7 +62,7 @@ type ProjectSummary struct {
 }
 
 var (
-	plugin      *guest.Plugin
+	plugin      *Plugin
 	configStore = NewKVStore[ProviderConfig]("ai-agent:config")
 )
 
@@ -103,7 +103,7 @@ func (s *KVStore[T]) Set(key string, value T) error {
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = guest.NewPlugin("ai-agent").
+	plugin = NewPlugin("ai-agent").
 		WithMetadata(
 			"AI Agent", 
 			"Provides AI capabilities including chat and summarization",
@@ -143,10 +143,10 @@ func main() {
 	// Set up event handling
 	plugin.OnStart(func() {
 		// Subscribe to chat events
-		plugin.RouteMessage(guest.AlloyMessage{
+		plugin.RouteMessage(AlloyMessage{
 			Method: "subscribe",
 			Sender: "ai-agent",
-			Target: guest.AlloyOption[string]{Value: "plugin-events", Set: true},
+			Target: AlloyOption[string]{Value: "plugin-events", Set: true},
 			Payload: json.RawMessage(`{"event":"chat:message"}`),
 		})
 	})
@@ -158,10 +158,10 @@ func main() {
 }
 
 // handleConfigSet handles setting the AI provider configuration.
-func handleConfigSet(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleConfigSet(msg AlloyMessage) AlloyMessage {
 	var cfg ProviderConfig
 	if err := json.Unmarshal(msg.Payload, &cfg); err != nil {
-		return guest.ErrorReply(msg, "invalid_config: "+err.Error())
+		return ErrorReply(msg, "invalid_config: "+err.Error())
 	}
 
 	// Validate and set defaults
@@ -184,17 +184,17 @@ func handleConfigSet(msg guest.AlloyMessage) guest.AlloyMessage {
 
 	// Save the configuration
 	if err := configStore.Set("current", cfg); err != nil {
-		return guest.ErrorReply(msg, "failed_to_save_config: "+err.Error())
+		return ErrorReply(msg, "failed_to_save_config: "+err.Error())
 	}
 
-	return guest.Reply(msg, map[string]interface{}{
+	return Reply(msg, map[string]interface{}{
 		"status": "ok",
 		"config": cfg,
 	})
 }
 
 // handleConfigGet handles getting the current AI provider configuration.
-func handleConfigGet(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleConfigGet(msg AlloyMessage) AlloyMessage {
 	cfg, err := configStore.Get("current")
 	if err != nil {
 		// Return default config if none exists
@@ -205,14 +205,14 @@ func handleConfigGet(msg guest.AlloyMessage) guest.AlloyMessage {
 		}
 	}
 
-	return guest.Reply(msg, cfg)
+	return Reply(msg, cfg)
 }
 
 // handleProviderSet handles setting the AI provider.
-func handleProviderSet(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleProviderSet(msg AlloyMessage) AlloyMessage {
 	var req ProviderSetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_payload")
+		return ErrorReply(msg, "invalid_payload")
 	}
 
 	cfg, err := configStore.Get("current")
@@ -245,20 +245,20 @@ func handleProviderSet(msg guest.AlloyMessage) guest.AlloyMessage {
 
 	// Save the configuration
 	if err := configStore.Set("current", cfg); err != nil {
-		return guest.ErrorReply(msg, "failed_to_save_config")
+		return ErrorReply(msg, "failed_to_save_config")
 	}
 
-	return guest.Reply(msg, map[string]interface{}{
+	return Reply(msg, map[string]interface{}{
 		"status": "ok",
 		"config": cfg,
 	})
 }
 
 // handleQuery handles direct AI queries.
-func handleQuery(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleQuery(msg AlloyMessage) AlloyMessage {
 	var req AIQuery
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_query_payload")
+		return ErrorReply(msg, "invalid_query_payload")
 	}
 
 	// First try to find a native LLM provider
@@ -266,7 +266,7 @@ func handleQuery(msg guest.AlloyMessage) guest.AlloyMessage {
 	if nativeProvider != "" {
 		response, err := queryNativeLLM(nativeProvider, req.Prompt)
 		if err == nil {
-			return guest.Reply(msg, AIResponse{Response: response})
+			return Reply(msg, AIResponse{Response: response})
 		}
 		plugin.Log("warn", fmt.Sprintf("Native LLM query failed: %v", err))
 	}
@@ -289,18 +289,18 @@ func handleQuery(msg guest.AlloyMessage) guest.AlloyMessage {
 	// Query the AI provider
 	response, err := performLLMQuery(cfg, fullPrompt)
 	if err != nil {
-		return guest.ErrorReply(msg, "query_failed: "+err.Error())
+		return ErrorReply(msg, "query_failed: "+err.Error())
 	}
 
-	return guest.Reply(msg, AIResponse{Response: response})
+	return Reply(msg, AIResponse{Response: response})
 }
 
 // handleSummarize handles text summarization requests.
-func handleSummarize(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleSummarize(msg AlloyMessage) AlloyMessage {
 	// Get active project
 	project, err := getActiveProject()
 	if err != nil {
-		return guest.ErrorReply(msg, "no_active_project")
+		return ErrorReply(msg, "no_active_project")
 	}
 
 	// Create summary prompt
@@ -310,20 +310,20 @@ func handleSummarize(msg guest.AlloyMessage) guest.AlloyMessage {
 	// Query the AI
 	response, err := performLLMQueryWithFallback(summaryPrompt)
 	if err != nil {
-		return guest.ErrorReply(msg, "summarization_failed: "+err.Error())
+		return ErrorReply(msg, "summarization_failed: "+err.Error())
 	}
 
-	return guest.Reply(msg, ProjectSummary{Summary: response})
+	return Reply(msg, ProjectSummary{Summary: response})
 }
 
 // discoverNativeLLM discovers native LLM providers.
 func discoverNativeLLM() string {
 	// Create discovery message
-	discoverMsg := guest.AlloyMessage{
+	discoverMsg := AlloyMessage{
 		ID:     "ai-discover-" + fmt.Sprint(time.Now().UnixNano()),
 		Method: "discover",
 		Sender: "ai-agent",
-		Target: guest.AlloyOption[string]{Value: "plugin-command-manager", Set: true},
+		Target: AlloyOption[string]{Value: "plugin-command-manager", Set: true},
 	}
 
 	// Call the command manager
@@ -363,11 +363,11 @@ func discoverNativeLLM() string {
 // queryNativeLLM queries a native LLM provider.
 func queryNativeLLM(providerID, prompt string) (string, error) {
 	// Create query message
-	queryMsg := guest.AlloyMessage{
+	queryMsg := AlloyMessage{
 		ID:      "ai-gen-" + fmt.Sprint(time.Now().UnixNano()),
 		Method:  "generate",
 		Sender:  "ai-agent",
-		Target:  guest.AlloyOption[string]{Value: providerID, Set: true},
+		Target:  AlloyOption[string]{Value: providerID, Set: true},
 		Payload: json.RawMessage(`{"prompt":"` + prompt + `"}`),
 	}
 
@@ -525,11 +525,11 @@ func getProjectContext() string {
 // getActiveProject gets the active project.
 func getActiveProject() (*ProjectInfo, error) {
 	// Create message to get active project
-	msg := guest.AlloyMessage{
+	msg := AlloyMessage{
 		ID:     "get-active-project-" + fmt.Sprint(time.Now().UnixNano()),
 		Method: "get_active",
 		Sender: "ai-agent",
-		Target: guest.AlloyOption[string]{Value: "plugin-project-manager", Set: true},
+		Target: AlloyOption[string]{Value: "plugin-project-manager", Set: true},
 	}
 
 	// Call the project manager
@@ -555,7 +555,7 @@ type ProjectInfo struct {
 }
 
 // handleEvent handles incoming events.
-func handleEvent(msg guest.AlloyMessage) {
+func handleEvent(msg AlloyMessage) {
 	// This would be called when an event is received
 	if msg.Method == "event" && len(msg.Payload) > 0 {
 		var event struct {
@@ -598,11 +598,11 @@ func handleChatMessage(payload json.RawMessage) {
 // sendChatResponse sends a response to a chat channel.
 func sendChatResponse(channel, response string) {
 	// Create message to send chat response
-	msg := guest.AlloyMessage{
+	msg := AlloyMessage{
 		ID:      "ai-response-" + fmt.Sprint(time.Now().UnixNano()),
 		Method:  "send",
 		Sender:  "ai-agent",
-		Target:  guest.AlloyOption[string]{Value: "plugin-chat", Set: true},
+		Target:  AlloyOption[string]{Value: "plugin-chat", Set: true},
 		Payload: json.RawMessage(fmt.Sprintf(`{"channel":"%s","content":"%s"}`, channel, response)),
 	}
 

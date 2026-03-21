@@ -3,33 +3,53 @@
 package main
 
 import (
-	"./wit"
+	"encoding/json"
+	. "github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest"
 )
 
 func main() {
-	// Create a new WIT-based plugin
-	plugin := guest.NewPlugin("health").
-		WithMetadata(
-			"Health Plugin", 
-			"Provides health status information for the WASM instance",
-			"0.1.0", 
-			"Alloy Team",
-		).
-		WithTags("monitoring", "health", "status").
-		WithCapability("status", "Get the health status of this WASM instance")
+	// Initialize the plugin
+	AlloyInit(
+		"health",
+		[]AlloyCapability{
+			{Method: "status", Description: "Get the health status of this WASM instance"},
+		},
+	)
 
-	// Set up message handler
-	plugin.Handle("status", func(msg guest.AlloyMessage) guest.AlloyMessage {
-		status := map[string]string{
-			"status": "healthy",
-			"uptime": "wasm-monitored",
-			"source": "wasm-wit",
+	AlloyLog("info", "Health plugin initialized")
+
+	// Main message loop
+	for {
+		msgOption := AlloyGetNextMessage()
+		if msgOption.IsNone() {
+			continue
 		}
-		return guest.Reply(msg, status)
-	})
 
-	// Run the plugin
-	if err := plugin.Run(); err != nil {
-		plugin.Log("error", "Plugin failed: "+err.Error())
+		msg := msgOption.Unwrap()
+		if msg.Method == "status" {
+			// Create response payload
+			status := map[string]string{
+				"status": "healthy",
+				"uptime": "wasm-monitored",
+				"source": "wasm-wit",
+			}
+
+			payload, err := json.Marshal(status)
+			if err != nil {
+				AlloyLog("error", "Failed to marshal status: "+err.Error())
+				continue
+			}
+
+			// Create and send response
+			resp := AlloyMessage{
+				Id:        msg.Id + "-response",
+				Method:    msg.Method,
+				Sender:    "health",
+				Target:    Some(msg.Sender),
+				Payload:   payload,
+				Timestamp: 0,
+			}
+			AlloySendResponse(resp)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-# Alloy Build System - WIT WASM Implementation
+# Alloy WIT Build System
 
 # Set shell
 SHELL := "bash"
@@ -8,19 +8,21 @@ default: help
 
 # Show help
 help:
-	@echo "Alloy Build System - WIT WASM Implementation"
+	@echo "Alloy WIT Build System"
 	@echo ""
-	@echo "Available targets:"
+	@echo "Targets:"
 	@echo "  generate-wit-bindings - Generate WIT bindings"
 	@echo "  build-wasm          - Build all WASM plugins"
 	@echo "  build-plugin PLUGIN - Build specific plugin"
 	@echo "  build-core-wit      - Build WIT-based core backend"
+	@echo "  build-gui-tui       - Build TUI interface"
+	@echo "  build-gui-web       - Build Web interface"
+	@echo "  build-gui-all       - Build all GUIs"
+	@echo "  build               - Build everything"
 	@echo "  test-wit            - Run WIT tests"
+	@echo "  test                - Run all tests"
 	@echo "  clean               - Clean build artifacts"
 	@echo "  fmt                 - Format code"
-	@echo "  build               - Build everything"
-	@echo "  test                - Run all tests"
-	@echo "  all                 - Build and test everything"
 
 # Generate WIT bindings
 generate-wit-bindings:
@@ -36,51 +38,62 @@ generate-wit-bindings:
 build-wasm: generate-wit-bindings
 	@echo "Building WASM plugins..."
 	@mkdir -p build/wasm
-	@for plugin_dir in plugins/wasm/*; do \
-		if [ -d "$$plugin_dir" ]; then \
-			plugin_name=$(basename "$$plugin_dir"); \
-			just build-plugin "$$plugin_name"; \
-		fi; \
+	@for plugin in ai buffer chat health iam project secrets tasks; do \
+		just build-plugin "$$plugin"; \
 	done
 	@echo "WASM plugins built successfully!"
 
 # Build specific plugin
 build-plugin plugin_name:
-	@echo "Building plugin: $$plugin_name"
+	@echo "Building plugin: {{plugin_name}}"
 	@mkdir -p build/wasm
-	@plugin_dir="plugins/wasm/$$plugin_name"
-	@if [ -d "$$plugin_dir" ]; then \
-		# Copy WIT bindings to the plugin directory
-	mkdir -p "$$plugin_dir/wit"
-	cp -r pkg/wasm2/bindings/guest/* "$$plugin_dir/wit/"
-	
-	# Build with TinyGo
-	if [ -f "$$plugin_dir/main_wit.go" ]; then \
-		(cd "$$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/$$plugin_name.wasm" main_wit.go); \
+	@if [ -f "plugins/wasm/{{plugin_name}}/main_wit.go" ]; then \
+		cd "plugins/wasm/{{plugin_name}}" && GOOS=wasip1 GOARCH=wasm tinygo build -no-debug -target=wasi -o "../../../build/wasm/{{plugin_name}}.wasm" main_wit.go; \
 	else \
-		(cd "$$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/$$plugin_name.wasm" .); \
-	fi; \
-	
-	echo "Built: build/wasm/$$plugin_name.wasm"; \
-	else \
-		echo "Plugin directory not found: $$plugin_dir"; \
-		exit 1; \
+		cd "plugins/wasm/{{plugin_name}}" && GOOS=wasip1 GOARCH=wasm tinygo build -no-debug -target=wasi -o "../../../build/wasm/{{plugin_name}}.wasm" .; \
 	fi
+	@echo "Built: build/wasm/{{plugin_name}}.wasm"
 
-# Build the WIT-based core backend
+# Build WIT-based core backend
 build-core-wit:
 	@echo "Building WIT-based core backend..."
 	@mkdir -p build
 	@go build -o build/core-wit ./cmd/alloy-core-wit
 	@echo "Built: build/core-wit"
 
-# Test WIT implementation
+# Build TUI interface
+build-gui-tui:
+	@echo "Building TUI interface..."
+	@mkdir -p build
+	@go build -o build/alloy-tui ./cmd/alloy-tui
+	@echo "Built: build/alloy-tui"
+
+# Build Web interface
+build-gui-web:
+	@echo "Building Web interface..."
+	@mkdir -p build
+	@go build -o build/alloy-web ./cmd/alloy-web
+	@echo "Built: build/alloy-web"
+
+# Build all GUIs
+build-gui-all: build-gui-tui build-gui-web
+	@echo "All GUIs built successfully!"
+
+# Build everything
+build: build-wasm build-core-wit build-gui-all
+	@echo "Build completed!"
+
+# Run WIT tests
 test-wit:
 	@echo "Running WIT tests..."
 	@cd pkg/wasm2/runtime && go test -v
 	@cd pkg/wasm2 && go test -v
 	@cd pkg/kernel && go test -v -run "TestWIT.*"
 	@echo "WIT tests completed!"
+
+# Run all tests
+test: test-wit
+	@echo "All tests completed!"
 
 # Clean build artifacts
 clean:
@@ -95,15 +108,3 @@ fmt:
 	@go fmt ./...
 	@goimports -w .
 	@echo "Code formatting completed!"
-
-# Run all tests
-test: test-wit
-	@echo "All tests completed!"
-
-# Build everything
-build: build-wasm build-core-wit
-	@echo "Build completed!"
-
-# Build and test everything
-all: build test
-	@echo "All tasks completed!"

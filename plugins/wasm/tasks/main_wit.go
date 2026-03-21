@@ -38,13 +38,13 @@ type TaskListResponse struct {
 }
 
 var (
-	plugin *guest.Plugin
+	plugin *Plugin
 	tasks  = make(map[string]Task)
 )
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = guest.NewPlugin("tasks").
+	plugin = NewPlugin("tasks").
 		WithMetadata(
 			"Task Manager", 
 			"Manages tasks and to-do items for the system",
@@ -72,10 +72,10 @@ func main() {
 }
 
 // handleCreate handles task creation requests.
-func handleCreate(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleCreate(msg AlloyMessage) AlloyMessage {
 	var req TaskCreateRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_request: "+err.Error())
+		return ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	// Create the task
@@ -92,21 +92,21 @@ func handleCreate(msg guest.AlloyMessage) guest.AlloyMessage {
 
 	plugin.Log("info", "Created task: "+task.Title)
 
-	return guest.Reply(msg, TaskCreateResponse{
+	return Reply(msg, TaskCreateResponse{
 		Status: "created",
 		Task:   task,
 	})
 }
 
 // handleList handles task list requests.
-func handleList(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleList(msg AlloyMessage) AlloyMessage {
 	// Convert tasks map to slice
 	taskList := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
 		taskList = append(taskList, task)
 	}
 
-	return guest.Reply(msg, TaskListResponse{
+	return Reply(msg, TaskListResponse{
 		Tasks: taskList,
 	})
 }

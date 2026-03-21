@@ -37,7 +37,7 @@ type DirectMessage struct {
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin := guest.NewPlugin("chat-plugin").
+	plugin := NewPlugin("chat-plugin").
 		WithMetadata(
 			"Chat Plugin", 
 			"Provides chat functionality including channels and direct messages",
@@ -73,10 +73,10 @@ func main() {
 }
 
 // handleSendMessage handles sending a message to a channel.
-func handleSendMessage(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleSendMessage(msg AlloyMessage) AlloyMessage {
 	var chatMsg ChatMessage
 	if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
-		return guest.ErrorReply(msg, "failed_to_unmarshal_chat_message")
+		return ErrorReply(msg, "failed_to_unmarshal_chat_message")
 	}
 
 	chatMsg.Sender = msg.Sender
@@ -98,20 +98,20 @@ func handleSendMessage(msg guest.AlloyMessage) guest.AlloyMessage {
 	plugin.KVSet(historyKey, newHistoryData)
 
 	// Broadcast the message
-	plugin.RouteMessage(guest.AlloyMessage{
+	plugin.RouteMessage(AlloyMessage{
 		Method:  "chat:message",
 		Sender:  "chat-plugin",
 		Payload: newHistoryData,
 	})
 
-	return guest.Reply(msg, chatMsg)
+	return Reply(msg, chatMsg)
 }
 
 // handleDirectSend handles sending a direct message.
-func handleDirectSend(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleDirectSend(msg AlloyMessage) AlloyMessage {
 	var dm DirectMessage
 	if err := json.Unmarshal(msg.Payload, &dm); err != nil {
-		return guest.ErrorReply(msg, "failed_to_unmarshal_dm_message")
+		return ErrorReply(msg, "failed_to_unmarshal_dm_message")
 	}
 	dm.From = msg.Sender
 	dm.Timestamp = time.Now().Unix()
@@ -137,20 +137,20 @@ func handleDirectSend(msg guest.AlloyMessage) guest.AlloyMessage {
 	plugin.KVSet(pairKey, newHistoryData)
 
 	// Broadcast the direct message
-	plugin.RouteMessage(guest.AlloyMessage{
+	plugin.RouteMessage(AlloyMessage{
 		Method:  "chat:direct",
 		Sender:  "chat-plugin",
 		Payload: newHistoryData,
 	})
 
-	return guest.Reply(msg, dm)
+	return Reply(msg, dm)
 }
 
 // handlePresenceUpdate handles updating user presence.
-func handlePresenceUpdate(msg guest.AlloyMessage) guest.AlloyMessage {
+func handlePresenceUpdate(msg AlloyMessage) AlloyMessage {
 	var presence Presence
 	if err := json.Unmarshal(msg.Payload, &presence); err != nil {
-		return guest.ErrorReply(msg, "failed_to_unmarshal_presence")
+		return ErrorReply(msg, "failed_to_unmarshal_presence")
 	}
 	presence.User = msg.Sender
 	presence.Timestamp = time.Now().Unix()
@@ -179,17 +179,17 @@ func handlePresenceUpdate(msg guest.AlloyMessage) guest.AlloyMessage {
 	plugin.KVSet("chat:presence", updatedData)
 
 	// Broadcast presence update
-	plugin.RouteMessage(guest.AlloyMessage{
+	plugin.RouteMessage(AlloyMessage{
 		Method:  "chat:presence",
 		Sender:  "chat-plugin",
 		Payload: msg.Payload,
 	})
 
-	return guest.Reply(msg, map[string]string{"status": "updated"})
+	return Reply(msg, map[string]string{"status": "updated"})
 }
 
 // handlePresenceList handles listing online users.
-func handlePresenceList(msg guest.AlloyMessage) guest.AlloyMessage {
+func handlePresenceList(msg AlloyMessage) AlloyMessage {
 	// Get current presence list
 	presenceData, _ := plugin.KVGet("chat:presence")
 	var presenceList map[string]Presence
@@ -210,16 +210,16 @@ func handlePresenceList(msg guest.AlloyMessage) guest.AlloyMessage {
 	updatedData, _ := json.Marshal(presenceList)
 	plugin.KVSet("chat:presence", updatedData)
 
-	return guest.Reply(msg, presenceList)
+	return Reply(msg, presenceList)
 }
 
 // handleDirectHistory handles getting direct message history.
-func handleDirectHistory(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleDirectHistory(msg AlloyMessage) AlloyMessage {
 	var req struct {
 		To string `json:"to"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "failed_to_unmarshal_request")
+		return ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
 	// Create a key for the message pair
@@ -235,16 +235,16 @@ func handleDirectHistory(msg guest.AlloyMessage) guest.AlloyMessage {
 		_ = json.Unmarshal(historyData, &history)
 	}
 
-	return guest.Reply(msg, history)
+	return Reply(msg, history)
 }
 
 // handleHistory handles getting channel history.
-func handleHistory(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleHistory(msg AlloyMessage) AlloyMessage {
 	var req struct {
 		Channel string `json:"channel"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "failed_to_unmarshal_request")
+		return ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
 	// Get history
@@ -254,5 +254,5 @@ func handleHistory(msg guest.AlloyMessage) guest.AlloyMessage {
 		_ = json.Unmarshal(historyData, &history)
 	}
 
-	return guest.Reply(msg, history)
+	return Reply(msg, history)
 }

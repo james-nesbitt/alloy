@@ -40,7 +40,7 @@ type AuthorizationResponse struct {
 }
 
 var (
-	plugin    *guest.Plugin
+	plugin    *Plugin
 	policies  = NewKVStore[Policy]("policies")
 	identities = NewKVStore[string]("identities") // mapping of Actor -> Role
 )
@@ -82,7 +82,7 @@ func (s *KVStore[T]) Set(key string, value T) error {
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = guest.NewPlugin("iam").
+	plugin = NewPlugin("iam").
 		WithMetadata(
 			"Identity and Access Management", 
 			"Manages authentication and authorization for the system",
@@ -122,16 +122,16 @@ func main() {
 }
 
 // handleCheck handles authorization checks.
-func handleCheck(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleCheck(msg AlloyMessage) AlloyMessage {
 	var req AuthorizationRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		plugin.Log("warn", "Invalid authorization request: "+err.Error())
-		return guest.Reply(msg, AuthorizationResponse{Allowed: false})
+		return Reply(msg, AuthorizationResponse{Allowed: false})
 	}
 
 	// Systems and internal kernel calls are self-authorized
 	if req.Actor == "kernel" || req.Actor == "system" {
-		return guest.Reply(msg, AuthorizationResponse{Allowed: true})
+		return Reply(msg, AuthorizationResponse{Allowed: true})
 	}
 
 	// Get the actor's role
@@ -145,7 +145,7 @@ func handleCheck(msg guest.AlloyMessage) guest.AlloyMessage {
 	policy, err := policies.Get(role)
 	if err != nil {
 		plugin.Log("warn", "No policy found for role: "+role)
-		return guest.Reply(msg, AuthorizationResponse{Allowed: false})
+		return Reply(msg, AuthorizationResponse{Allowed: false})
 	}
 
 	// Check if the action is allowed
@@ -162,40 +162,40 @@ func handleCheck(msg guest.AlloyMessage) guest.AlloyMessage {
 	plugin.Log("debug", fmt.Sprintf("Authorization check: actor=%s, role=%s, action=%s, allowed=%v", 
 		req.Actor, role, action, allowed))
 
-	return guest.Reply(msg, AuthorizationResponse{Allowed: allowed})
+	return Reply(msg, AuthorizationResponse{Allowed: allowed})
 }
 
 // handlePolicySet handles setting policies.
-func handlePolicySet(msg guest.AlloyMessage) guest.AlloyMessage {
+func handlePolicySet(msg AlloyMessage) AlloyMessage {
 	var req PolicySetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_policy: "+err.Error())
+		return ErrorReply(msg, "invalid_policy: "+err.Error())
 	}
 
 	// Save the policy
 	if err := policies.Set(req.Policy.Role, req.Policy); err != nil {
-		return guest.ErrorReply(msg, "failed_to_save_policy: "+err.Error())
+		return ErrorReply(msg, "failed_to_save_policy: "+err.Error())
 	}
 
 	plugin.Log("info", fmt.Sprintf("Set policy for role: %s (%d permissions)", 
 		req.Policy.Role, len(req.Policy.Permissions)))
 
-	return guest.Reply(msg, map[string]string{"status": "ok"})
+	return Reply(msg, map[string]string{"status": "ok"})
 }
 
 // handleIdentitySet handles setting identities.
-func handleIdentitySet(msg guest.AlloyMessage) guest.AlloyMessage {
+func handleIdentitySet(msg AlloyMessage) AlloyMessage {
 	var req IdentitySetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return guest.ErrorReply(msg, "invalid_identity: "+err.Error())
+		return ErrorReply(msg, "invalid_identity: "+err.Error())
 	}
 
 	// Save the identity
 	if err := identities.Set(req.Actor, req.Role); err != nil {
-		return guest.ErrorReply(msg, "failed_to_save_identity: "+err.Error())
+		return ErrorReply(msg, "failed_to_save_identity: "+err.Error())
 	}
 
 	plugin.Log("info", fmt.Sprintf("Set role %s for actor: %s", req.Role, req.Actor))
 
-	return guest.Reply(msg, map[string]string{"status": "ok"})
+	return Reply(msg, map[string]string{"status": "ok"})
 }
