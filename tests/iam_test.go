@@ -19,7 +19,7 @@ func TestIAMInterceptor(t *testing.T) {
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	k := kernel.New(logger)
+	k := kernel.New(logger, "")
 	state := storage.NewMemoryStateStore()
 
 	// 1. Load IAM

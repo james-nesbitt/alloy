@@ -51,8 +51,8 @@ type Kernel struct {
 }
 
 // New creates a new instance of the Alloy Kernel.
-func New(logger *slog.Logger) *Kernel {
-	tel, _ := initTelemetry()
+func New(logger *slog.Logger, metricsAddr string) *Kernel {
+	tel, _ := initTelemetry(metricsAddr)
 	return &Kernel{
 		logger:       logger,
 		plugins:      make(map[string]api.Plugin),

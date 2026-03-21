@@ -39,7 +39,7 @@ func (m *mockInterceptor) HandleMessage(ctx context.Context, msg api.Message) (a
 
 func TestInterceptors(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	k := kernel.New(logger)
+	k := kernel.New(logger, "")
 
 	interceptor := &mockInterceptor{}
 	target := &targetPlugin{received: make(chan api.Message, 1)}

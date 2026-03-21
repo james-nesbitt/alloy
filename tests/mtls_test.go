@@ -33,7 +33,7 @@ func TestMTLSMessageFlow(t *testing.T) {
 	clientTLS, _ := store.GetClientTLSConfig(ca, "test-client")
 
 	// 2. Start Kernel
-	k := kernel.New(logger)
+	k := kernel.New(logger, "")
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

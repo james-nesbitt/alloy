@@ -74,6 +74,7 @@ func main() {
 	flag.Var(&wasmPlugins, "wasm-plugin", "WASM plugin file to load at startup (can be specified multiple times)")
 
 	provisionManifest := flag.String("provision", "", "Path to provisioning manifest (JSON)")
+	metricsAddr := flag.String("metrics-addr", ":2112", "Address to listen for Prometheus metrics (e.g. :2112)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
@@ -141,7 +142,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	k := kernel.New(logger)
+	k := kernel.New(logger, *metricsAddr)
 
 	// WASM Runtime Setup
 	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(dataDir, "plugins"), k.RouteMessage)

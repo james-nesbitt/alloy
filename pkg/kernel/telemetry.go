@@ -22,7 +22,7 @@ type Telemetry struct {
 	pluginGauge metric.Int64UpDownCounter
 }
 
-func initTelemetry() (*Telemetry, error) {
+func initTelemetry(metricsAddr string) (*Telemetry, error) {
 	exporter, err := prometheus.New()
 	if err != nil {
 		return nil, err
@@ -43,15 +43,16 @@ func initTelemetry() (*Telemetry, error) {
 		metric.WithDescription("Number of active plugins"))
 
 	// Expose prometheus metrics
-	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		fmt.Printf("Telemetry: Metrics server listening on :2112/metrics\n")
-		// Use a unique port for Alloy metrics
-		if err := http.ListenAndServe(":2112", mux); err != nil {
-			log.Printf("Telemetry: Metrics server failed: %v", err)
-		}
-	}()
+	if metricsAddr != "" {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+			fmt.Printf("Telemetry: Metrics server listening on %s/metrics\n", metricsAddr)
+			if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+				log.Printf("Telemetry: Metrics server failed: %v", err)
+			}
+		}()
+	}
 
 	return &Telemetry{
 		meter:       meter,
