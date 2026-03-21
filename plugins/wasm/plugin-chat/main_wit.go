@@ -1,0 +1,258 @@
+//go:build wasip1 || wasm
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/jnesbitt/alloy-go/pkg/wasm2/guest"
+)
+
+// ChatMessage represents a message in a channel.
+type ChatMessage struct {
+	ID        string `json:"id"`
+	Channel   string `json:"channel"`
+	Sender    string `json:"sender"`
+	Content   string `json:"content"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// Presence represents a user's presence status.
+type Presence struct {
+	User      string `json:"user"`
+	Status    string `json:"status"` // online, away, offline
+	Timestamp int64  `json:"timestamp"`
+}
+
+// DirectMessage represents a direct message between users.
+type DirectMessage struct {
+	ID        string `json:"id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Content   string `json:"content"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+func main() {
+	// Create a new WIT-based plugin
+	plugin := guest.NewPlugin("chat-plugin").
+		WithMetadata(
+			"Chat Plugin", 
+			"Provides chat functionality including channels and direct messages",
+			"0.1.0", 
+			"Alloy Team",
+		).
+		WithTags("chat", "messaging", "communication").
+		WithCapability("send", "Send a message to a channel").
+		WithCapability("history", "Retrieve chat history for a channel").
+		WithCapability("direct:send", "Send a direct message").
+		WithCapability("direct:history", "Get direct message history").
+		WithCapability("presence:update", "Update user presence status").
+		WithCapability("presence:list", "List online users")
+
+	// Set up message handlers
+	plugin.Handle("send", handleSendMessage)
+	plugin.Handle("direct:send", handleDirectSend)
+	plugin.Handle("presence:update", handlePresenceUpdate)
+	plugin.Handle("presence:list", handlePresenceList)
+	plugin.Handle("direct:history", handleDirectHistory)
+	plugin.Handle("history", handleHistory)
+
+	// Set up initialization
+	plugin.OnInit(func() error {
+		plugin.Log("info", "Chat plugin initializing")
+		return nil
+	})
+
+	// Run the plugin
+	if err := plugin.Run(); err != nil {
+		plugin.Log("error", "Plugin failed: "+err.Error())
+	}
+}
+
+// handleSendMessage handles sending a message to a channel.
+func handleSendMessage(msg guest.AlloyMessage) guest.AlloyMessage {
+	var chatMsg ChatMessage
+	if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
+		return guest.ErrorReply(msg, "failed_to_unmarshal_chat_message")
+	}
+
+	chatMsg.Sender = msg.Sender
+	chatMsg.Timestamp = time.Now().Unix()
+	chatMsg.ID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
+
+	// Persist history
+	historyKey := "history:" + chatMsg.Channel
+	historyData, _ := plugin.KVGet(historyKey)
+	var history []ChatMessage
+	if historyData != nil {
+		_ = json.Unmarshal(historyData, &history)
+	}
+	history = append(history, chatMsg)
+	if len(history) > 100 {
+		history = history[1:]
+	}
+	newHistoryData, _ := json.Marshal(history)
+	plugin.KVSet(historyKey, newHistoryData)
+
+	// Broadcast the message
+	plugin.RouteMessage(guest.AlloyMessage{
+		Method:  "chat:message",
+		Sender:  "chat-plugin",
+		Payload: newHistoryData,
+	})
+
+	return guest.Reply(msg, chatMsg)
+}
+
+// handleDirectSend handles sending a direct message.
+func handleDirectSend(msg guest.AlloyMessage) guest.AlloyMessage {
+	var dm DirectMessage
+	if err := json.Unmarshal(msg.Payload, &dm); err != nil {
+		return guest.ErrorReply(msg, "failed_to_unmarshal_dm_message")
+	}
+	dm.From = msg.Sender
+	dm.Timestamp = time.Now().Unix()
+	dm.ID = fmt.Sprintf("dm-%d", time.Now().UnixNano())
+
+	// Create a key for the message pair
+	pairKey := "dm:" + dm.From + ":" + dm.To
+	if dm.From > dm.To {
+		pairKey = "dm:" + dm.To + ":" + dm.From
+	}
+
+	// Persist history
+	historyData, _ := plugin.KVGet(pairKey)
+	var history []DirectMessage
+	if historyData != nil {
+		_ = json.Unmarshal(historyData, &history)
+	}
+	history = append(history, dm)
+	if len(history) > 50 {
+		history = history[1:]
+	}
+	newHistoryData, _ := json.Marshal(history)
+	plugin.KVSet(pairKey, newHistoryData)
+
+	// Broadcast the direct message
+	plugin.RouteMessage(guest.AlloyMessage{
+		Method:  "chat:direct",
+		Sender:  "chat-plugin",
+		Payload: newHistoryData,
+	})
+
+	return guest.Reply(msg, dm)
+}
+
+// handlePresenceUpdate handles updating user presence.
+func handlePresenceUpdate(msg guest.AlloyMessage) guest.AlloyMessage {
+	var presence Presence
+	if err := json.Unmarshal(msg.Payload, &presence); err != nil {
+		return guest.ErrorReply(msg, "failed_to_unmarshal_presence")
+	}
+	presence.User = msg.Sender
+	presence.Timestamp = time.Now().Unix()
+
+	// Get current presence list
+	presenceData, _ := plugin.KVGet("chat:presence")
+	var presenceList map[string]Presence
+	if presenceData != nil {
+		_ = json.Unmarshal(presenceData, &presenceList)
+	} else {
+		presenceList = make(map[string]Presence)
+	}
+
+	// Update presence
+	presenceList[msg.Sender] = presence
+
+	// Clean up stale presence
+	for user, pr := range presenceList {
+		if time.Now().Unix()-pr.Timestamp > 300 {
+			delete(presenceList, user)
+		}
+	}
+
+	// Save updated presence
+	updatedData, _ := json.Marshal(presenceList)
+	plugin.KVSet("chat:presence", updatedData)
+
+	// Broadcast presence update
+	plugin.RouteMessage(guest.AlloyMessage{
+		Method:  "chat:presence",
+		Sender:  "chat-plugin",
+		Payload: msg.Payload,
+	})
+
+	return guest.Reply(msg, map[string]string{"status": "updated"})
+}
+
+// handlePresenceList handles listing online users.
+func handlePresenceList(msg guest.AlloyMessage) guest.AlloyMessage {
+	// Get current presence list
+	presenceData, _ := plugin.KVGet("chat:presence")
+	var presenceList map[string]Presence
+	if presenceData != nil {
+		_ = json.Unmarshal(presenceData, &presenceList)
+	} else {
+		presenceList = make(map[string]Presence)
+	}
+
+	// Clean up stale presence
+	for user, pr := range presenceList {
+		if time.Now().Unix()-pr.Timestamp > 300 {
+			delete(presenceList, user)
+		}
+	}
+
+	// Save updated presence
+	updatedData, _ := json.Marshal(presenceList)
+	plugin.KVSet("chat:presence", updatedData)
+
+	return guest.Reply(msg, presenceList)
+}
+
+// handleDirectHistory handles getting direct message history.
+func handleDirectHistory(msg guest.AlloyMessage) guest.AlloyMessage {
+	var req struct {
+		To string `json:"to"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return guest.ErrorReply(msg, "failed_to_unmarshal_request")
+	}
+
+	// Create a key for the message pair
+	pairKey := "dm:" + msg.Sender + ":" + req.To
+	if msg.Sender > req.To {
+		pairKey = "dm:" + req.To + ":" + msg.Sender
+	}
+
+	// Get history
+	historyData, _ := plugin.KVGet(pairKey)
+	var history []DirectMessage
+	if historyData != nil {
+		_ = json.Unmarshal(historyData, &history)
+	}
+
+	return guest.Reply(msg, history)
+}
+
+// handleHistory handles getting channel history.
+func handleHistory(msg guest.AlloyMessage) guest.AlloyMessage {
+	var req struct {
+		Channel string `json:"channel"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return guest.ErrorReply(msg, "failed_to_unmarshal_request")
+	}
+
+	// Get history
+	historyData, _ := plugin.KVGet("history:" + req.Channel)
+	var history []ChatMessage
+	if historyData != nil {
+		_ = json.Unmarshal(historyData, &history)
+	}
+
+	return guest.Reply(msg, history)
+}

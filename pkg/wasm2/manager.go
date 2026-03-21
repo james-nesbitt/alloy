@@ -27,6 +27,7 @@ type PluginInstance struct {
 	Instance     *runtime.Instance
 	Capabilities []api.Capability
 	Status       runtime.Status
+	Metadata     api.PluginMetadata
 }
 
 // NewManager creates a new WASM manager.
@@ -71,12 +72,31 @@ func (m *Manager) LoadPlugin(
 		Instance:     instance,
 		Capabilities: caps,
 		Status:       runtime.StatusRunning,
+		Metadata: api.PluginMetadata{
+			ID:          id,
+			Type:        "wasm",
+			Capabilities: caps,
+			Annotations: make(map[string]string),
+		},
 	}
 
 	// Register the plugin
 	m.mu.Lock()
 	m.plugins[id] = plugin
 	m.mu.Unlock()
+
+	// Update metadata when it becomes available
+	go func() {
+		// Wait for plugin to initialize
+		time.Sleep(200 * time.Millisecond)
+
+		// Get updated metadata from the instance
+		m.mu.Lock()
+		if inst, ok := m.plugins[id]; ok {
+			inst.Metadata = instance.Metadata()
+		}
+		m.mu.Unlock()
+	}()
 
 	return nil
 }
@@ -131,6 +151,57 @@ func (m *Manager) GetPluginStatus(pluginID string) (runtime.Status, bool) {
 	}
 
 	return runtime.StatusStopped, false
+}
+
+// DiscoverPlugins finds plugins that provide a specific capability.
+func (m *Manager) DiscoverPlugins(capabilityMethod string) []api.PluginMetadata {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var results []api.PluginMetadata
+
+	for _, plugin := range m.plugins {
+		for _, cap := range plugin.Metadata.Capabilities {
+			if cap.Method == capabilityMethod {
+				results = append(results, plugin.Metadata)
+				break
+			}
+		}
+	}
+
+	return results
+}
+
+// DiscoverPluginsByTag finds plugins with a specific tag.
+func (m *Manager) DiscoverPluginsByTag(tag string) []api.PluginMetadata {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var results []api.PluginMetadata
+
+	for _, plugin := range m.plugins {
+		for _, t := range plugin.Metadata.Tags {
+			if t == tag {
+				results = append(results, plugin.Metadata)
+				break
+			}
+		}
+	}
+
+	return results
+}
+
+// GetAllPluginMetadata gets metadata for all loaded plugins.
+func (m *Manager) GetAllPluginMetadata() []api.PluginMetadata {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	metadata := make([]api.PluginMetadata, 0, len(m.plugins))
+	for _, plugin := range m.plugins {
+		metadata = append(metadata, plugin.Metadata)
+	}
+
+	return metadata
 }
 
 // Close shuts down the manager.

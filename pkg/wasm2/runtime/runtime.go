@@ -42,6 +42,7 @@ type Instance struct {
 	capabilities []api.Capability
 	status       Status
 	witInstance  *guest.AlloyInstance
+	metadata     api.PluginMetadata
 }
 
 // Status represents the plugin's execution status.
@@ -130,6 +131,122 @@ func (r *Runtime) LoadPlugin(
 	fuelLimit uint64,
 	caps []api.Capability,
 ) (*Instance, error) {
+	// Create plugin storage directory
+	pluginDir := filepath.Join(r.dataDir, id)
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create plugin storage dir: %w", err)
+	}
+
+	// Configure the module
+	config := wazero.NewModuleConfig()
+	config = config.WithName(id)
+	config = config.WithStdout(newLoggerWriter(r.logger, id, "stdout"))
+	config = config.WithStderr(newLoggerWriter(r.logger, id, "stderr"))
+	config = config.WithFS(os.DirFS(pluginDir))
+
+	// Compile the module
+	compiled, err := r.runtime.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile module %s: %w", id, err)
+	}
+
+	startChan := make(chan [2]uint32, 1)
+	instCtx, instCancel := context.WithCancel(context.Background())
+	loadCtx := context.WithValue(instCtx, "alloy.start_chan", startChan)
+
+	// Instantiate the module
+	mod, err := r.runtime.InstantiateModule(loadCtx, compiled, config)
+	if err != nil {
+		instCancel()
+		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
+	}
+
+	// Create the instance
+	instance := &Instance{
+		id:           id,
+		ctx:          instCtx,
+		cancel:       instCancel,
+		mod:          mod,
+		logger:       r.logger,
+		msgChan:      make(chan api.Message, 32),
+		respChan:     make(chan api.Message, 32),
+		capabilities: caps,
+		status:       StatusRunning,
+		metadata: api.PluginMetadata{
+			ID:          id,
+			Type:        "wasm",
+			Capabilities: caps,
+			Annotations: make(map[string]string),
+		},
+	}
+
+	// Register it so host functions can find it
+	r.mu.Lock()
+	r.plugins[id] = instance
+	r.mu.Unlock()
+
+	// Create the WIT instance
+	witInst, err := guest.NewAlloyInstance(mod)
+	if err != nil {
+		instance.Close(ctx)
+		return nil, fmt.Errorf("failed to create WIT instance: %w", err)
+	}
+	instance.witInstance = witInst
+
+	// Initialize the plugin with its capabilities
+	witCaps := convertToWITCapabilities(caps)
+	witInst.AlloyInit(id, witCaps)
+
+	// Wait for the plugin to signal it's ready
+	if startFunc := mod.ExportedFunction("_start"); startFunc != nil {
+		go func() {
+			if _, err := startFunc.Call(loadCtx); err != nil {
+				r.logger.Error("plugin _start exited with error", "id", id, "error", err)
+				instance.status = StatusCrashed
+				instance.metadata.Annotations["error"] = err.Error()
+			}
+		}()
+
+		select {
+		case <-startChan:
+			r.logger.Info("wasm plugin ready", "id", id)
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timed out waiting for plugin %s to start", id)
+		}
+	}
+
+	// Load plugin metadata from KV storage after initialization
+	go func() {
+		// Wait for plugin to initialize
+		time.Sleep(100 * time.Millisecond)
+
+		// Get metadata from KV storage
+		metadataJSON, err := r.kv.Get(id, "plugin:metadata:"+id)
+		if err == nil && metadataJSON != nil {
+			var metadata guest.PluginMetadata
+			if err := json.Unmarshal(metadataJSON, &metadata); err == nil {
+				r.mu.Lock()
+				instance.metadata.Name = metadata.Name
+				instance.metadata.Description = metadata.Description
+				instance.metadata.Version = metadata.Version
+				instance.metadata.Author = metadata.Author
+				instance.metadata.Tags = metadata.Tags
+				// Convert capabilities
+				for _, cap := range metadata.Capabilities {
+					apiCap := api.Capability{
+						Method:      cap.Method,
+						Description: cap.Description,
+						Shortcut:    cap.Shortcut,
+						Annotations: cap.Annotations,
+					}
+					instance.metadata.Capabilities = append(instance.metadata.Capabilities, apiCap)
+				}
+				r.mu.Unlock()
+			}
+		}
+	}()
+
+	return instance, nil
 	// Create plugin storage directory
 	pluginDir := filepath.Join(r.dataDir, id)
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {

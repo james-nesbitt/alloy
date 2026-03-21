@@ -127,6 +127,13 @@ test-wit: generate-wit-bindings build-test-wasm
     
     @echo "WIT implementation tests completed!"
 
+# Run WIT integration test
+test-wit-integration: build-wasm
+    @echo "Running WIT integration test..."
+    go test -v ./tests -run "TestWITIntegration" -timeout 60s
+    
+    @echo "WIT integration test completed!"
+
 # Generate WIT bindings for WASM plugins
 generate-wit-bindings:
     mkdir -p pkg/wasm/bindings/host/wit-rust pkg/wasm/bindings/guest
@@ -170,9 +177,47 @@ build-wasm:
             cp -r pkg/wasm2/bindings/guest/* "$plugin_dir/wit/"
             
             # Build with TinyGo for better WASM support
-            (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/$target_name.wasm" .)
+            # Use main_wit.go if it exists, otherwise use main.go
+            if [ -f "$plugin_dir/main_wit.go" ]; then
+                (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/$target_name.wasm" main_wit.go)
+            else
+                (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/$target_name.wasm" .)
+            fi
         fi
     done
+    rm -rf .tmp-bin
+
+# Build specific plugin with WIT support
+build-wasm-plugin plugin_name:
+    @mkdir -p build/wasm
+    @mkdir -p .tmp-bin
+    @cp wasm-opt-shim.sh .tmp-bin/wasm-opt
+    @chmod +x .tmp-bin/wasm-opt
+    TMP_BIN=$(realpath .tmp-bin)
+    
+    # Generate WIT bindings
+    just generate-wit-bindings
+    
+    plugin_dir="plugins/wasm/{{plugin_name}}"
+    if [ -d "$plugin_dir" ]; then
+        echo "Building WASM with WIT: {{plugin_name}} -> build/wasm/{{plugin_name}}.wasm"
+        
+        # Copy WIT bindings to the plugin directory
+        mkdir -p "$plugin_dir/wit"
+        cp -r pkg/wasm2/bindings/guest/* "$plugin_dir/wit/"
+        
+        # Build with TinyGo for better WASM support
+        # Use main_wit.go if it exists, otherwise use main.go
+        if [ -f "$plugin_dir/main_wit.go" ]; then
+            (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/{{plugin_name}}.wasm" main_wit.go)
+        else
+            (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm tinygo build -target=wasi -o "../../../build/wasm/{{plugin_name}}.wasm" .)
+        fi
+    else
+        echo "Plugin directory not found: $plugin_dir"
+        exit 1
+    fi
+    
     rm -rf .tmp-bin
 
 # Build the WIT example plugin
