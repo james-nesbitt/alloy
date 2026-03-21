@@ -83,23 +83,26 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 		// In a real system, we might promote IAM to a first-class interceptor
 	}
 
-	// Emit registration event
-	caps, _ := json.Marshal(p.Capabilities())
-	// Use non-auditing/intercepting context for system-level events
-	systemCtx := context.WithValue(context.Background(), auditContextKey, true)
-	systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
+	go func() {
+		// Emit registration event
+		caps := p.Capabilities()
+		capsData, _ := json.Marshal(caps)
+		// Use non-auditing/intercepting context for system-level events
+		systemCtx := context.WithValue(context.Background(), auditContextKey, true)
+		systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
 
-	k.RouteMessage(systemCtx, api.Message{
-		ID:        "event-reg-" + p.ID(),
-		Type:      api.TypeEvent,
-		Sender:    "kernel",
-		Target:    "plugin-events",
-		Method:    "publish",
-		Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(caps) + `}}`),
-		Timestamp: time.Now().Unix(),
-	})
+		k.RouteMessage(systemCtx, api.Message{
+			ID:        "event-reg-" + p.ID(),
+			Type:      api.TypeEvent,
+			Sender:    "kernel",
+			Target:    "plugin-events",
+			Method:    "publish",
+			Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(capsData) + `}}`),
+			Timestamp: time.Now().Unix(),
+		})
 
-	k.publishAuditEvent(systemCtx, api.Message{Sender: "system", Target: p.ID()}, "plugin_register", "success")
+		k.publishAuditEvent(systemCtx, api.Message{Sender: "system", Target: p.ID()}, "plugin_register", "success")
+	}()
 }
 
 // RouteMessage handles the delivery of a message to its intended target.

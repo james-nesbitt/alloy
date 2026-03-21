@@ -18,213 +18,152 @@ type Project struct {
 	Active      bool     `json:"active"`
 }
 
-var projects = make(map[string]*Project)
-
-func init() {
-	wasm.SetHandler(handleMessage)
-	wasm.SetCapabilities([]wasm.Capability{
-		{Method: "create", Description: "Create a new project", Shortcut: "p c", Annotations: map[string]string{"group": "project"}},
-		{Method: "list", Description: "List all projects", Shortcut: "p l", Annotations: map[string]string{"group": "project"}},
-		{Method: "active", Description: "Get current active project", Shortcut: "p a", Annotations: map[string]string{"group": "project"}},
-		{Method: "add:buffer", Description: "Add a buffer to the current project", Shortcut: "p a b", Annotations: map[string]string{"group": "project"}},
-		{Method: "add:channel", Description: "Add a chat channel to the current project", Shortcut: "p a c", Annotations: map[string]string{"group": "project"}},
-		{Method: "open", Description: "Open a project", Shortcut: "p o", Annotations: map[string]string{"group": "project"}},
-		{Method: "save", Description: "Save projects to durable store", Shortcut: "p s", Annotations: map[string]string{"group": "project"}},
-	})
-}
+var (
+	projects = make(map[string]*Project)
+	store = wasm.NewKVStore[map[string]*Project]("project-manager")
+)
 
 func main() {
-	// Restore from KV on startup
-	if data := wasm.KVGet("all-projects"); data != nil {
-		json.Unmarshal(data, &projects)
-	}
+	p := wasm.New("plugin-project-manager").
+		WithCapability("create", "Create a new project", "p c").
+		WithCapability("list", "List all projects", "p l").
+		WithCapability("active", "Get current active project", "p a").
+		WithCapability("add:buffer", "Add a buffer to the current project", "p a b").
+		WithCapability("add:channel", "Add a chat channel to the current project", "p a c").
+		WithCapability("open", "Open a project", "p o").
+		WithCapability("save", "Save projects to durable store", "p s").
+		OnInit(func() error {
+			// Restore from KV on startup
+			if data, err := store.Get("all"); err == nil {
+				projects = data
+			}
+			return nil
+		})
 
-	wasm.SleepForever()
-}
-
-func handleMessage(msg wasm.Message) wasm.Message {
-	switch msg.Method {
-	case "create":
+	p.Handle("create", func(msg wasm.Message) wasm.Message {
 		var req struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
 		}
-		json.Unmarshal(msg.Payload, &req)
+		_ = json.Unmarshal(msg.Payload, &req)
 
 		id := fmt.Sprintf("proj-%d", time.Now().UnixNano())
-		p := &Project{
+		proj := &Project{
 			ID:          id,
 			Name:        req.Name,
 			Description: req.Description,
 		}
-		projects[id] = p
+		projects[id] = proj
 		saveProjects() // Persistent saving
 
-		return wasm.Message{
-			ID:     msg.ID + "-resp",
-			Type:   "response",
-			Sender: "plugin-project-manager",
-			Target: msg.Sender,
-			Payload: mustMarshal(p),
-		}
+		return wasm.Reply(msg, proj)
+	})
 
-	case "active":
+	p.Handle("active", func(msg wasm.Message) wasm.Message {
 		var active *Project
-		for _, p := range projects {
-			if p.Active {
-				active = p
+		for _, proj := range projects {
+			if proj.Active {
+				active = proj
 				break
 			}
 		}
 		if active == nil {
-			return errorResponse(msg, "no active project")
+			return wasm.ErrorReply(msg, "no active project")
 		}
-		return wasm.Message{
-			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
-			Payload: mustMarshal(active),
-		}
+		return wasm.Reply(msg, active)
+	})
 
-	case "list":
+	p.Handle("list", func(msg wasm.Message) wasm.Message {
 		list := make([]*Project, 0, len(projects))
-		for _, p := range projects {
-			list = append(list, p)
+		for _, proj := range projects {
+			list = append(list, proj)
 		}
-		return wasm.Message{
-			ID:     msg.ID + "-resp",
-			Type:   "response",
-			Sender: "plugin-project-manager",
-			Target: msg.Sender,
-			Payload: mustMarshal(map[string]interface{}{
-				"projects": list,
-			}),
-		}
+		return wasm.Reply(msg, map[string]interface{}{
+			"projects": list,
+		})
+	})
 
-	case "add:buffer":
+	p.Handle("add:buffer", func(msg wasm.Message) wasm.Message {
 		var req struct {
 			ProjectID string `json:"project_id"`
 			BufferID  string `json:"buffer_id"`
 		}
-		json.Unmarshal(msg.Payload, &req)
+		_ = json.Unmarshal(msg.Payload, &req)
 		
 		targetID := req.ProjectID
 		if targetID == "" {
-			for _, p := range projects {
-				if p.Active {
-					targetID = p.ID
+			for _, proj := range projects {
+				if proj.Active {
+					targetID = proj.ID
 					break
 				}
 			}
 		}
 
-		p, ok := projects[targetID]
-		if !ok { return errorResponse(msg, "project not found") }
-		p.Buffers = append(p.Buffers, req.BufferID)
+		proj, ok := projects[targetID]
+		if !ok { return wasm.ErrorReply(msg, "project not found") }
+		proj.Buffers = append(proj.Buffers, req.BufferID)
 		saveProjects()
-		return wasm.Message{
-			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
-			Payload: []byte(`{"status":"ok"}`),
-		}
+		return wasm.Reply(msg, map[string]string{"status": "ok"})
+	})
 
-	case "add:channel":
+	p.Handle("add:channel", func(msg wasm.Message) wasm.Message {
 		var req struct {
 			ProjectID string `json:"project_id"`
 			Channel string `json:"channel"`
 		}
-		json.Unmarshal(msg.Payload, &req)
+		_ = json.Unmarshal(msg.Payload, &req)
 
 		targetID := req.ProjectID
 		if targetID == "" {
-			for _, p := range projects {
-				if p.Active {
-					targetID = p.ID
+			for _, proj := range projects {
+				if proj.Active {
+					targetID = proj.ID
 					break
 				}
 			}
 		}
 
-		p, ok := projects[targetID]
-		if !ok { return errorResponse(msg, "project not found") }
-		p.Channels = append(p.Channels, req.Channel)
+		proj, ok := projects[targetID]
+		if !ok { return wasm.ErrorReply(msg, "project not found") }
+		proj.Channels = append(proj.Channels, req.Channel)
 		saveProjects()
-		return wasm.Message{
-			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
-			Payload: []byte(`{"status":"ok"}`),
-		}
+		return wasm.Reply(msg, map[string]string{"status": "ok"})
+	})
 
-	case "open":
+	p.Handle("open", func(msg wasm.Message) wasm.Message {
 		var req struct { ID string `json:"id"` }
-		json.Unmarshal(msg.Payload, &req)
-		p, ok := projects[req.ID]
-		if !ok { return errorResponse(msg, "project not found") }
+		_ = json.Unmarshal(msg.Payload, &req)
+		proj, ok := projects[req.ID]
+		if !ok { return wasm.ErrorReply(msg, "project not found") }
 		
-		for _, proj := range projects { proj.Active = false }
-		p.Active = true
+		for _, pr := range projects { pr.Active = false }
+		proj.Active = true
 		saveProjects()
 		
 		// Notify frontends via event
-		publishEvent("project:opened", p)
+		p.Events.Emit("project:opened", proj)
 		
-		return wasm.Message{
-			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
-			Payload: mustMarshal(p),
-		}
+		return wasm.Reply(msg, proj)
+	})
 
-	case "save":
+	p.Handle("save", func(msg wasm.Message) wasm.Message {
 		saveProjects()
-		return wasm.Message{
-			ID: msg.ID + "-resp", Type: "response", Sender: "plugin-project-manager", Target: msg.Sender,
-			Payload: []byte(`{"status":"saved"}`),
-		}
+		return wasm.Reply(msg, map[string]string{"status": "saved"})
+	})
 
-	default:
-		return wasm.Message{}
-	}
+	p.Run()
 }
 
 func saveProjects() {
-	data, _ := json.Marshal(projects)
-	wasm.KVSet("all-projects", data)
+	_ = store.Set("all", projects)
 
-	for _, p := range projects {
-		if p.Active {
-			pData, _ := json.Marshal(p)
+	for _, pr := range projects {
+		if pr.Active {
+			pData, _ := json.Marshal(pr)
 			wasm.KVSet("shared:active-project", pData)
 			return
 		}
 	}
 	wasm.KVSet("shared:active-project", nil)
-}
-
-func publishEvent(topic string, data any) {
-	payload, _ := json.Marshal(struct {
-		Topic string `json:"topic"`
-		Data  any    `json:"data"`
-	}{
-		Topic: topic,
-		Data:  data,
-	})
-	wasm.RouteMessage(wasm.Message{
-		ID:        fmt.Sprintf("evt-%s-%d", topic, time.Now().UnixNano()),
-		Type:      "event",
-		Sender:    "plugin-project-manager",
-		Target:    "plugin-events",
-		Method:    "publish",
-		Payload:   payload,
-		Timestamp: time.Now().Unix(),
-	})
-}
-
-func mustMarshal(v any) []byte {
-	b, _ := json.Marshal(v)
-	return b
-}
-
-func errorResponse(msg wasm.Message, err string) wasm.Message {
-	return wasm.Message{
-		ID:     msg.ID + "-resp",
-		Type:   "response",
-		Sender: "plugin-project-manager",
-		Target: msg.Sender,
-		Payload: []byte(fmt.Sprintf(`{"error":"%s"}`, err)),
-	}
 }

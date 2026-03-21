@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Plugin represents the high-level framework for an Alloy WASM plugin.
@@ -14,6 +15,8 @@ type Plugin struct {
 	defaultHandler MessageHandler
 	onInit       func() error
 	onStart      func()
+	onSave       func() []byte
+	onLoad       func([]byte)
 
 	// High-level clients
 	Events   *Events
@@ -68,9 +71,30 @@ func (p *Plugin) OnStart(fn func()) *Plugin {
 	return p
 }
 
-// Run initializes the plugin and enters the main execution loop.
+// OnSave sets a function to be called when the plugin needs to save its internal state.
+func (p *Plugin) OnSave(fn func() []byte) *Plugin {
+	p.onSave = fn
+	p.WithCapability("system:save_state", "Internal: Save state for reload", "")
+	return p
+}
+
+// OnLoad sets a function to be called when the plugin needs to restore its internal state.
+func (p *Plugin) OnLoad(fn func([]byte)) *Plugin {
+	p.onLoad = fn
+	p.WithCapability("system:load_state", "Internal: Load state for reload", "")
+	return p
+}
+
+// alloy_init is exported for custom reactor-style initialization.
+//export alloy_init
+func alloy_init() {
+	// TinyGo will call this if main is not used or if we call it from host.
+	// But we still need the plugin user to define their plugin.
+}
+
+// Run registers the plugin with the host and enters a stay-alive loop.
 func (p *Plugin) Run() {
-	// Register with the low-level SDK
+	// Register with the low-level SDK guest state
 	SetCapabilities(p.capabilities)
 	SetHandler(p.dispatch)
 
@@ -82,17 +106,28 @@ func (p *Plugin) Run() {
 		}
 	}
 
-	// Start main logic if provided
+	// Start main logic if provided.
 	if p.onStart != nil {
-		p.onStart()
+		go p.onStart()
 	}
 
-	// Stay alive
-	SleepForever()
+	// Stay alive without blocking host calls.
+	for {
+		time.Sleep(time.Minute)
+	}
 }
 
 // dispatch routes messages to registered handlers.
 func (p *Plugin) dispatch(msg Message) Message {
+	if msg.Method == "system:save_state" && p.onSave != nil {
+		return Message{Type: "response", Method: msg.Method, Payload: p.onSave()}
+	}
+
+	if msg.Method == "system:load_state" && p.onLoad != nil {
+		p.onLoad(msg.Payload)
+		return Message{Type: "response", Method: msg.Method}
+	}
+
 	// Check for a specific handler first
 	if h, ok := p.handlers[msg.Method]; ok {
 		return h(msg)

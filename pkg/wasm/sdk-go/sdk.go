@@ -87,6 +87,14 @@ func alloyFetch(reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32
 //go:wasmimport alloy sleep_forever
 func alloySleepForever()
 
+//go:wasmimport alloy started
+func alloyStarted()
+
+// PluginStarted signals to the host that the plugin has finished initialization.
+func PluginStarted() {
+	alloyStarted()
+}
+
 // Log sends a string to the host's logger.
 func Log(msg string) {
 	ptr := uintptr(unsafe.Pointer(unsafe.StringData(msg)))
@@ -130,9 +138,10 @@ func KVDelete(key string) bool {
 	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
 }
 
-// SleepForever blocks the plugin execution safely using a host-side block.
+// SleepForever is a legacy helper. In modern Alloy plugins, it is a no-op 
+// as plugins are reactive and should not block the main execution thread.
 func SleepForever() {
-	alloySleepForever()
+	// alloySleepForever() // Removed to prevent deadlocking the host's call to guest exports
 }
 
 type FetchRequest struct {

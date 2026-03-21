@@ -30,239 +30,117 @@ type DirectMessage struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func init() {
-	wasm.SetHandler(handleMessage)
-	wasm.SetCapabilities([]wasm.Capability{
-		{Method: "send", Description: "Send a message to a channel", Shortcut: "c s", Annotations: map[string]string{"group": "chat"}},
-		{Method: "history", Description: "Retrieve chat history for a channel", Shortcut: "c h", Annotations: map[string]string{"group": "chat"}},
-		{Method: "direct:send", Description: "Send a direct message", Shortcut: "c d", Annotations: map[string]string{"group": "chat"}},
-		{Method: "direct:history", Description: "Get direct message history", Shortcut: "c D", Annotations: map[string]string{"group": "chat"}},
-		{Method: "ping", Description: "Check plugin health"},
-		{Method: "presence:update", Description: "Update user presence status", Shortcut: "c p", Annotations: map[string]string{"group": "chat"}},
-		{Method: "presence:list", Description: "List online users", Shortcut: "c l", Annotations: map[string]string{"group": "chat"}},
-	})
-}
+var (
+	presenceStore = wasm.NewKVStore[map[string]Presence]("chat:presence")
+)
 
 func main() {
-	wasm.SleepForever()
-}
+	p := wasm.New("plugin-chat").
+		WithCapability("send", "Send a message to a channel", "c s").
+		WithCapability("history", "Retrieve chat history for a channel", "c h").
+		WithCapability("direct:send", "Send a direct message", "c d").
+		WithCapability("direct:history", "Get direct message history", "c D").
+		WithCapability("presence:update", "Update user presence status", "c p").
+		WithCapability("presence:list", "List online users", "c l")
 
-func handleMessage(msg wasm.Message) wasm.Message {
-	switch msg.Method {
-	case "send":
+	p.Handle("send", func(msg wasm.Message) wasm.Message {
 		var chatMsg ChatMessage
 		if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
-			return errorResponse(msg, "failed to unmarshal chat message")
+			return wasm.ErrorReply(msg, "failed to unmarshal chat message")
 		}
 
 		chatMsg.Sender = msg.Sender
 		chatMsg.Timestamp = time.Now().Unix()
 		chatMsg.ID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
 
-		// Persist using host KV
+		// Persist history (simplified for now using KVStore)
 		historyKey := "history:" + chatMsg.Channel
 		historyBytes := wasm.KVGet(historyKey)
 		var history []ChatMessage
 		if historyBytes != nil {
-			json.Unmarshal(historyBytes, &history)
+			_ = json.Unmarshal(historyBytes, &history)
 		}
 		history = append(history, chatMsg)
-		if len(history) > 100 {
-			history = history[1:]
-		}
+		if len(history) > 100 { history = history[1:] }
 		newHistoryBytes, _ := json.Marshal(history)
 		wasm.KVSet(historyKey, newHistoryBytes)
 
-		// Create a synthetic event message (to be routed by kernel)
-		publishEvent("chat:message", chatMsg)
+		// Create a synthetic event message
+		p.Events.Emit("chat:message", chatMsg)
 		
-		payload, _ := json.Marshal(chatMsg)
-		return wasm.Message{
-			ID:        msg.ID + "-resp",
-			Type:      "response",
-			Sender:    "plugin-chat",
-			Target:    msg.Sender,
-			Method:    msg.Method,
-			Payload:   payload,
-			Timestamp: time.Now().Unix(),
-		}
+		return wasm.Reply(msg, chatMsg)
+	})
 
-	case "direct:send":
+	p.Handle("direct:send", func(msg wasm.Message) wasm.Message {
 		var dm DirectMessage
 		if err := json.Unmarshal(msg.Payload, &dm); err != nil {
-			return errorResponse(msg, "failed to unmarshal DM message")
+			return wasm.ErrorReply(msg, "failed to unmarshal DM message")
 		}
 		dm.From = msg.Sender
 		dm.Timestamp = time.Now().Unix()
 		dm.ID = fmt.Sprintf("dm-%d", time.Now().UnixNano())
 
-		// History key for DMs (sorted combo of IDs)
 		pairKey := "dm:" + dm.From + ":" + dm.To
-		if dm.From > dm.To {
-			pairKey = "dm:" + dm.To + ":" + dm.From
-		}
+		if dm.From > dm.To { pairKey = "dm:" + dm.To + ":" + dm.From }
 		
 		historyBytes := wasm.KVGet(pairKey)
 		var history []DirectMessage
-		if historyBytes != nil {
-			json.Unmarshal(historyBytes, &history)
-		}
+		if historyBytes != nil { _ = json.Unmarshal(historyBytes, &history) }
 		history = append(history, dm)
-		if len(history) > 50 {
-			history = history[1:]
-		}
-
+		if len(history) > 50 { history = history[1:] }
 		newHistoryBytes, _ := json.Marshal(history)
 		wasm.KVSet(pairKey, newHistoryBytes)
 
-		publishEvent("chat:direct", dm)
+		p.Events.Emit("chat:direct", dm)
+		return wasm.Reply(msg, dm)
+	})
 
-		payload, _ := json.Marshal(dm)
-		return wasm.Message{
-			ID:      msg.ID + "-resp",
-			Type:    "response",
-			Sender:  "plugin-chat",
-			Target:  msg.Sender,
-			Payload: payload,
-		}
-
-	case "presence:update":
+	p.Handle("presence:update", func(msg wasm.Message) wasm.Message {
 		var presence Presence
-		if err := json.Unmarshal(msg.Payload, &presence); err != nil {
-			return errorResponse(msg, "invalid presence payload")
-		}
+		_ = json.Unmarshal(msg.Payload, &presence)
 		presence.User = msg.Sender
 		presence.Timestamp = time.Now().Unix()
 
-		// Update global presence list
-		presenceListBytes := wasm.KVGet("presence:list")
-		var presenceList map[string]Presence
-		if presenceListBytes != nil {
-			json.Unmarshal(presenceListBytes, &presenceList)
-		} else {
-			presenceList = make(map[string]Presence)
-		}
+		presenceList, err := presenceStore.Get("list")
+		if err != nil { presenceList = make(map[string]Presence) }
 		presenceList[msg.Sender] = presence
 		
-		// Prune old presence info
-		for u, p := range presenceList {
-			if time.Now().Unix()-p.Timestamp > 300 { // 5 minutes heartbeat
-				delete(presenceList, u)
-			}
+		for u, pr := range presenceList {
+			if time.Now().Unix()-pr.Timestamp > 300 { delete(presenceList, u) }
 		}
 
-		newPresenceListBytes, _ := json.Marshal(presenceList)
-		wasm.KVSet("presence:list", newPresenceListBytes)
+		_ = presenceStore.Set("list", presenceList)
+		p.Events.Emit("chat:presence", presence)
+		return wasm.Reply(msg, map[string]string{"status": "updated"})
+	})
 
-		publishEvent("chat:presence", presence)
+	p.Handle("presence:list", func(msg wasm.Message) wasm.Message {
+		presenceList, _ := presenceStore.Get("list")
+		return wasm.Reply(msg, presenceList)
+	})
 
-		return wasm.Message{
-			ID:      msg.ID + "-resp",
-			Type:    "response",
-			Sender:  "plugin-chat",
-			Target:  msg.Sender,
-			Payload: []byte(`{"status":"updated"}`),
-		}
-
-	case "presence:list":
-		presenceListBytes := wasm.KVGet("presence:list")
-		if presenceListBytes == nil {
-			presenceListBytes = []byte("{}")
-		}
-		return wasm.Message{
-			ID:      msg.ID + "-resp",
-			Type:    "response",
-			Sender:  "plugin-chat",
-			Target:  msg.Sender,
-			Payload: presenceListBytes,
-		}
-
-	case "direct:history":
-		var req struct {
-			To string `json:"to"`
-		}
-		json.Unmarshal(msg.Payload, &req)
+	p.Handle("direct:history", func(msg wasm.Message) wasm.Message {
+		var req struct { To string `json:"to"` }
+		_ = json.Unmarshal(msg.Payload, &req)
 
 		pairKey := "dm:" + msg.Sender + ":" + req.To
-		if msg.Sender > req.To {
-			pairKey = "dm:" + req.To + ":" + msg.Sender
-		}
+		if msg.Sender > req.To { pairKey = "dm:" + req.To + ":" + msg.Sender }
 
 		historyBytes := wasm.KVGet(pairKey)
-		if historyBytes == nil {
-			historyBytes = []byte("[]")
-		}
+		var history []DirectMessage
+		if historyBytes != nil { _ = json.Unmarshal(historyBytes, &history) }
+		return wasm.Reply(msg, history)
+	})
 
-		return wasm.Message{
-			ID:      msg.ID + "-resp",
-			Type:    "response",
-			Sender:  "plugin-chat",
-			Target:  msg.Sender,
-			Payload: historyBytes,
-		}
-
-	case "ping":
-		return wasm.Message{
-			ID:        msg.ID + "-resp",
-			Type:      "response",
-			Sender:    "plugin-chat",
-			Target:    msg.Sender,
-			Method:    "ping",
-			Payload:   []byte(`{"status":"pong"}`),
-			Timestamp: time.Now().Unix(),
-		}
-
-	case "history":
-		var req struct {
-			Channel string `json:"channel"`
-		}
-		json.Unmarshal(msg.Payload, &req)
+	p.Handle("history", func(msg wasm.Message) wasm.Message {
+		var req struct { Channel string `json:"channel"` }
+		_ = json.Unmarshal(msg.Payload, &req)
 
 		historyBytes := wasm.KVGet("history:" + req.Channel)
-		if historyBytes == nil {
-			historyBytes = []byte("[]")
-		}
-
-		return wasm.Message{
-			ID:      msg.ID + "-resp",
-			Type:    "response",
-			Sender:  "plugin-chat",
-			Target:  msg.Sender,
-			Method:  msg.Method,
-			Payload: historyBytes,
-		}
-
-	default:
-		return wasm.Message{}
-	}
-}
-
-func publishEvent(topic string, data any) {
-	payload, _ := json.Marshal(struct {
-		Topic string `json:"topic"`
-		Data  any    `json:"data"`
-	}{
-		Topic: topic,
-		Data:  data,
+		var history []ChatMessage
+		if historyBytes != nil { _ = json.Unmarshal(historyBytes, &history) }
+		return wasm.Reply(msg, history)
 	})
-	wasm.RouteMessage(wasm.Message{
-		ID:        fmt.Sprintf("evt-%s-%d", topic, time.Now().UnixNano()),
-		Type:      "request",
-		Sender:    "plugin-chat",
-		Target:    "plugin-events",
-		Method:    "publish",
-		Payload:   payload,
-		Timestamp: time.Now().Unix(),
-	})
-}
 
-func errorResponse(msg wasm.Message, err string) wasm.Message {
-	return wasm.Message{
-		ID:     msg.ID + "-resp",
-		Type:   "response",
-		Sender: "plugin-chat",
-		Target: msg.Sender,
-		Method: msg.Method,
-		Payload: []byte(fmt.Sprintf(`{"error":"%s"}`, err)),
-	}
+	p.Run()
 }

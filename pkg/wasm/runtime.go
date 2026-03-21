@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
@@ -96,53 +95,26 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		config = config.WithFS(os.DirFS(pluginDir))
 	}
 
-	r.logger.Info("compiling wasm module", "id", id, "size", len(wasmBytes))
+	// Compile the module
 	compiled, err := r.r.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile module %s: %w", id, err)
 	}
-	r.logger.Info("compiled wasm module", "id", id)
 
-	// For Go libraries (-buildmode=c-shared), we can instantiate synchronously as it won't block
-	// For Go commands, we must instantiate in a goroutine because they block in main
-	r.logger.Info("instantiating wasm module", "id", id)
+	// Instantiate the module. 
+	// We use WithStartFunctions() with no args to prevent InstantiateModule from 
+	// blocking on _start if it's a command module.
+	mod, err := r.r.InstantiateModule(ctx, compiled, config.WithStartFunctions())
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
+	}
 
-	var mod wazeroapi.Module
-	if initFunc := compiled.ExportedFunctions()["_initialize"]; initFunc != nil {
-		// Reactor/Library mode
-		m, err := r.r.InstantiateModule(ctx, compiled, config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
-		}
-		mod = m
-		r.logger.Info("initializing wasm runtime", "id", id)
-		if _, err := mod.ExportedFunction("_initialize").Call(ctx); err != nil {
-			return nil, fmt.Errorf("failed to initialize module %s: %w", id, err)
-		}
-	} else {
-		// Command mode (blocks in _start)
-		errChan := make(chan error, 1)
-		modChan := make(chan wazeroapi.Module, 1)
+	if startFunc := mod.ExportedFunction("_start"); startFunc != nil {
+		// Command mode - call _start in a goroutine
+		r.logger.Info("starting wasm command goroutine", "id", id)
 		go func() {
-			m, err := r.r.InstantiateModule(ctx, compiled, config)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			modChan <- m
+			_, _ = startFunc.Call(ctx)
 		}()
-
-		select {
-		case m := <-modChan:
-			mod = m
-		case err := <-errChan:
-			return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
-		case <-time.After(10 * time.Second):
-			mod = r.r.Module(id)
-			if mod == nil {
-				return nil, fmt.Errorf("timeout waiting for module %s to instantiate", id)
-			}
-		}
 	}
 
 	r.logger.Info("instantiated wasm module", "id", id)
@@ -233,6 +205,18 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 			return 0
 		}).
 		Export("route_message").
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module) {
+			r.logger.Info("wasm plugin signaled started (host)", "id", mod.Name())
+			// Signal that the plugin has started and initialized its runtime
+			if router, ok := ctx.Value("alloy.start_chan").(chan struct{}); ok {
+				select {
+				case router <- struct{}{}:
+				default:
+				}
+			}
+		}).
+		Export("started").
 		NewFunctionBuilder().
 		WithFunc(r.hostFetch).
 		Export("fetch").

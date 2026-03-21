@@ -4,7 +4,7 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/wasm/sdk-go"
 )
 
-func main() {
+func init() {
 	p := wasm.New("plugin-health").
 		WithCapability("status", "Get the health status of this WASM instance", "h s").
 		Handle("status", func(msg wasm.Message) wasm.Message {
@@ -18,3 +18,5 @@ func main() {
 
 	p.Run()
 }
+
+func main() {}

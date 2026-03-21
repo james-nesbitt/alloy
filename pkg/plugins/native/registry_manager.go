@@ -101,6 +101,7 @@ func (r *RegistryManager) delegateLoad(ctx context.Context, def PluginDef) {
 			r.kernel.RouteMessage(ctx, api.Message{
 				ID:      "reg-" + i.ID(),
 				Sender:  r.ID(),
+				Actor:   "system",
 				Target:  "plugin-command-manager",
 				Method:  "register",
 				Payload: []byte(`{"id":"` + i.ID() + `","type":"native","capabilities":` + string(capsData) + `}`),
@@ -114,6 +115,7 @@ func (r *RegistryManager) delegateLoad(ctx context.Context, def PluginDef) {
 		r.kernel.RouteMessage(ctx, api.Message{
 			ID:      "load-wasm-" + def.ID,
 			Sender:  r.ID(),
+			Actor:   "system",
 			Target:  "plugin-wasm-manager",
 			Method:  "load",
 			Payload: payload,
