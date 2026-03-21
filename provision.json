@@ -26,6 +26,11 @@
       "load_time": "boot"
     },
     {
+      "id": "plugin-ollama",
+      "type": "native",
+      "load_time": "boot"
+    },
+    {
       "id": "plugin-chat",
       "type": "wasm",
       "path": "build/wasm/chat.wasm",

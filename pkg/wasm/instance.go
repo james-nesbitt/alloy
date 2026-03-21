@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 	wazeroapi "github.com/tetratelabs/wazero/api"
@@ -27,6 +28,9 @@ type Instance struct {
 	defaultFuel uint64
 	mu          sync.Mutex
 
+	inPtr  uint32 // Pre-provided pointer to guest inBuffer
+	outPtr uint32 // Pre-provided pointer to guest outBuffer
+
 	status    InstanceStatus
 	lastError string
 
@@ -40,6 +44,8 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	time.Sleep(10 * time.Millisecond)
+
 	i.logger.Debug("wasm HandleMessage start", "id", i.id, "method", msg.Method)
 
 	if i.status == StatusCrashed {
@@ -51,16 +57,21 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, err
 	}
 
-	// 1. Get input buffer pointer
-	getInPtr := i.mod.ExportedFunction("alloy_get_in_ptr")
-	if getInPtr == nil {
-		return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_in_ptr' export")
+	// 1. Use existing input buffer pointer
+	inPtr := i.inPtr
+	if inPtr == 0 {
+		// Fallback to calling export if not provided during handshake
+		getInPtr := i.mod.ExportedFunction("alloy_get_in_ptr")
+		if getInPtr == nil {
+			return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_in_ptr' export and no inPtr provided")
+		}
+		i.logger.Warn("falling back to exported alloy_get_in_ptr (might be unstable on TinyGo)", "plugin", i.id)
+		results, err := getInPtr.Call(ctx)
+		if err != nil {
+			return api.Message{}, fmt.Errorf("failed to get input pointer: %w", err)
+		}
+		inPtr = uint32(results[0])
 	}
-	results, err := getInPtr.Call(ctx)
-	if err != nil {
-		return api.Message{}, fmt.Errorf("failed to get input pointer: %w", err)
-	}
-	inPtr := uint32(results[0])
 
 	// 2. Write payload to guest input buffer
 	if !i.mod.Memory().Write(inPtr, payload) {
@@ -86,16 +97,20 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, nil
 	}
 
-	// 4. Get output buffer pointer
-	getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
-	if getOutPtr == nil {
-		return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_out_ptr' export")
+	// 4. Use existing output buffer pointer
+	outPtr := i.outPtr
+	if outPtr == 0 {
+		// Fallback to calling export
+		getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
+		if getOutPtr == nil {
+			return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_out_ptr' export and no outPtr provided")
+		}
+		results, err := getOutPtr.Call(ctx)
+		if err != nil {
+			return api.Message{}, fmt.Errorf("failed to get output pointer: %w", err)
+		}
+		outPtr = uint32(results[0])
 	}
-	results, err = getOutPtr.Call(ctx)
-	if err != nil {
-		return api.Message{}, fmt.Errorf("failed to get output pointer: %w", err)
-	}
-	outPtr := uint32(results[0])
 
 	// 5. Read response
 	respBuf, ok := i.mod.Memory().Read(outPtr, respSize)
@@ -138,9 +153,12 @@ func (i *Instance) Capabilities() []api.Capability {
 		return nil
 	}
 
-	getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
-	ptrResults, _ := getOutPtr.Call(context.Background())
-	ptr := uint32(ptrResults[0])
+	ptr := i.outPtr
+	if ptr == 0 {
+		getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
+		ptrResults, _ := getOutPtr.Call(context.Background())
+		ptr = uint32(ptrResults[0])
+	}
 
 	buf, ok := i.mod.Memory().Read(ptr, side)
 	if !ok {

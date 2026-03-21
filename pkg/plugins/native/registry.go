@@ -47,4 +47,7 @@ var Registry = map[string]PluginConstructor{
 		}
 		return NewLoggerManager(logger, auditDir)
 	},
+	"plugin-ollama": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+		return NewOllamaProvider(ctx, logger, state)
+	},
 }

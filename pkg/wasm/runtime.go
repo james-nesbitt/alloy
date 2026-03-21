@@ -32,10 +32,11 @@ type Runtime struct {
 	kv       storage.StateStore
 	dataDir  string
 	routerFn func(context.Context, api.Message)
+	callFn   func(context.Context, api.Message) (api.Message, error)
 }
 
 // NewRuntime creates a new Alloy WASM runtime.
-func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore, dataDir string, router func(context.Context, api.Message)) (*Runtime, error) {
+func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore, dataDir string, router func(context.Context, api.Message), call func(context.Context, api.Message) (api.Message, error)) (*Runtime, error) {
 	// Use Compiler for better performance.
 	nc := wazero.NewRuntimeConfigCompiler().
 		WithCoreFeatures(wazeroapi.CoreFeaturesV2)
@@ -69,6 +70,7 @@ func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore,
 		kv:       kv,
 		dataDir:  dataDir,
 		routerFn: router,
+		callFn:   call,
 	}, nil
 }
 
@@ -142,7 +144,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		return nil, fmt.Errorf("failed to compile module %s: %w", id, err)
 	}
 
-	startChan := make(chan struct{}, 1)
+	startChan := make(chan [2]uint32, 1)
 	loadCtx := context.WithValue(ctx, "alloy.start_chan", startChan)
 
 	// Instantiate the module. 
@@ -162,17 +164,29 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		}()
 		
 		// Wait for the plugin to signal it's started
+		var ptrs [2]uint32
 		select {
-		case <-startChan:
-			r.logger.Info("wasm plugin ready", "id", id)
+		case ptrs = <-startChan:
+			r.logger.Info("wasm plugin ready", "id", id, "in_ptr", ptrs[0], "out_ptr", ptrs[1])
 			// Wait a tiny bit more for TinyGo stack/scheduler to settle
 			time.Sleep(5 * time.Millisecond)
 		case <-ctx.Done():
 			return nil, fmt.Errorf("timed out waiting for plugin %s to start", id)
 		}
-	}
 
-	r.logger.Info("instantiated wasm module", "id", id)
+		r.logger.Info("instantiated wasm module", "id", id)
+
+		return &Instance{
+			id:           id,
+			mod:          mod,
+			logger:       r.logger,
+			inPtr:        ptrs[0],
+			outPtr:       ptrs[1],
+			defaultFuel:  fuelLimit,
+			status:       StatusRunning,
+			capabilities: caps,
+		}, nil
+	}
 
 	return &Instance{
 		id:           id,
@@ -371,6 +385,30 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		}).
 		Export("kv_list").
 		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, size, respPtrPtr, respSizePtr uint32) uint32 {
+			buf, ok := mod.Memory().Read(ptr, size)
+			if !ok { return 1 }
+			var msg api.Message
+			if err := json.Unmarshal(buf, &msg); err != nil { return 1 }
+			resp, err := r.callFn(ctx, msg)
+			if err != nil { return 1 }
+			data, err := json.Marshal(resp)
+			if err != nil { return 1 }
+
+			// Allocate in guest
+			malloc := mod.ExportedFunction("alloy_malloc")
+			if malloc == nil { return 1 }
+			res, err := malloc.Call(ctx, uint64(len(data)))
+			if err != nil || len(res) == 0 { return 1 }
+			ptrResp := uint32(res[0])
+
+			if !mod.Memory().Write(ptrResp, data) { return 1 }
+			if !mod.Memory().WriteUint32Le(respPtrPtr, ptrResp) { return 1 }
+			if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(data))) { return 1 }
+			return 0
+		}).
+		Export("call").
+		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, size uint32) uint32 {
 			buf, ok := mod.Memory().Read(ptr, size)
 			if !ok { return 1 }
@@ -381,12 +419,12 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 		}).
 		Export("route_message").
 		NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, mod wazeroapi.Module) {
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, inPtr, outPtr uint32) {
 			r.logger.Info("wasm plugin signaled started (host)", "id", mod.Name())
 			// Signal that the plugin has started and initialized its runtime
-			if router, ok := ctx.Value("alloy.start_chan").(chan struct{}); ok {
+			if router, ok := ctx.Value("alloy.start_chan").(chan [2]uint32); ok {
 				select {
-				case router <- struct{}{}:
+				case router <- [2]uint32{inPtr, outPtr}:
 				default:
 				}
 			}

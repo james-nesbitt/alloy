@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jnesbitt/alloy-go/pkg/wasm/sdk-go"
 )
@@ -155,7 +156,60 @@ func main() {
 	p.Run()
 }
 
+func discoverNativeLLM() string {
+	resp, err := wasm.Call(wasm.Message{
+		ID:     "ai-discover-" + fmt.Sprint(time.Now().UnixNano()),
+		Type:   "request",
+		Sender: "plugin-ai-agent",
+		Target: "plugin-command-manager",
+		Method: "discover",
+	})
+	if err != nil {
+		return ""
+	}
+
+	var d struct {
+		Targets []struct {
+			ID           string            `json:"id"`
+			Capabilities []wasm.Capability `json:"capabilities"`
+		} `json:"targets"`
+	}
+	json.Unmarshal(resp.Payload, &d)
+
+	for _, t := range d.Targets {
+		for _, cap := range t.Capabilities {
+			if cap.Method == "generate" && cap.Annotations["type"] == "llm" {
+				wasm.Log("Found native LLM provider: " + t.ID)
+				return t.ID
+			}
+		}
+	}
+	return ""
+}
+
 func performLLMQuery(p *wasm.Plugin, prompt string) (string, error) {
+	// Try discovery of native providers first
+	nativeID := discoverNativeLLM()
+	if nativeID != "" {
+		wasm.Log("Using native LLM provider: " + nativeID)
+		resp, err := wasm.Call(wasm.Message{
+			ID:     "ai-gen-" + fmt.Sprint(time.Now().UnixNano()),
+			Type:   "request",
+			Sender: "plugin-ai-agent",
+			Target: nativeID,
+			Method: "generate",
+			Payload: json.RawMessage(`{"prompt":"` + prompt + `"}`),
+		})
+		if err == nil {
+			var r struct {
+				Response string `json:"response"`
+			}
+			json.Unmarshal(resp.Payload, &r)
+			return r.Response, nil
+		}
+		wasm.Log("Native LLM call failed, falling back to configured API: " + err.Error())
+	}
+
 	cfg, err := configStore.Get("current")
 	if err != nil {
 		cfg = ProviderConfig{Type: "mock", Model: "test-model"}

@@ -145,7 +145,7 @@ func main() {
 	k := kernel.New(logger, *metricsAddr)
 
 	// WASM Runtime Setup
-	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(dataDir, "plugins"), k.RouteMessage)
+	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(dataDir, "plugins"), k.RouteMessage, k.Call)
 	if err != nil {
 		logger.Error("failed to initialize wasm runtime", "error", err)
 		os.Exit(1)

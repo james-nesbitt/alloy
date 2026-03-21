@@ -18,6 +18,7 @@ type KernelInternal interface {
 	RegisterPlugin(p api.Plugin)
 	RegisterMetadata(info api.PluginMetadata, loader api.PluginLoader)
 	RouteMessage(ctx context.Context, msg api.Message)
+	Call(ctx context.Context, msg api.Message) (api.Message, error)
 }
 
 // Manager is an Alloy native plugin that manages WASM plugin lifecycles.

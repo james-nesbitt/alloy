@@ -117,7 +117,7 @@ build-wasm:
             echo "Building WASM: $plugin_name -> build/wasm/$target_name.wasm"
             # Use TinyGo if available, otherwise Standard Go wasip1
             if command -v tinygo >/dev/null 2>&1; then
-                (cd "$plugin_dir" && PATH="$TMP_BIN:$PATH" tinygo build -target=wasip1 -o "../../../build/wasm/$target_name.wasm" .)
+                (cd "$plugin_dir" && PATH="$TMP_BIN:$PATH" tinygo build -target=wasip1 -no-debug -stack-size=128kb -o "../../../build/wasm/$target_name.wasm" .)
             else
                 (cd "$plugin_dir" && GOOS=wasip1 GOARCH=wasm go build -o "../../../build/wasm/$target_name.wasm" .)
             fi

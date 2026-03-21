@@ -3,6 +3,7 @@ package wasm
 
 import (
 	"encoding/json"
+	"fmt"
 	"unsafe"
 )
 
@@ -73,14 +74,16 @@ func alloyRouteMessage(ptr uint32, size uint32) uint32
 func alloyFetch(reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32
 
 //go:wasmimport alloy started
-func alloyStarted()
+func alloyStarted(inPtr, outPtr uint32)
+
+//go:wasmimport alloy call
+func alloyCall(ptr, size, respPtrPtr, respSizePtr uint32) uint32
 
 // PluginStarted signals to the host that the plugin has finished initialization.
 func PluginStarted() {
-	if uintptr(unsafe.Pointer(&inBuffer[0])) == 0 {
-		return
-	}
-	alloyStarted()
+	inPtr := uint32(uintptr(unsafe.Pointer(&inBuffer[0])))
+	outPtr := uint32(uintptr(unsafe.Pointer(&outBuffer[0])))
+	alloyStarted(inPtr, outPtr)
 }
 
 // Log sends a string to the host's logger.
@@ -199,6 +202,34 @@ func RouteMessage(msg Message) bool {
 	}
 	ptr := uintptr(unsafe.Pointer(&data[0]))
 	return alloyRouteMessage(uint32(ptr), uint32(len(data))) == 0
+}
+
+// Call performs a synchronous call to another plugin.
+func Call(msg Message) (Message, error) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return Message{}, err
+	}
+
+	var respPtr, respSize uint32
+	res := alloyCall(
+		uint32(uintptr(unsafe.Pointer(&data[0]))),
+		uint32(len(data)),
+		uint32(uintptr(unsafe.Pointer(&respPtr))),
+		uint32(uintptr(unsafe.Pointer(&respSize))),
+	)
+
+	if res != 0 {
+		return Message{}, fmt.Errorf("call failed")
+	}
+
+	respBuf := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(respPtr))), respSize)
+	var resp Message
+	if err := json.Unmarshal(respBuf, &resp); err != nil {
+		return Message{}, err
+	}
+
+	return resp, nil
 }
 
 // alloy_get_in_ptr returns the address of the input buffer.

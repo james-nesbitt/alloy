@@ -148,6 +148,90 @@ func (k *Kernel) BootPlugins(ctx context.Context) error {
 	return nil
 }
 
+// Call performs a synchronous call to a plugin.
+func (k *Kernel) Call(ctx context.Context, msg api.Message) (api.Message, error) {
+	k.mu.RLock()
+	p, ok := k.plugins[msg.Target]
+	k.mu.RUnlock()
+
+	if !ok {
+		// Attempt lazy load if metadata exists and target is not currently being loaded
+		k.mu.RLock()
+		_, hasMeta := k.metadata[msg.Target]
+		_, hasLoader := k.loaders[msg.Target]
+		k.mu.RUnlock()
+
+		if hasMeta && hasLoader {
+			k.logger.Info("performing synchronous lazy-load on call", "target", msg.Target)
+			lp, err := k.LoadPluginSync(ctx, msg.Target)
+			if err == nil {
+				p = lp
+			} else {
+				return api.Message{}, fmt.Errorf("plugin %s not found and lazy-load failed: %w", msg.Target, err)
+			}
+		} else {
+			return api.Message{}, fmt.Errorf("plugin not found: %s", msg.Target)
+		}
+	}
+
+	if p == nil {
+		return api.Message{}, fmt.Errorf("plugin not available: %s", msg.Target)
+	}
+
+	return p.HandleMessage(ctx, msg)
+}
+
+// LoadPluginSync performs a synchronous load of a lazy plugin.
+func (k *Kernel) LoadPluginSync(ctx context.Context, id string) (api.Plugin, error) {
+	k.mu.Lock()
+	if loadCh, inProgress := k.loading[id]; inProgress {
+		k.mu.Unlock()
+		select {
+		case <-loadCh:
+			k.mu.RLock()
+			p := k.plugins[id]
+			k.mu.RUnlock()
+			return p, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	meta, hasMeta := k.metadata[id]
+	loader, hasLoader := k.loaders[id]
+	if !hasMeta || !hasLoader {
+		k.mu.Unlock()
+		return nil, fmt.Errorf("plugin %s metadata or loader missing", id)
+	}
+
+	loadCh := make(chan struct{})
+	k.loading[id] = loadCh
+	k.mu.Unlock()
+
+	defer func() {
+		k.mu.Lock()
+		delete(k.loading, id)
+		close(loadCh)
+		k.mu.Unlock()
+	}()
+
+	k.logger.Info("synchronous loading plugin", "plugin_id", id)
+	loadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	p, err := loader.LoadPlugin(loadCtx, id)
+	if err == nil {
+		k.RegisterPlugin(p)
+		k.mu.Lock()
+		// Capabilities update
+		meta.Capabilities = p.Capabilities()
+		k.metadata[id] = meta
+		k.mu.Unlock()
+		return p, nil
+	}
+	return nil, err
+}
+
 // RegisterPlugin attaches an active plugin to the kernel.
 func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	k.mu.Lock()

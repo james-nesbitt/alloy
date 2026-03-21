@@ -111,7 +111,7 @@ func (p *Plugin) Run() {
 	// Stay alive without blocking host calls.
 	// For Standard Go WASM, we must keep the main goroutine alive.
 	for {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(time.Hour)
 	}
 }
 
