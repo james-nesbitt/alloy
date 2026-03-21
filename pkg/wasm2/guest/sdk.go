@@ -2,7 +2,7 @@ package guest
 
 import (
 	"encoding/json"
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest"
+	"./wit/guest"
 )
 
 // Plugin represents a WASM plugin using WIT bindings.

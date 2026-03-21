@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/guest"
+	"./wit"
 )
 
 // Project represents a project in the system.

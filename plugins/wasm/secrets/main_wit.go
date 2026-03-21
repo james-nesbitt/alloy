@@ -5,7 +5,7 @@ package main
 import (
 	"encoding/json"
 
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/guest"
+	"./wit"
 )
 
 // SecretStoreRequest represents a request to store a secret.

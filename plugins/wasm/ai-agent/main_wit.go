@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/guest"
+	"./wit"
 )
 
 // AIProviderType represents the type of AI provider.

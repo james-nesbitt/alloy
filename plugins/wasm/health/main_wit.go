@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/guest"
+	"./wit"
 )
 
 func main() {

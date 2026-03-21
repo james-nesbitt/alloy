@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/guest"
+	"./wit"
 )
 
 // Task represents a task in the system.

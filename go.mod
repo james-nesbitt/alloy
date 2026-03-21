@@ -68,3 +68,5 @@ require (
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest => ../bindings/guest
