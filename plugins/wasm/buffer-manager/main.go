@@ -267,6 +267,11 @@ func handleDelete(msg wasm.Message) wasm.Message {
 	}
 	json.Unmarshal(msg.Payload, &req)
 	delete(buffers, req.ID)
+
+	// Also delete from persistent storage
+	wasm.KVDelete(fmt.Sprintf("buffer:%s:meta", req.ID))
+	wasm.KVDelete(fmt.Sprintf("buffer:%s:content", req.ID))
+
 	return wasm.Message{
 		ID:     msg.ID + "-resp",
 		Type:   "response",
@@ -359,16 +364,28 @@ func handleSave(msg wasm.Message) wasm.Message {
 }
 
 func handleLoad(msg wasm.Message) wasm.Message {
-	// Since we don't have a synchronous KV 'list' host function yet,
-	// we still use the async RouteMessage approach for discovery.
-	wasm.RouteMessage(wasm.Message{
-		ID:      "kv-load-list",
-		Type:    "request",
-		Sender:  "plugin-buffer-manager",
-		Target:  "plugin-kv",
-		Method:  "list",
-		Payload: mustMarshal(map[string]string{"prefix": "buffer:"}),
-	})
+	keys := wasm.KVList("buffer:")
+	wasm.Log(fmt.Sprintf("Sync loading: found %d keys", len(keys)))
+	for _, key := range keys {
+		if strings.HasSuffix(key, ":meta") {
+			val := wasm.KVGet(key)
+			if val != nil {
+				var b Buffer
+				if err := json.Unmarshal(val, &b); err == nil {
+					buffers[b.ID] = &b
+					wasm.Log("Restored buffer sync " + b.ID)
+					// If root, get content too
+					if b.BaseBufferID == "" {
+						contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
+						content := wasm.KVGet(contentKey)
+						if content != nil {
+							b.Data = content
+						}
+					}
+				}
+			}
+		}
+	}
 
 	return wasm.Message{
 		ID:     msg.ID + "-resp",
@@ -379,43 +396,6 @@ func handleLoad(msg wasm.Message) wasm.Message {
 			"status": "ok",
 		}),
 	}
-}
-
-func handleKVResponse(msg wasm.Message) wasm.Message {
-	wasm.Log("Received KV response: " + msg.ID)
-	// Handle list result
-	if msg.ID == "kv-load-list-resp" {
-		var resp struct {
-			Keys []string `json:"keys"`
-		}
-		json.Unmarshal(msg.Payload, &resp)
-		wasm.Log(fmt.Sprintf("Found %d keys", len(resp.Keys)))
-		for _, key := range resp.Keys {
-			if strings.HasSuffix(key, ":meta") {
-				wasm.Log("Loading meta for " + key)
-				val := wasm.KVGet(key)
-				if val != nil {
-					var b Buffer
-					if err := json.Unmarshal(val, &b); err == nil {
-						buffers[b.ID] = &b
-						wasm.Log("Restored buffer " + b.ID)
-						// If root, get content too
-						if b.BaseBufferID == "" {
-							contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
-							content := wasm.KVGet(contentKey)
-							if content != nil {
-								b.Data = content
-								wasm.Log(fmt.Sprintf("Restored content for %s: %d bytes", b.ID, len(content)))
-							}
-						}
-					} else {
-						wasm.Log("Failed to unmarshal meta: " + key)
-					}
-				}
-			}
-		}
-	}
-	return wasm.Message{Type: "ignore"}
 }
 
 func notifyAll(id string, event string) {

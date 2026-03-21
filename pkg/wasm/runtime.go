@@ -190,6 +190,84 @@ func (r *Runtime) Close(ctx context.Context) error {
 }
 
 // InstantiateAlloyHost defines the host-side functions available to plugins.
+// alloy_kv_delete(kPtr, kLen uint32) uint32
+func (r *Runtime) alloyKVDelete(ctx context.Context, mod wazeroapi.Module, stack []uint64) {
+	kPtr := uint32(stack[0])
+	kLen := uint32(stack[1])
+
+	mem := mod.Memory()
+	key, ok := mem.Read(kPtr, kLen)
+	if !ok {
+		stack[0] = 1
+		return
+	}
+
+	if err := r.kv.Delete(string(key)); err != nil {
+		r.logger.Error("kv delete failed", "key", string(key), "error", err)
+		stack[0] = 1
+		return
+	}
+	stack[0] = 0
+}
+
+// alloy_kv_list(pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32
+func (r *Runtime) alloyKVList(ctx context.Context, mod wazeroapi.Module, stack []uint64) {
+	pPtr := uint32(stack[0])
+	pLen := uint32(stack[1])
+	respPtrPtr := uint32(stack[2])
+	respSizePtr := uint32(stack[3])
+
+	mem := mod.Memory()
+	prefix, ok := mem.Read(pPtr, pLen)
+	if !ok {
+		stack[0] = 1
+		return
+	}
+
+	keys, err := r.kv.List(string(prefix))
+	if err != nil {
+		r.logger.Error("kv list failed", "prefix", string(prefix), "error", err)
+		stack[0] = 1
+		return
+	}
+
+	data, err := json.Marshal(keys)
+	if err != nil {
+		stack[0] = 1
+		return
+	}
+
+	// Allocate memory in guest for the response
+	malloc := mod.ExportedFunction("alloy_malloc")
+	if malloc == nil {
+		stack[0] = 1
+		return
+	}
+
+	res, err := malloc.Call(ctx, uint64(len(data)))
+	if err != nil || len(res) == 0 {
+		stack[0] = 1
+		return
+	}
+	ptr := uint32(res[0])
+
+	if !mem.Write(ptr, data) {
+		stack[0] = 1
+		return
+	}
+
+	if !mem.WriteUint32Le(respPtrPtr, ptr) {
+		stack[0] = 1
+		return
+	}
+	if !mem.WriteUint32Le(respSizePtr, uint32(len(data))) {
+		stack[0] = 1
+		return
+	}
+
+	stack[0] = 0
+}
+
 func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, error) {
 	if mod := r.r.Module(HostModuleName); mod != nil {
 		return mod, nil
@@ -250,6 +328,34 @@ func (r *Runtime) InstantiateAlloyHost(ctx context.Context) (wazeroapi.Module, e
 			return 0
 		}).
 		Export("kv_delete").
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, mod wazeroapi.Module, pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32 {
+			pBuf, ok := mod.Memory().Read(pPtr, pLen)
+			if !ok { return 1 }
+			prefix := string(pBuf)
+			namespace := mod.Name()
+			if strings.HasPrefix(prefix, "shared:") {
+				namespace = "shared"
+				prefix = prefix[7:]
+			}
+			keys, err := r.kv.List(namespace, prefix)
+			if err != nil { return 1 }
+			data, err := json.Marshal(keys)
+			if err != nil { return 1 }
+
+			// Allocate in guest
+			malloc := mod.ExportedFunction("alloy_malloc")
+			if malloc == nil { return 1 }
+			res, err := malloc.Call(ctx, uint64(len(data)))
+			if err != nil || len(res) == 0 { return 1 }
+			ptr := uint32(res[0])
+
+			if !mod.Memory().Write(ptr, data) { return 1 }
+			if !mod.Memory().WriteUint32Le(respPtrPtr, ptr) { return 1 }
+			if !mod.Memory().WriteUint32Le(respSizePtr, uint32(len(data))) { return 1 }
+			return 0
+		}).
+		Export("kv_list").
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, size uint32) uint32 {
 			buf, ok := mod.Memory().Read(ptr, size)

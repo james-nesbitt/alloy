@@ -63,6 +63,9 @@ func alloyKVGet(kPtr, kLen, vPtr, vMaxLen uint32) uint32
 //go:wasmimport alloy kv_delete
 func alloyKVDelete(kPtr, kLen uint32) uint32
 
+//go:wasmimport alloy kv_list
+func alloyKVList(pPtr, pLen, respPtrPtr, respSizePtr uint32) uint32
+
 //go:wasmimport alloy route_message
 func alloyRouteMessage(ptr uint32, size uint32) uint32
 
@@ -121,6 +124,31 @@ func KVGet(key string) []byte {
 func KVDelete(key string) bool {
 	kPtr := uintptr(unsafe.Pointer(unsafe.StringData(key)))
 	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
+}
+
+// KVList retrieves all keys matching a prefix from the host's durable KV store.
+func KVList(prefix string) []string {
+	pPtr := uintptr(unsafe.Pointer(unsafe.StringData(prefix)))
+	var respPtr, respSize uint32
+
+	res := alloyKVList(
+		uint32(pPtr),
+		uint32(len(prefix)),
+		uint32(uintptr(unsafe.Pointer(&respPtr))),
+		uint32(uintptr(unsafe.Pointer(&respSize))),
+	)
+
+	if res != 0 {
+		return nil
+	}
+
+	respBuf := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(respPtr))), respSize)
+	var keys []string
+	if err := json.Unmarshal(respBuf, &keys); err != nil {
+		return nil
+	}
+
+	return keys
 }
 
 type FetchRequest struct {
