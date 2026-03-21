@@ -1,4 +1,3 @@
-//go:build tinygo || wasip1 || wasm
 package wasm
 
 import (
@@ -15,6 +14,12 @@ type Plugin struct {
 	defaultHandler MessageHandler
 	onInit       func() error
 	onStart      func()
+
+	// High-level clients
+	Events   *Events
+	Projects *ProjectClient
+	Chat     *ChatClient
+	IAM      *IAMClient
 }
 
 // New creates a new Plugin instance.
@@ -22,6 +27,10 @@ func New(id string) *Plugin {
 	return &Plugin{
 		id:       id,
 		handlers: make(map[string]MessageHandler),
+		Events:   NewEvents(id),
+		Projects: NewProjectClient(id),
+		Chat:     NewChatClient(id),
+		IAM:      NewIAMClient(id),
 	}
 }
 

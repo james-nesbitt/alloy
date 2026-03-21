@@ -1,4 +1,3 @@
-//go:build tinygo || wasip1 || wasm
 package wasm
 
 import (
