@@ -159,13 +159,14 @@ func (r *RegistryManager) LoadPlugin(ctx context.Context, id string) (api.Plugin
 		caps = []api.Capability{}
 	}
 	capsData, _ := json.Marshal(caps)
+	r.logger.Info("reporting plugin active to command-manager", "id", p.ID())
 	r.kernel.RouteMessage(ctx, api.Message{
 		ID:      "reg-cm-" + p.ID(),
 		Sender:  r.ID(),
 		Actor:   "system",
 		Target:  "plugin-command-manager",
 		Method:  "register",
-		Payload: []byte(`{"id":"` + p.ID() + `","type":"native","capabilities":` + string(capsData) + `}`),
+		Payload: []byte(`{"id":"` + p.ID() + `","type":"native","status":"active","capabilities":` + string(capsData) + `}`),
 	})
 
 	return p, nil

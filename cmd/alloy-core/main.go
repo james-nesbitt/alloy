@@ -192,7 +192,7 @@ func main() {
 			Sender:  rm.ID(),
 			Target:  "plugin-command-manager",
 			Method:  "register",
-			Payload: []byte(`{"id":"` + p.ID() + `","type":"native","capabilities":` + string(capsData) + `}`),
+			Payload: []byte(`{"id":"` + p.ID() + `","type":"native","status":"active","capabilities":` + string(capsData) + `}`),
 		})
 	}
 

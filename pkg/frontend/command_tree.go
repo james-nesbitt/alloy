@@ -11,6 +11,7 @@ import (
 type Registration struct {
 	ID           string           `json:"id"`
 	Type         string           `json:"type"`
+	Status       string           `json:"status,omitempty"`
 	Capabilities []api.Capability `json:"capabilities,omitempty"`
 }
 

@@ -196,14 +196,21 @@ func (r *Runtime) alloyKVDelete(ctx context.Context, mod wazeroapi.Module, stack
 	kLen := uint32(stack[1])
 
 	mem := mod.Memory()
-	key, ok := mem.Read(kPtr, kLen)
+	keyBuf, ok := mem.Read(kPtr, kLen)
 	if !ok {
 		stack[0] = 1
 		return
 	}
 
-	if err := r.kv.Delete(string(key)); err != nil {
-		r.logger.Error("kv delete failed", "key", string(key), "error", err)
+	key := string(keyBuf)
+	namespace := mod.Name()
+	if strings.HasPrefix(key, "shared:") {
+		namespace = "shared"
+		key = key[7:]
+	}
+
+	if err := r.kv.Delete(namespace, key); err != nil {
+		r.logger.Error("kv delete failed", "namespace", namespace, "key", key, "error", err)
 		stack[0] = 1
 		return
 	}
@@ -218,15 +225,22 @@ func (r *Runtime) alloyKVList(ctx context.Context, mod wazeroapi.Module, stack [
 	respSizePtr := uint32(stack[3])
 
 	mem := mod.Memory()
-	prefix, ok := mem.Read(pPtr, pLen)
+	pBuf, ok := mem.Read(pPtr, pLen)
 	if !ok {
 		stack[0] = 1
 		return
 	}
 
-	keys, err := r.kv.List(string(prefix))
+	prefix := string(pBuf)
+	namespace := mod.Name()
+	if strings.HasPrefix(prefix, "shared:") {
+		namespace = "shared"
+		prefix = prefix[7:]
+	}
+
+	keys, err := r.kv.List(namespace, prefix)
 	if err != nil {
-		r.logger.Error("kv list failed", "prefix", string(prefix), "error", err)
+		r.logger.Error("kv list failed", "namespace", namespace, "prefix", prefix, "error", err)
 		stack[0] = 1
 		return
 	}

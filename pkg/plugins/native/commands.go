@@ -13,6 +13,7 @@ import (
 type registration struct {
 	ID           string           `json:"id"`
 	Type         string           `json:"type"`
+	Status       string           `json:"status,omitempty"`
 	Capabilities []api.Capability `json:"capabilities,omitempty"`
 }
 
@@ -81,13 +82,20 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 			id = msg.Sender
 		}
 
-		c.logger.Info("registering component in command-manager", "id", id, "type", reg.Type)
+		c.logger.Info("registering component in command-manager", "id", id, "type", reg.Type, "status", reg.Status)
 		c.mu.Lock()
-		c.registry[id] = registration{
-			ID:           id,
-			Type:         reg.Type,
-			Capabilities: reg.Capabilities,
+		
+		existing := c.registry[id]
+		if reg.Capabilities != nil {
+			existing.Capabilities = reg.Capabilities
 		}
+		if reg.Status != "" {
+			existing.Status = reg.Status
+		}
+		existing.ID = id
+		existing.Type = reg.Type
+		
+		c.registry[id] = existing
 		c.mu.Unlock()
 		if msg.Sender == "" {
 			return api.Message{}, nil

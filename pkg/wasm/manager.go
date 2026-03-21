@@ -91,6 +91,17 @@ func (m *Manager) HandleMessage(ctx context.Context, msg api.Message) (api.Messa
 			LoadTime:     def.LoadTime,
 			Capabilities: def.Capabilities,
 		}, m)
+
+		// Also notify command-manager of metadata
+		m.kernel.RouteMessage(ctx, api.Message{
+			ID:      "reg-cm-" + def.ID,
+			Sender:  m.ID(),
+			Actor:   "system",
+			Target:  "plugin-command-manager",
+			Method:  "register",
+			Payload: []byte(`{"id":"` + def.ID + `","type":"wasm","status":"registered"}`),
+		})
+
 		return m.ack(msg.ID, msg.Sender, "registered"), nil
 
 	case "load":
@@ -234,14 +245,43 @@ func (m *Manager) loadAndRegister(id, path string, mem, fuel uint64, caps []api.
 	m.defs[id] = pluginDef{ID: id, Path: path, MemoryLimit: mem, FuelLimit: fuel, Capabilities: caps}
 	m.mu.Unlock()
 
+	// Initial loading status
+	m.kernel.RouteMessage(context.Background(), api.Message{
+		ID:      "load-cm-" + id,
+		Sender:  m.ID(),
+		Actor:   "system",
+		Target:  "plugin-command-manager",
+		Method:  "register",
+		Payload: []byte(`{"id":"` + id + `","type":"wasm","status":"loading"}`),
+	})
+
 	p, err := m.LoadPlugin(context.Background(), id)
 	if err != nil {
 		m.logger.Error("failed to load and register plugin", "id", id, "error", err)
+		m.kernel.RouteMessage(context.Background(), api.Message{
+			ID:      "error-cm-" + id,
+			Sender:  m.ID(),
+			Actor:   "system",
+			Target:  "plugin-command-manager",
+			Method:  "register",
+			Payload: []byte(`{"id":"` + id + `","type":"wasm","status":"error"}`),
+		})
 		m.publishError("plugin:load_failed", id, err.Error())
 		return
 	}
 
 	m.kernel.RegisterPlugin(p)
+
+	// Finally active
+	m.kernel.RouteMessage(context.Background(), api.Message{
+		ID:      "active-cm-" + id,
+		Sender:  m.ID(),
+		Actor:   "system",
+		Target:  "plugin-command-manager",
+		Method:  "register",
+		Payload: []byte(`{"id":"` + id + `","type":"wasm","status":"active"}`),
+	})
+
 	m.logger.Info("wasm plugin registered", "id", id)
 }
 

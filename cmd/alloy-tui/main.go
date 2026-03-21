@@ -139,6 +139,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case discoveryMsg:
 		m.targets = msg.Targets
+		if m.statuses == nil { m.statuses = make(map[string]string) }
+		for _, t := range m.targets {
+			if t.Status != "" {
+				m.statuses[t.ID] = t.Status
+			}
+		}
 		m.commandTree = frontend.BuildCommandTree(m.targets)
 		var cmds []tea.Cmd
 		for _, t := range m.targets {
@@ -1017,8 +1023,12 @@ func (m model) View() string {
 					label := opt.Display
 					
 					statusStr := ""
-					if opt.Status == "crashed" {
-						statusStr = " (CRASHED)"
+					switch opt.Status {
+					case "crashed": statusStr = " (CRASHED)"
+					case "error":   statusStr = " (ERROR)"
+					case "loading": statusStr = " (LOADING...)"
+					case "registered": statusStr = " (LAZY)"
+					case "active":    statusStr = "" // Active is normal, omit for brevity
 					}
 
 					if m.isLeader {
@@ -1039,9 +1049,14 @@ func (m model) View() string {
 					if i == m.selectedCmdIdx {
 						rows = append(rows, selectedStyle.Render(line))
 					} else {
-						if opt.Status == "crashed" {
+						switch opt.Status {
+						case "crashed", "error":
 							rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(line))
-						} else {
+						case "loading":
+							rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render(line))
+						case "registered":
+							rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(line))
+						default:
 							rows = append(rows, line)
 						}
 					}
