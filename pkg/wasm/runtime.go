@@ -71,7 +71,7 @@ func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore,
 	}, nil
 }
 
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, memoryLimitMB uint64, fuelLimit uint64) (api.Plugin, error) {
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, memoryLimitMB uint64, fuelLimit uint64, caps []api.Capability) (api.Plugin, error) {
 	config := wazero.NewModuleConfig().
 		WithName(id).
 		WithStdout(os.Stdout).
@@ -101,10 +101,13 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		return nil, fmt.Errorf("failed to compile module %s: %w", id, err)
 	}
 
+	startChan := make(chan struct{}, 1)
+	loadCtx := context.WithValue(ctx, "alloy.start_chan", startChan)
+
 	// Instantiate the module. 
 	// We use WithStartFunctions() with no args to prevent InstantiateModule from 
 	// blocking on _start if it's a command module.
-	mod, err := r.r.InstantiateModule(ctx, compiled, config.WithStartFunctions())
+	mod, err := r.r.InstantiateModule(loadCtx, compiled, config.WithStartFunctions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
 	}
@@ -113,18 +116,27 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		// Command mode - call _start in a goroutine
 		r.logger.Info("starting wasm command goroutine", "id", id)
 		go func() {
-			_, _ = startFunc.Call(ctx)
+			_, _ = startFunc.Call(loadCtx)
 		}()
+		
+		// Wait for the plugin to signal it's started
+		select {
+		case <-startChan:
+			r.logger.Info("wasm plugin ready", "id", id)
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timed out waiting for plugin %s to start", id)
+		}
 	}
 
 	r.logger.Info("instantiated wasm module", "id", id)
 
 	return &Instance{
-		id:          id,
-		mod:         mod,
-		logger:      r.logger,
-		defaultFuel: fuelLimit,
-		status:      StatusRunning,
+		id:           id,
+		mod:          mod,
+		logger:       r.logger,
+		defaultFuel:  fuelLimit,
+		status:       StatusRunning,
+		capabilities: caps,
 	}, nil
 }
 

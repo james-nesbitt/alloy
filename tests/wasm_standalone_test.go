@@ -43,7 +43,7 @@ func TestStandaloneWasmLoad(t *testing.T) {
 	t.Logf("Loading mock plugin from %s (%d bytes)", wasmPath, len(wasmBytes))
 
 	// Instantiate the plugin
-	plugin, err := rt.LoadPlugin(ctx, "mock-plugin", wasmBytes, 64, 0)
+	plugin, err := rt.LoadPlugin(ctx, "mock-plugin", wasmBytes, 64, 0, nil)
 	if err != nil {
 		t.Fatalf("failed to load plugin: %v", err)
 	}

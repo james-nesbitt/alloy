@@ -8,8 +8,9 @@ import (
 )
 
 func main() {
-    wasm.SetHandler(handleMessage)
-    wasm.SleepForever()
+    p := wasm.New("plugin-mock")
+    p.DefaultHandle(handleMessage)
+    p.Run()
 }
 
 func handleMessage(msg wasm.Message) wasm.Message {

@@ -150,20 +150,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Fundamental Core Plugins (Must be registered early to handle registration events)
-	events, _ := native.Registry["plugin-events"](ctx, logger, stateStore)
-	k.RegisterPlugin(events.(api.Plugin))
-
-	commands, _ := native.Registry["plugin-command-manager"](ctx, logger, stateStore)
-	k.RegisterPlugin(commands.(api.Plugin))
-	if r, ok := commands.(native.RouterSetter); ok {
-		r.SetRouter(k.RouteMessage)
-	}
-
 	// Instantiate the host module (alloy) so plugins can import log, kv, etc.
 	if _, err := wasmRuntime.InstantiateAlloyHost(context.Background()); err != nil {
 		logger.Error("failed to instantiate alloy host module", "error", err)
 		os.Exit(1)
+	}
+
+	// Fundamental Core Plugins (Must be registered early to handle registration events)
+	events, _ := native.Registry["plugin-events"](ctx, logger, stateStore)
+	eventsPlugin := events.(api.Plugin)
+	k.RegisterPlugin(eventsPlugin)
+	if r, ok := eventsPlugin.(native.RouterSetter); ok {
+		r.SetRouter(k.RouteMessage)
+	}
+
+	commands, _ := native.Registry["plugin-command-manager"](ctx, logger, stateStore)
+	commandsPlugin := commands.(api.Plugin)
+	k.RegisterPlugin(commandsPlugin)
+	if r, ok := commandsPlugin.(native.RouterSetter); ok {
+		r.SetRouter(k.RouteMessage)
 	}
 
 	// Registry Manager (Orchestrator)
@@ -174,8 +179,10 @@ func main() {
 	wm := wasm.NewManager(logger, wasmRuntime, k)
 	k.RegisterPlugin(wm)
 
-	// Register base capabilities with CM manually as they were pre-loaded or loaded during startup
-	for _, p := range []api.Plugin{rm, wm, events.(api.Plugin), commands.(api.Plugin)} {
+	// ... rest of main ...
+
+	// Register base capabilities with CM manually
+	for _, p := range []api.Plugin{rm, wm, eventsPlugin, commandsPlugin} {
 		caps := p.Capabilities()
 		if caps == nil { caps = []api.Capability{} }
 		capsData, _ := json.Marshal(caps)
@@ -270,14 +277,27 @@ func main() {
 			if err != nil {
 				logger.Error("failed to read provisioning manifest", "path", *provisionManifest, "error", err)
 			} else {
-				k.RouteMessage(context.Background(), api.Message{
-					ID:      "bootstrap-provision",
+				// Register all plugins from manifest synchronously by calling the plugin handler directly
+				_, err = rm.HandleMessage(context.Background(), api.Message{
+					ID:      "bootstrap-register",
 					Type:    api.TypeRequest,
 					Sender:  "system",
 					Target:  rm.ID(),
-					Method:  "provision",
+					Method:  "register",
 					Payload: data,
 				})
+				
+				if err != nil {
+					logger.Error("failed to register manifest plugins", "error", err)
+				}
+
+				// Wait a moment for events to propagate (CM registration)
+				time.Sleep(100 * time.Millisecond)
+
+				// Load all boot plugins
+				if err := k.BootPlugins(context.Background()); err != nil {
+					logger.Error("failed to boot plugins", "error", err)
+				}
 			}
 		} else {
 			logger.Info("no provisioning manifest provided, starting in minimal mode")

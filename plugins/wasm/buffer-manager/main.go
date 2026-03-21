@@ -47,55 +47,33 @@ func findRootBuffer(id string) (*Buffer, bool) {
 	return nil, false
 }
 
-func init() {
-	wasm.SetHandler(handleMessage)
-	wasm.SetCapabilities([]wasm.Capability{
-		{Method: "create", Description: "Create a new buffer", Shortcut: "b c", Annotations: map[string]string{"group": "buffer"}},
-		{Method: "list", Description: "List all buffers", Shortcut: "b l", Annotations: map[string]string{"group": "buffer"}},
-		{Method: "read", Description: "Read buffer content", Shortcut: "b r", Annotations: map[string]string{"group": "buffer"}},
-		{Method: "write", Description: "Write buffer content", Shortcut: "b w", Annotations: map[string]string{"group": "buffer"}},
-		{Method: "delete", Description: "Delete a buffer", Shortcut: "b d", Annotations: map[string]string{"group": "buffer"}},
-		{Method: "save", Description: "Save buffer to persistent storage", Shortcut: "b s", Annotations: map[string]string{"group": "buffer"}},
-		{Method: "load", Description: "Load buffers from persistent storage", Shortcut: "b o", Annotations: map[string]string{"group": "buffer"}},
-	})
-}
-
 func main() {
-	wasm.SleepForever()
+	p := wasm.New("plugin-buffer-manager").
+		WithCapability("create", "Create a new buffer", "b c").
+		WithCapability("list", "List all buffers", "b l").
+		WithCapability("read", "Read buffer content", "b r").
+		WithCapability("write", "Write buffer content", "b w").
+		WithCapability("delete", "Delete a buffer", "b d").
+		WithCapability("save", "Save buffer to persistent storage", "b s").
+		WithCapability("load", "Load buffers from persistent storage", "b o")
+
+	p.Handle("create", handleCreate)
+	p.Handle("read", handleRead)
+	p.Handle("write", handleWrite)
+	p.Handle("append", handleAppend)
+	p.Handle("list", handleList)
+	p.Handle("delete", handleDelete)
+	p.Handle("subscribe", handleSubscribe)
+	p.Handle("clear", handleClear)
+	p.Handle("save", handleSave)
+	p.Handle("load", handleLoad)
+	p.Handle("set_metadata", handleSetMetadata)
+
+	p.Run()
 }
 
 func handleMessage(msg wasm.Message) wasm.Message {
-	// If it's a response to one of our own requests
-	if msg.Type == "response" && strings.HasPrefix(msg.ID, "kv-") {
-		return handleKVResponse(msg)
-	}
-
-	switch msg.Method {
-	case "create":
-		return handleCreate(msg)
-	case "read":
-		return handleRead(msg)
-	case "write":
-		return handleWrite(msg)
-	case "append":
-		return handleAppend(msg)
-	case "list":
-		return handleList(msg)
-	case "delete":
-		return handleDelete(msg)
-	case "subscribe":
-		return handleSubscribe(msg)
-	case "clear":
-		return handleClear(msg)
-	case "save":
-		return handleSave(msg)
-	case "load":
-		return handleLoad(msg)
-	case "set_metadata":
-		return handleSetMetadata(msg)
-	default:
-		return errorResponse(msg, "unsupported method")
-	}
+	return wasm.Message{} // Legacy, not used with p.Run() but kept for now if others call it
 }
 
 func handleSubscribe(msg wasm.Message) wasm.Message {

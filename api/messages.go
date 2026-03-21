@@ -31,6 +31,26 @@ type Message struct {
 	SessionID string          `json:"session_id,omitempty"` // The unique session for the actor
 }
 
+// PluginLoadTime defines when a plugin should be loaded.
+type PluginLoadTime string
+
+const (
+	LoadTimeBoot PluginLoadTime = "boot"
+	LoadTimeLazy PluginLoadTime = "lazy"
+)
+
+// PluginMetadata describes a plugin's identity and capabilities before it is fully loaded.
+type PluginMetadata struct {
+	ID           string         `json:"id"`
+	Capabilities []Capability   `json:"capabilities"`
+	LoadTime     PluginLoadTime `json:"load_time"`
+}
+
+// PluginLoader is an interface for components that can load a plugin on demand.
+type PluginLoader interface {
+	LoadPlugin(ctx context.Context, id string) (Plugin, error)
+}
+
 // Plugin defines the interface for components that can be registered with the kernel.
 type Plugin interface {
 	ID() string

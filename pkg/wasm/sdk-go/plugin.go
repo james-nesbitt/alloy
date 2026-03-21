@@ -85,13 +85,6 @@ func (p *Plugin) OnLoad(fn func([]byte)) *Plugin {
 	return p
 }
 
-// alloy_init is exported for custom reactor-style initialization.
-//export alloy_init
-func alloy_init() {
-	// TinyGo will call this if main is not used or if we call it from host.
-	// But we still need the plugin user to define their plugin.
-}
-
 // Run registers the plugin with the host and enters a stay-alive loop.
 func (p *Plugin) Run() {
 	// Register with the low-level SDK guest state
@@ -111,9 +104,14 @@ func (p *Plugin) Run() {
 		go p.onStart()
 	}
 
+	// Signal to the host that we are ready
+	PluginStarted()
+
 	// Stay alive without blocking host calls.
+	// For Standard Go WASM, we must keep the main goroutine alive.
+	// select{} is fine but we keep the Sleep loop for better cross-runtime behavior.
 	for {
-		time.Sleep(time.Minute)
+		time.Sleep(time.Hour)
 	}
 }
 

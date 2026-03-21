@@ -34,19 +34,15 @@ func NewCommandManager(logger *slog.Logger) *CommandManager {
 func (c *CommandManager) SetRouter(r func(context.Context, api.Message)) {
 	c.route = r
 	// Subscribe to registration events
-	go func() {
-		// Small delay to ensure event manager is likely up
-		time.Sleep(100 * time.Millisecond)
-		c.route(context.Background(), api.Message{
-			ID:        "sub-cm-reg",
-			Type:      api.TypeRequest,
-			Sender:    c.ID(),
-			Target:    "plugin-events",
-			Method:    "subscribe",
-			Payload:   []byte(`{"topic":"component:registered"}`),
-			Timestamp: time.Now().Unix(),
-		})
-	}()
+	c.route(context.Background(), api.Message{
+		ID:        "sub-cm-reg",
+		Type:      api.TypeRequest,
+		Sender:    c.ID(),
+		Target:    "plugin-events",
+		Method:    "subscribe",
+		Payload:   []byte(`{"topic":"component:registered"}`),
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 func (c *CommandManager) ID() string { return "plugin-command-manager" }
@@ -65,8 +61,10 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 	case "component:registered":
 		var reg registration
 		if err := json.Unmarshal(msg.Payload, &reg); err != nil {
+			c.logger.Error("failed to unmarshal component registration", "error", err, "payload", string(msg.Payload))
 			return api.Message{}, err
 		}
+		c.logger.Info("component registered via event", "id", reg.ID, "type", reg.Type)
 		c.mu.Lock()
 		c.registry[reg.ID] = reg
 		c.mu.Unlock()

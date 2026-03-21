@@ -44,8 +44,6 @@ func SetCapabilities(caps []Capability) {
 	capabilities = caps
 }
 
-// ... original alloy_malloc and other exports ...
-
 // alloy_capabilities is exported for the host to query the plugin's capabilities.
 //export alloy_capabilities
 //go:wasmexport alloy_capabilities
@@ -83,9 +81,6 @@ func alloyRouteMessage(ptr uint32, size uint32) uint32
 
 //go:wasmimport alloy fetch
 func alloyFetch(reqPtr, reqSize, respPtrPtr, respSizePtr uint32) uint32
-
-//go:wasmimport alloy sleep_forever
-func alloySleepForever()
 
 //go:wasmimport alloy started
 func alloyStarted()
@@ -136,12 +131,6 @@ func KVGet(key string) []byte {
 func KVDelete(key string) bool {
 	kPtr := uintptr(unsafe.Pointer(unsafe.StringData(key)))
 	return alloyKVDelete(uint32(kPtr), uint32(len(key))) == 0
-}
-
-// SleepForever is a legacy helper. In modern Alloy plugins, it is a no-op 
-// as plugins are reactive and should not block the main execution thread.
-func SleepForever() {
-	// alloySleepForever() // Removed to prevent deadlocking the host's call to guest exports
 }
 
 type FetchRequest struct {
@@ -196,8 +185,12 @@ func RouteMessage(msg Message) bool {
 	return alloyRouteMessage(uint32(ptr), uint32(len(data))) == 0
 }
 
-// Memory management without sync.Mutex (rely on host-side serialization)
-var allocations = make(map[uintptr][]byte)
+// A simple bump allocator on a global buffer.
+// We avoid Go's heap for exports to prevent "panic on system stack".
+var (
+    simpleHeap [1024 * 1024]byte
+    heapIdx    int
+)
 
 // alloy_malloc is exported for the host to allocate memory in the guest.
 //export alloy_malloc
@@ -206,9 +199,13 @@ func Alloy_malloc(size uint32) uintptr {
 	if size == 0 {
 		return 0
 	}
-	buf := make([]byte, size)
-	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	allocations[ptr] = buf
+    
+    if heapIdx + int(size) > len(simpleHeap) {
+        heapIdx = 0 // Reset
+    }
+    
+    ptr := uintptr(unsafe.Pointer(&simpleHeap[heapIdx]))
+    heapIdx += int(size)
 	return ptr
 }
 
@@ -216,7 +213,7 @@ func Alloy_malloc(size uint32) uintptr {
 //export alloy_free
 //go:wasmexport alloy_free
 func Alloy_free(ptr uintptr) {
-	delete(allocations, ptr)
+    // No-op bump allocator
 }
 
 // alloy_handle_message is exported for the host to send messages to the guest.
@@ -235,7 +232,7 @@ func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
 		return 0
 	}
 	resp := handler(msg)
-	if resp.Type == "ignore" {
+	if resp.ID == "" && resp.Target == "" {
 		return 0
 	}
 
@@ -245,7 +242,7 @@ func Alloy_handle_message(ptr uintptr, size uint32) uint64 {
 		return 0
 	}
 
-	// 4. Copy response to an allocated buffer to ensure it's stable for the host
+	// 4. Copy response to an allocated buffer
 	respSize := uint32(len(respBuf))
 	outPtr := Alloy_malloc(respSize)
 	if outPtr == 0 {

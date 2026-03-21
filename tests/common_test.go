@@ -164,8 +164,10 @@ func waitForPlugins(t *testing.T, conn net.Conn, collector *MessageCollector, ex
 		}
 		json.Unmarshal(resp.Payload, &result)
 		count := 0
+		foundIDs := []string{}
 		foundMap := make(map[string]bool)
 		for _, target := range result.Targets {
+			foundIDs = append(foundIDs, target.ID)
 			if expected[target.ID] {
 				foundMap[target.ID] = true
 			}
@@ -175,7 +177,7 @@ func waitForPlugins(t *testing.T, conn net.Conn, collector *MessageCollector, ex
 		if count >= len(expected) {
 			return
 		}
-		t.Logf("Waiting for plugins: %d/%d registered...", count, len(expected))
+		t.Logf("Waiting for plugins: %d/%d registered. Found in registry: %v", count, len(expected), foundIDs)
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for plugins: %v", expectedIDs)

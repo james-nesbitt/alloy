@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 	wazeroapi "github.com/tetratelabs/wazero/api"
@@ -30,6 +29,8 @@ type Instance struct {
 
 	status    InstanceStatus
 	lastError string
+
+	capabilities []api.Capability
 }
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
@@ -37,12 +38,8 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	// Resource enforcement: Timeout based on "fuel"
-	// For now, treat fuel as milliseconds for simplicity in sandboxing.
-	if i.defaultFuel > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(i.defaultFuel)*time.Millisecond)
-		defer cancel()
+	if i.status == StatusCrashed {
+		return api.Message{}, fmt.Errorf("plugin %s is crashed: %s", i.id, i.lastError)
 	}
 
 	payload, err := json.Marshal(msg)
@@ -51,7 +48,6 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 	}
 
 	size := uint64(len(payload))
-	// 1. Allocate memory in guest for request
 	malloc := i.mod.ExportedFunction("alloy_malloc")
 	if malloc == nil {
 		return api.Message{}, fmt.Errorf("plugin missing 'alloy_malloc' export")
@@ -63,19 +59,16 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 	}
 	ptr := uint32(results[0])
 
-	// Ensure we free the allocated pointer on the way out
 	defer func() {
 		if free := i.mod.ExportedFunction("alloy_free"); free != nil {
 			_, _ = free.Call(ctx, uint64(ptr))
 		}
 	}()
 
-	// 2. Write payload to guest memory
 	if !i.mod.Memory().Write(ptr, payload) {
 		return api.Message{}, fmt.Errorf("failed to write payload to guest memory")
 	}
 
-	// 3. Invoke handler
 	handler := i.mod.ExportedFunction("alloy_handle_message")
 	if handler == nil {
 		return api.Message{}, fmt.Errorf("plugin missing 'alloy_handle_message' export")
@@ -97,13 +90,11 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 		return api.Message{}, nil
 	}
 
-	// 4. Read response from guest memory
 	respBuf, ok := i.mod.Memory().Read(respPtr, respSize)
 	if !ok {
 		return api.Message{}, fmt.Errorf("failed to read response from guest memory")
 	}
 
-	// Cleanup response buffer in guest now that we've read it
 	if free := i.mod.ExportedFunction("alloy_free"); free != nil {
 		_, _ = free.Call(ctx, uint64(respPtr))
 	}
@@ -124,15 +115,12 @@ func (i *Instance) Capabilities() []api.Capability {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
 	fn := i.mod.ExportedFunction("alloy_capabilities")
 	if fn == nil {
 		return nil
 	}
 
-	results, err := fn.Call(ctx)
+	results, err := fn.Call(context.Background())
 	if err != nil || len(results) == 0 {
 		return nil
 	}
@@ -151,10 +139,7 @@ func (i *Instance) Capabilities() []api.Capability {
 	}
 
 	var caps []api.Capability
-	if err := json.Unmarshal(buf, &caps); err != nil {
-		return nil
-	}
-
+	_ = json.Unmarshal(buf, &caps)
 	return caps
 }
 
