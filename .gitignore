@@ -1,15 +1,26 @@
 # Binaries and build artifacts
 build/
+bin/
+*.wasm
+alloy-core
+alloy-cli
+alloy-tui
+alloy-gui-gio
+alloy-gui-wayland-native
+plugins-bin/
 
-# Go environment
-vendor/
-
-# Test documentation and coverage
+# Logs and test artifacts
+*.log
 coverage.out
 coverdata/
 race_report.txt
 smoke_test_output.log
+*.html
+
+# Go environment
+vendor/
 
 # IDEs
 .vscode/
 .idea/
+.DS_Store
