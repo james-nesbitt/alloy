@@ -14,6 +14,7 @@ func main() {
 }
 
 func handleMessage(msg wasm.Message) wasm.Message {
+    wasm.Log("Mock handling message: " + msg.ID)
     return wasm.Message{
         ID: msg.ID + "-resp",
         Type: "response",

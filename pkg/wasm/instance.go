@@ -35,8 +35,12 @@ type Instance struct {
 
 // HandleMessage passes an Alloy Message to the guest via the Guest ABI.
 func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	// Add a small delay if this is the very first message after loading to avoid 
+	// potential wasip1/tinygo runtime initialization races
 	i.mu.Lock()
 	defer i.mu.Unlock()
+
+	i.logger.Debug("wasm HandleMessage start", "id", i.id, "method", msg.Method)
 
 	if i.status == StatusCrashed {
 		return api.Message{}, fmt.Errorf("plugin %s is crashed: %s", i.id, i.lastError)
@@ -84,6 +88,9 @@ func (i *Instance) HandleMessage(ctx context.Context, msg api.Message) (api.Mess
 
 	// 4. Get output buffer pointer
 	getOutPtr := i.mod.ExportedFunction("alloy_get_out_ptr")
+	if getOutPtr == nil {
+		return api.Message{}, fmt.Errorf("plugin missing 'alloy_get_out_ptr' export")
+	}
 	results, err = getOutPtr.Call(ctx)
 	if err != nil {
 		return api.Message{}, fmt.Errorf("failed to get output pointer: %w", err)

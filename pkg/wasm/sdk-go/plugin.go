@@ -106,12 +106,12 @@ func (p *Plugin) Run() {
 
 	// Signal to the host that we are ready
 	PluginStarted()
+	Log("Plugin " + p.id + " fully started and ready")
 
 	// Stay alive without blocking host calls.
 	// For Standard Go WASM, we must keep the main goroutine alive.
-	// select{} is fine but we keep the Sleep loop for better cross-runtime behavior.
 	for {
-		time.Sleep(time.Hour)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
@@ -69,6 +70,12 @@ func NewRuntime(ctx context.Context, logger *slog.Logger, kv storage.StateStore,
 		dataDir:  dataDir,
 		routerFn: router,
 	}, nil
+}
+
+func (r *Runtime) recoverPanic(id string) {
+	if err := recover(); err != nil {
+		r.logger.Error("WASM host-guest call panic recovered", "plugin", id, "error", err)
+	}
 }
 
 type logWriter struct {
@@ -150,6 +157,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		// Command mode - call _start in a goroutine
 		r.logger.Info("starting wasm command goroutine", "id", id)
 		go func() {
+			defer r.recoverPanic(id)
 			_, _ = startFunc.Call(loadCtx)
 		}()
 		
@@ -157,6 +165,8 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 		select {
 		case <-startChan:
 			r.logger.Info("wasm plugin ready", "id", id)
+			// Wait a tiny bit more for TinyGo stack/scheduler to settle
+			time.Sleep(5 * time.Millisecond)
 		case <-ctx.Done():
 			return nil, fmt.Errorf("timed out waiting for plugin %s to start", id)
 		}

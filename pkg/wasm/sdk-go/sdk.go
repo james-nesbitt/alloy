@@ -74,6 +74,9 @@ func alloyStarted()
 
 // PluginStarted signals to the host that the plugin has finished initialization.
 func PluginStarted() {
+	if uintptr(unsafe.Pointer(&inBuffer[0])) == 0 {
+		return
+	}
 	alloyStarted()
 }
 
@@ -203,6 +206,9 @@ func Alloy_free(ptr uint32) {
 // alloy_handle_message is exported for the host to send messages to the guest.
 //go:wasmexport alloy_handle_message
 func Alloy_handle_message(size uint32) uint32 {
+	if size == 0 {
+		return 0
+	}
 	if size > uint32(len(inBuffer)) {
 		return 0
 	}
@@ -210,11 +216,13 @@ func Alloy_handle_message(size uint32) uint32 {
 	buf := inBuffer[:size]
 	var msg Message
 	if err := json.Unmarshal(buf, &msg); err != nil {
+		Log("Failed to unmarshal message in guest: " + err.Error())
 		return 0
 	}
 
 	// 2. Call the registered handler
 	if handler == nil {
+		Log("Guest handler is nil")
 		return 0
 	}
 	resp := handler(msg)
@@ -225,10 +233,12 @@ func Alloy_handle_message(size uint32) uint32 {
 	// 3. Serialize response
 	respBuf, err := json.Marshal(resp)
 	if err != nil {
+		Log("Failed to marshal response in guest: " + err.Error())
 		return 0
 	}
 
 	if len(respBuf) > len(outBuffer) {
+		Log("Response too large for guest outBuffer")
 		return 0
 	}
 
