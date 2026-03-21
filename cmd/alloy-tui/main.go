@@ -42,6 +42,8 @@ type model struct {
 	subscriptions map[string]bool
 	commandTree   *frontend.CommandNode
 	recency       map[string]int
+	frequency     map[string]int
+	statuses      map[string]string
 	selectedCmdIdx int
 
 	activeProject *Project
@@ -214,6 +216,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} `json:"data"`
 				}
 				if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+					if m.statuses == nil { m.statuses = make(map[string]string) }
+					m.statuses[ev.Data.ID] = "crashed"
 					displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render(
 						fmt.Sprintf("[%s] !!! Plugin %s CRASHED: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
 				}
@@ -695,9 +699,12 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 			method := parts[1]
 			payload := ""
 			
-			// Increment recency for "plugin-id method"
+			// Increment recency & frequency for "plugin-id method"
 			if m.recency == nil { m.recency = make(map[string]int) }
-			m.recency[target+" "+method]++
+			if m.frequency == nil { m.frequency = make(map[string]int) }
+			key := target + " " + method
+			m.recency[key] = int(time.Now().Unix())
+			m.frequency[key]++
 
 			if len(parts) > 2 {
 				payload = strings.Join(parts[2:], " ")
@@ -723,6 +730,8 @@ type CommandOption struct {
 	Annotation  string
 	IsDir       bool
 	Method      string
+	Status      string
+	Frequency   int
 }
 
 func (m model) filteredCommands() []CommandOption {
@@ -749,21 +758,44 @@ func (m model) filteredCommands() []CommandOption {
 		flattened := m.commandTree.Flatten("")
 		for _, item := range flattened {
 			if frontend.FuzzyMatch(item.FullTitle, input) {
+				status := "running"
+				if s, ok := m.statuses[item.Target]; ok {
+					status = s
+				}
+
 				results = append(results, CommandOption{
 					Raw:         item.Target + " " + item.Method,
 					Display:     item.FullTitle,
 					Description: item.Description,
+					Status:      status,
+					Frequency:   m.frequency[item.Target+" "+item.Method],
 				})
 			}
 		}
 
-		// Weight by recency
+		// Weight by recency/frequency/status
 		sort.Slice(results, func(i, j int) bool {
-			wi := m.recency[results[i].Raw]
-			wj := m.recency[results[j].Raw]
-			if wi != wj {
-				return wi > wj
+			// 1. Status priority
+			if results[i].Status != results[j].Status {
+				if results[i].Status == "crashed" { return false }
+				if results[j].Status == "crashed" { return true }
 			}
+			
+			// 2. Exact prefix match bonus
+			prefI := strings.HasPrefix(results[i].Display, input)
+			prefJ := strings.HasPrefix(results[j].Display, input)
+			if prefI != prefJ { return prefI }
+
+			// 3. Recency (last used in session)
+			ri := m.recency[results[i].Raw]
+			rj := m.recency[results[j].Raw]
+			if ri != rj { return ri > rj }
+
+			// 4. Frequency
+			fi := results[i].Frequency
+			fj := results[j].Frequency
+			if fi != fj { return fi > fj }
+
 			return results[i].Display < results[j].Display
 		})
 	} else if m.mode == ModeCommand && m.isLeader && m.commandTree != nil {
@@ -779,6 +811,11 @@ func (m model) filteredCommands() []CommandOption {
 				child := node.Children[k]
 				// Match against key or shortcut representation
 				if frontend.FuzzyMatch(k, input) {
+					status := "running"
+					if s, ok := m.statuses[child.Target]; ok {
+						status = s
+					}
+
 					results = append(results, CommandOption{
 						Raw:         child.Target + " " + child.Method,
 						Display:     k,
@@ -786,17 +823,22 @@ func (m model) filteredCommands() []CommandOption {
 						Annotation:  child.Annotation,
 						IsDir:       len(child.Children) > 0,
 						Method:      child.Method,
+						Status:      status,
+						Frequency:   m.frequency[child.Target+" "+child.Method],
 					})
 				}
 			}
 			
-			// Weight by recency
+			// Weight by recency/frequency/status
 			sort.Slice(results, func(i, j int) bool {
-				wi := m.recency[results[i].Raw]
-				wj := m.recency[results[j].Raw]
-				if wi != wj {
-					return wi > wj
+				if results[i].Status != results[j].Status {
+					if results[i].Status == "crashed" { return false }
+					if results[j].Status == "crashed" { return true }
 				}
+				ri := m.recency[results[i].Raw]
+				rj := m.recency[results[j].Raw]
+				if ri != rj { return ri > rj }
+
 				return results[i].Display < results[j].Display
 			})
 		}
@@ -884,6 +926,12 @@ func (m model) View() string {
 			var rows []string
 			for i, opt := range filtered {
 				label := opt.Display
+				
+				statusStr := ""
+				if opt.Status == "crashed" {
+					statusStr = " (CRASHED)"
+				}
+
 				if m.isLeader {
 					annotation := ""
 					if opt.Annotation != "" {
@@ -893,14 +941,20 @@ func (m model) View() string {
 					if opt.IsDir {
 						method = "..."
 					}
-					label = fmt.Sprintf("%-2s  %s%-15s", opt.Display, annotation, method)
+					label = fmt.Sprintf("%-2s  %s%-15s%s", opt.Display, annotation, method, statusStr)
+				} else {
+					label = fmt.Sprintf("%-20s%s", opt.Display, statusStr)
 				}
 
 				line := fmt.Sprintf(" %-20s %s", label, opt.Description)
 				if i == m.selectedCmdIdx {
 					rows = append(rows, selectedStyle.Render(line))
 				} else {
-					rows = append(rows, line)
+					if opt.Status == "crashed" {
+						rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(line))
+					} else {
+						rows = append(rows, line)
+					}
 				}
 			}
 

@@ -83,7 +83,9 @@ type SearchItem struct {
 	Shortcut    string
 	Target      string
 	Method      string
-	Weight      float64
+	Weight      int
+	Frequency   int
+	Status      string // "running", "crashed", etc.
 }
 
 // Flatten extracts all leaf commands from the tree.

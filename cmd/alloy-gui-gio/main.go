@@ -412,14 +412,28 @@ func run(w *app.Window, client *frontend.Client) error {
 							}
 
 							content := input.Text()
-							var hints []string
+							var hints []layout.FlexChild
 
 							if gui.isLeader {
 								node := gui.commandTree.Find(gui.breadcrumbs)
 								if node != nil {
 									for k, child := range node.Children {
 										if content == "" || strings.HasPrefix(k, content) {
-											hints = append(hints, fmt.Sprintf("%s (%s)", k, child.Method))
+											hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Caption(th, k+" ")
+														c.Font.Weight = 700
+														c.Color = color.NRGBA{R: 255, G: 255, B: 0, A: 255}
+														return c.Layout(gtx)
+													}),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Caption(th, child.Method)
+														c.Color = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
+														return c.Layout(gtx)
+													}),
+												)
+											}))
 										}
 									}
 								}
@@ -447,20 +461,35 @@ func run(w *app.Window, client *frontend.Client) error {
 									return scored[i].item.FullTitle < scored[j].item.FullTitle
 								})
 
+								if len(scored) > 5 { scored = scored[:5] }
+
 								for _, s := range scored {
-									hints = append(hints, s.item.FullTitle)
+									hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													c := material.Caption(th, s.item.FullTitle)
+													c.Font.Weight = 700
+													return c.Layout(gtx)
+												}),
+												layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													c := material.Caption(th, s.item.Description)
+													c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
+													return c.Layout(gtx)
+												}),
+											)
+										})
+									}))
 								}
 							}
 
 							if len(hints) == 0 {
 								return layout.Dimensions{}
 							}
-							if len(hints) > 5 {
-								hints = hints[:5]
-							}
 
 							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.Caption(th, "Suggestions: "+strings.Join(hints, " | ")).Layout(gtx)
+								return layout.Flex{Axis: layout.Vertical}.Layout(gtx, hints...)
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
