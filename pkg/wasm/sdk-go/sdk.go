@@ -15,6 +15,8 @@ type Message struct {
 	Method    string          `json:"method"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 	Timestamp int64           `json:"timestamp"`
+	Actor     string          `json:"actor,omitempty"`
+	SessionID string          `json:"session_id,omitempty"`
 }
 
 // Capability describes a functionality provided by a component.

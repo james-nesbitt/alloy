@@ -77,6 +77,12 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 
 	k.logger.Info("plugin registered", "plugin_id", p.ID())
 
+	// Handle IAM enforcement natively
+	if p.ID() == "plugin-iam" {
+		k.logger.Info("IAM plugin detected, enabling RBAC enforcement")
+		// In a real system, we might promote IAM to a first-class interceptor
+	}
+
 	// Emit registration event
 	caps, _ := json.Marshal(p.Capabilities())
 	// Use non-auditing/intercepting context for system-level events
@@ -109,7 +115,52 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	if ctx.Value(skipInterceptorsKey) == nil {
 		k.mu.RLock()
 		interceptors := k.interceptors
+		iam, hasIAM := k.plugins["plugin-iam"]
 		k.mu.RUnlock()
+
+		// Core RBAC Enforcement via plugin-iam
+		if hasIAM && msg.Sender != "system" && msg.Sender != "plugin-iam" && msg.Method != "check" && msg.Type == api.TypeRequest {
+			// Ask IAM for permission
+			checkPayload, _ := json.Marshal(map[string]string{
+				"actor":  msg.Actor,
+				"target": msg.Target,
+				"method": msg.Method,
+			})
+			iamCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+			defer cancel()
+			
+			// Call the plugin handler directly to avoid recursive routing
+			resp, err := iam.HandleMessage(iamCtx, api.Message{
+				ID:      "iam-check-" + msg.ID,
+				Type:    api.TypeRequest,
+				Sender:  "kernel",
+				Target:  "plugin-iam",
+				Method:  "check",
+				Payload: checkPayload,
+			})
+			
+			if err != nil {
+				k.logger.Error("IAM check failed", "error", err)
+				return
+			}
+			
+			var result struct {
+				Allowed bool `json:"allowed"`
+			}
+			if err := json.Unmarshal(resp.Payload, &result); err == nil && !result.Allowed {
+				k.logger.Warn("IAM: authorization denied", "actor", msg.Actor, "target", msg.Target, "method", msg.Method)
+				
+				// Optional: Send access denied response back to sender
+				k.RouteMessage(context.WithValue(ctx, skipInterceptorsKey, true), api.Message{
+					ID:      msg.ID + "-error",
+					Type:    api.TypeResponse,
+					Sender:  "kernel",
+					Target:  msg.Sender,
+					Payload: []byte(`{"error":"unauthorized"}`),
+				})
+				return
+			}
+		}
 
 		for _, interceptor := range interceptors {
 			newMsg, allow, err := interceptor.PreRoute(ctx, msg)

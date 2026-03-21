@@ -97,6 +97,7 @@ func stop(args []string) {
 
 func discover(args []string) {
 	fs := flag.NewFlagSet("discover", flag.ExitOnError)
+	actor := fs.String("actor", "cli-discover", "Actor identity")
 	socket := fs.String("socket", filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Socket address of the core")
 	alloyHome := fs.String("home", getAlloyHome(), "Directory for alloy identities")
 	insecure := fs.Bool("insecure", false, "Disable mTLS")
@@ -120,6 +121,7 @@ func discover(args []string) {
 		ID:        "discover-1",
 		Type:      api.TypeRequest,
 		Sender:    "cli-discover",
+		Actor:     *actor,
 		Target:    "plugin-command-manager",
 		Method:    "discover",
 		Timestamp: time.Now().Unix(),
@@ -192,6 +194,7 @@ func list(args []string) {
 func ping(args []string) {
 	fs := flag.NewFlagSet("ping", flag.ExitOnError)
 	name := fs.String("name", "cli-client", "Name of the component to use")
+	actor := fs.String("actor", "", "Actor identity (defaults to name)")
 	target := fs.String("target", "kernel", "Target component")
 	method := fs.String("method", "ping", "Method to call")
 
@@ -202,6 +205,10 @@ func ping(args []string) {
 	timeoutSec := fs.Int("timeout", 5, "Timeout in seconds")
 	insecure := fs.Bool("insecure", false, "Disable mTLS")
 	fs.Parse(args)
+
+	if *actor == "" {
+		*actor = *name
+	}
 
 	var tlsConfig *tls.Config
 	var err error
@@ -230,6 +237,7 @@ func ping(args []string) {
 		ID:        "ping-1",
 		Type:      api.TypeRequest,
 		Sender:    *name,
+		Actor:     *actor,
 		Target:    *target,
 		Method:    *method,
 		Timestamp: time.Now().Unix(),

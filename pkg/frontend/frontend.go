@@ -36,9 +36,14 @@ type Client struct {
 	mu       sync.RWMutex
 	onMsg    []func(api.Message)
 	name     string
+	actor    string // The authenticated actor identity
 }
 
 func NewClient(name, socket string, insecure bool) (*Client, error) {
+	return NewClientWithActor(name, name, socket, insecure)
+}
+
+func NewClientWithActor(name, actor, socket string, insecure bool) (*Client, error) {
 	var tlsConfig *tls.Config
 	if !insecure {
 		store := identity.NewStore(GetAlloyHome())
@@ -58,8 +63,9 @@ func NewClient(name, socket string, insecure bool) (*Client, error) {
 	}
 
 	c := &Client{
-		ipc:  ipcClient,
-		name: name,
+		ipc:   ipcClient,
+		name:  name,
+		actor: actor,
 	}
 
 	go c.readLoop()
@@ -88,10 +94,15 @@ func (c *Client) OnMessage(h func(api.Message)) {
 }
 
 func (c *Client) Send(ctx context.Context, target, method string, payload []byte) (api.Message, error) {
+	c.mu.RLock()
+	actor := c.actor
+	c.mu.RUnlock()
+
 	msg := api.Message{
 		ID:        fmt.Sprintf("frontend-%d", time.Now().UnixNano()),
 		Type:      api.TypeRequest,
 		Sender:    c.name,
+		Actor:     actor,
 		Target:    target,
 		Method:    method,
 		Payload:   payload,

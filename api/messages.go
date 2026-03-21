@@ -27,6 +27,8 @@ type Message struct {
 	Payload   json.RawMessage `json:"payload,omitempty"`
 	Timestamp int64           `json:"timestamp"`
 	Metadata  map[string]any  `json:"metadata,omitempty"`
+	Actor     string          `json:"actor,omitempty"`      // The identity performing the action (e.g., user email)
+	SessionID string          `json:"session_id,omitempty"` // The unique session for the actor
 }
 
 // Plugin defines the interface for components that can be registered with the kernel.

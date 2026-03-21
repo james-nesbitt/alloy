@@ -1080,12 +1080,17 @@ func (m model) View() string {
 
 func main() {
 	name := flag.String("name", "alloy-tui", "Name of the TUI component")
+	actor := flag.String("actor", "", "Actor identity (defaults to name)")
 	socket := flag.String("socket", frontend.GetAlloyRuntimeDir()+"/default.sock", "Socket address")
 	insecure := flag.Bool("insecure", false, "Disable mTLS")
 	flag.Parse()
 
+	if *actor == "" {
+		*actor = *name
+	}
+
 	msgCh := make(chan api.Message, 100)
-	client, err := frontend.NewClient(*name, *socket, *insecure)
+	client, err := frontend.NewClientWithActor(*name, *actor, *socket, *insecure)
 	if err != nil {
 		fmt.Printf("Failed to connect: %v\n", err)
 		os.Exit(1)
