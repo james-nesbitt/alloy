@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,12 +29,6 @@ import (
 	"github.com/jnesbitt/alloy-go/pkg/frontend"
 )
 
-type registration struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"`
-	Capabilities []api.Capability `json:"capabilities,omitempty"`
-}
-
 type Project struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -41,7 +36,7 @@ type Project struct {
 }
 
 type discoveryMsg struct {
-	Targets []registration `json:"targets"`
+	Targets []frontend.Registration `json:"targets"`
 }
 
 const (
@@ -77,7 +72,9 @@ type guiState struct {
 	mode          int
 	isLeader      bool
 	breadcrumbs   []string
-	targets       []registration
+	targets       []frontend.Registration
+	commandTree   *frontend.CommandNode
+	recency       map[string]int
 	activeProject *Project
 	projects      []Project
 	showProjects  bool
@@ -126,6 +123,7 @@ func run(w *app.Window, client *frontend.Client) error {
 	list.Axis = layout.Vertical
 	projList.Axis = layout.Vertical
 	gui.subscriptions = make(map[string]bool)
+	gui.recency = make(map[string]int)
 
 	// Discovery Loop
 	go func() {
@@ -137,6 +135,7 @@ func run(w *app.Window, client *frontend.Client) error {
 				var dMsg discoveryMsg
 				if err := json.Unmarshal(resp.Payload, &dMsg); err == nil {
 					gui.targets = dMsg.Targets
+					gui.commandTree = frontend.BuildCommandTree(gui.targets)
 
 					// Auto-subscribe to events and fetch active project
 					for _, t := range gui.targets {
@@ -408,26 +407,60 @@ func run(w *app.Window, client *frontend.Client) error {
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if !gui.isLeader {
+							if gui.mode != ModeCommand {
 								return layout.Dimensions{}
 							}
-							// Show filtered command hints
-							prefix := strings.Join(gui.breadcrumbs, " ")
+
+							content := input.Text()
 							var hints []string
-							for _, t := range gui.targets {
-								for _, c := range t.Capabilities {
-									if prefix == "" || strings.HasPrefix(c.Shortcut, prefix) {
-										reminder := strings.TrimPrefix(c.Shortcut, prefix)
-										reminder = strings.TrimSpace(reminder)
-										hints = append(hints, fmt.Sprintf("%-2s %s", reminder, c.Method))
+
+							if gui.isLeader {
+								node := gui.commandTree.Find(gui.breadcrumbs)
+								if node != nil {
+									for k, child := range node.Children {
+										if content == "" || strings.HasPrefix(k, content) {
+											hints = append(hints, fmt.Sprintf("%s (%s)", k, child.Method))
+										}
 									}
 								}
+							} else {
+								// Global fuzzy search if not leader
+								flattened := gui.commandTree.Flatten("")
+								type scoredItem struct {
+									item   frontend.SearchItem
+									weight int
+								}
+								var scored []scoredItem
+								for _, item := range flattened {
+									if frontend.FuzzyMatch(item.FullTitle, content) {
+										scored = append(scored, scoredItem{
+											item:   item,
+											weight: gui.recency[item.Target+" "+item.Method],
+										})
+									}
+								}
+								
+								sort.Slice(scored, func(i, j int) bool {
+									if scored[i].weight != scored[j].weight {
+										return scored[i].weight > scored[j].weight
+									}
+									return scored[i].item.FullTitle < scored[j].item.FullTitle
+								})
+
+								for _, s := range scored {
+									hints = append(hints, s.item.FullTitle)
+								}
 							}
+
 							if len(hints) == 0 {
 								return layout.Dimensions{}
 							}
+							if len(hints) > 5 {
+								hints = hints[:5]
+							}
+
 							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.Caption(th, "Hints: "+strings.Join(hints, " | ")).Layout(gtx)
+								return material.Caption(th, "Suggestions: "+strings.Join(hints, " | ")).Layout(gtx)
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -657,6 +690,10 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 	if len(parts) >= 2 {
 		target := parts[0]
 		method := parts[1]
+		
+		if gui.recency == nil { gui.recency = make(map[string]int) }
+		gui.recency[target+" "+method]++
+
 		payload := ""
 		if len(parts) > 2 {
 			payload = strings.Join(parts[2:], " ")

@@ -25,7 +25,7 @@ type model struct {
 	messages  []string
 	viewport  viewport.Model
 	textarea  textarea.Model
-	targets   []registration
+	targets   []frontend.Registration
 	err       error
 	width     int
 	height    int
@@ -40,7 +40,8 @@ type model struct {
 	isLeader      bool
 	breadcrumbs   []string
 	subscriptions map[string]bool
-	commandTree   *CommandNode
+	commandTree   *frontend.CommandNode
+	recency       map[string]int
 	selectedCmdIdx int
 
 	activeProject *Project
@@ -73,14 +74,8 @@ type Project struct {
 	Description string   `json:"description,omitempty"`
 }
 
-type registration struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"`
-	Capabilities []api.Capability `json:"capabilities,omitempty"`
-}
-
 type discoveryMsg struct {
-	Targets []registration `json:"targets"`
+	Targets []frontend.Registration `json:"targets"`
 }
 
 type messageMsg api.Message
@@ -141,7 +136,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case discoveryMsg:
 		m.targets = msg.Targets
-		m.commandTree = BuildCommandTree(m.targets)
+		m.commandTree = frontend.BuildCommandTree(m.targets)
 		var cmds []tea.Cmd
 		for _, t := range m.targets {
 			if t.ID == "plugin-events" && !m.subscriptions["chat:message"] {
@@ -699,6 +694,11 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 			target := parts[0]
 			method := parts[1]
 			payload := ""
+			
+			// Increment recency for "plugin-id method"
+			if m.recency == nil { m.recency = make(map[string]int) }
+			m.recency[target+" "+method]++
+
 			if len(parts) > 2 {
 				payload = strings.Join(parts[2:], " ")
 			}
@@ -716,25 +716,6 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func fuzzyMatch(target, input string) bool {
-	if input == "" {
-		return true
-	}
-	target = strings.ToLower(target)
-	input = strings.ToLower(input)
-
-	inputIdx := 0
-	for targetIdx := 0; targetIdx < len(target); targetIdx++ {
-		if target[targetIdx] == input[inputIdx] {
-			inputIdx++
-		}
-		if inputIdx == len(input) {
-			return true
-		}
-	}
-	return false
-}
-
 type CommandOption struct {
 	Raw         string
 	Display     string
@@ -750,7 +731,7 @@ func (m model) filteredCommands() []CommandOption {
 	if m.mode == ModeCommand && m.selectType == SelectProject {
 		input := m.commandInput.Value()
 		for _, p := range m.projects {
-			if fuzzyMatch(p.Name, input) {
+			if frontend.FuzzyMatch(p.Name, input) {
 				results = append(results, CommandOption{
 					Raw:         p.ID,
 					Display:     p.Name,
@@ -763,37 +744,43 @@ func (m model) filteredCommands() []CommandOption {
 		if len(input) > 0 && input[0] == ':' {
 			input = input[1:]
 		}
-		
-		for _, t := range m.targets {
-			for _, c := range t.Capabilities {
-				full := t.ID + " " + c.Method
-				if fuzzyMatch(full, input) {
-					results = append(results, CommandOption{
-						Raw:         full,
-						Display:     full,
-						Description: c.Description,
-					})
-				}
+
+		// Flatten the entire tree and fuzzy find
+		flattened := m.commandTree.Flatten("")
+		for _, item := range flattened {
+			if frontend.FuzzyMatch(item.FullTitle, input) {
+				results = append(results, CommandOption{
+					Raw:         item.Target + " " + item.Method,
+					Display:     item.FullTitle,
+					Description: item.Description,
+				})
 			}
 		}
+
+		// Weight by recency
+		sort.Slice(results, func(i, j int) bool {
+			wi := m.recency[results[i].Raw]
+			wj := m.recency[results[j].Raw]
+			if wi != wj {
+				return wi > wj
+			}
+			return results[i].Display < results[j].Display
+		})
 	} else if m.mode == ModeCommand && m.isLeader && m.commandTree != nil {
 		node := m.commandTree.Find(m.breadcrumbs)
 		if node != nil {
 			input := m.commandInput.Value()
-			keys := make([]string, 0, len(node.Children))
+			var keys []string
 			for k := range node.Children {
 				keys = append(keys, k)
 			}
-			sort.Strings(keys)
 
 			for _, k := range keys {
 				child := node.Children[k]
-				
-				// Label to match against can be the key (k) or the Method 
-				matchStr := k + " " + child.Method
-				if fuzzyMatch(matchStr, input) {
+				// Match against key or shortcut representation
+				if frontend.FuzzyMatch(k, input) {
 					results = append(results, CommandOption{
-						Raw:         child.Key,
+						Raw:         child.Target + " " + child.Method,
 						Display:     k,
 						Description: child.Description,
 						Annotation:  child.Annotation,
@@ -802,6 +789,16 @@ func (m model) filteredCommands() []CommandOption {
 					})
 				}
 			}
+			
+			// Weight by recency
+			sort.Slice(results, func(i, j int) bool {
+				wi := m.recency[results[i].Raw]
+				wj := m.recency[results[j].Raw]
+				if wi != wj {
+					return wi > wj
+				}
+				return results[i].Display < results[j].Display
+			})
 		}
 	}
 
@@ -969,6 +966,7 @@ func main() {
 		msgCh:         msgCh,
 		activeChannel: "general",
 		subscriptions: make(map[string]bool),
+		recency:       make(map[string]int),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
