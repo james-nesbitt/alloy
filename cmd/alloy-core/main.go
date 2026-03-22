@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -11,11 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/james-nesbitt/alloy/pkg/kernel"
-	"github.com/james-nesbitt/alloy/pkg/storage"
-	"github.com/james-nesbitt/alloy/pkg/ipc"
+	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
+	"github.com/james-nesbitt/alloy/pkg/ipc"
+	"github.com/james-nesbitt/alloy/pkg/kernel"
 	"github.com/james-nesbitt/alloy/pkg/security/identity"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func getAlloyRuntimeDir() string {
@@ -102,9 +105,33 @@ func main() {
 		logger.Warn("running in INSECURE mode")
 	}
 
-	// Load provisioned plugins if specified
-	if *provisionFile != "" {
-		if err := loadProvisionedPlugins(k, *provisionFile, logger); err != nil {
+	// Resolve provisioning file
+	currentProvisionFile := *provisionFile
+	if currentProvisionFile == "" {
+		// 1. Try relative to the executable (FHS relative: from /usr/libexec/alloy to /etc/alloy)
+		if exe, err := os.Executable(); err == nil {
+			fhsEtc := filepath.Join(filepath.Dir(exe), "..", "..", "etc", "alloy", "provision.json")
+			if _, err := os.Stat(fhsEtc); err == nil {
+				currentProvisionFile = fhsEtc
+			}
+		}
+		// 2. Try global absolute FHS
+		if currentProvisionFile == "" {
+			if _, err := os.Stat("/etc/alloy/provision.json"); err == nil {
+				currentProvisionFile = "/etc/alloy/provision.json"
+			}
+		}
+		// 3. Try local CWD (development fallback)
+		if currentProvisionFile == "" {
+			if _, err := os.Stat("provision.json"); err == nil {
+				currentProvisionFile = "provision.json"
+			}
+		}
+	}
+
+	// Load provisioned plugins if found
+	if currentProvisionFile != "" {
+		if err := loadProvisionedPlugins(k, currentProvisionFile, logger); err != nil {
 			logger.Error("failed to load provisioned plugins", "error", err)
 			os.Exit(1)
 		}
@@ -140,11 +167,144 @@ func main() {
 	}
 }
 
+// ProvisionManifest defines the structure of the plugin provisioning file.
+type ProvisionManifest struct {
+	Plugins []ProvisionPlugin `json:"plugins"`
+}
+
+type ProvisionPlugin struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Path     string `json:"path"`
+	LoadTime string `json:"load_time"`
+}
+
 // loadProvisionedPlugins loads plugins from a provisioning file.
 func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *slog.Logger) error {
 	logger.Info("loading provisioned plugins", "file", provisionFile)
-	// Provisioning logic would go here
+	data, err := os.ReadFile(provisionFile)
+	if err != nil {
+		return fmt.Errorf("failed to read provision file: %w", err)
+	}
+
+	var manifest ProvisionManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("failed to parse provision file: %w", err)
+	}
+
+	for _, p := range manifest.Plugins {
+		if p.Type != "wasm" {
+			logger.Warn("unsupported plugin type in manifest", "id", p.ID, "type", p.Type)
+			continue
+		}
+
+		// Resolve the plugin path
+		wasmPath := resolvePluginPath(provisionFile, p.Path)
+		if wasmPath == "" {
+			logger.Error("could not resolve plugin WASM path", "id", p.ID, "requested", p.Path)
+			continue
+		}
+
+		if p.LoadTime == "lazy" {
+			// Register a lazy loader for this plugin
+			k.RegisterPluginLoader(p.ID, &wasmLoader{
+				k:        k,
+				pluginID: p.ID,
+				path:     wasmPath,
+				logger:   logger,
+			}, api.PluginMetadata{
+				ID:       p.ID,
+				LoadTime: api.LoadTimeLazy,
+			})
+			logger.Info("registered lazy-loaded plugin", "id", p.ID, "path", wasmPath)
+		} else {
+			// Load immediately on boot
+			wasmBytes, err := os.ReadFile(wasmPath)
+			if err != nil {
+				logger.Error("failed to read plugin WASM for boot-load", "id", p.ID, "path", wasmPath, "error", err)
+				continue
+			}
+
+			if err := k.RegisterWASMPlugin(p.ID, wasmBytes, nil); err != nil {
+				logger.Error("failed to register boot-loaded plugin", "id", p.ID, "error", err)
+				continue
+			}
+			logger.Info("loaded plugin on boot", "id", p.ID, "path", wasmPath)
+		}
+	}
+
 	return nil
+}
+
+// resolvePluginPath attempts to find the WASM file relative to several well-known locations.
+func resolvePluginPath(manifestPath, pluginPath string) string {
+	if filepath.IsAbs(pluginPath) {
+		if _, err := os.Stat(pluginPath); err == nil {
+			return pluginPath
+		}
+	}
+
+	// 1. Try relative to the manifest file itself
+	relToManifest := filepath.Join(filepath.Dir(manifestPath), pluginPath)
+	if _, err := os.Stat(relToManifest); err == nil {
+		return relToManifest
+	}
+
+	// 2. Try the official FHS location relative to the binary
+	if exe, err := os.Executable(); err == nil {
+		fhsPath := filepath.Join(filepath.Dir(exe), "..", "lib", "alloy", "plugins", pluginPath)
+		if _, err := os.Stat(fhsPath); err == nil {
+			return fhsPath
+		}
+	}
+
+	// 3. Try common dev paths (relative to CWD)
+	cwd, _ := os.Getwd()
+	devPaths := []string{
+		filepath.Join(cwd, "build", "dist", "usr", "lib", "alloy", "plugins", pluginPath),
+		filepath.Join(cwd, "build", "plugins", pluginPath),
+	}
+	for _, p := range devPaths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	// 4. Try system-wide location
+	sysPath := filepath.Join("/usr/lib/alloy/plugins", pluginPath)
+	if _, err := os.Stat(sysPath); err == nil {
+		return sysPath
+	}
+
+	return ""
+}
+
+// wasmLoader implements the api.PluginLoader interface for lazy-loading WASM plugins.
+type wasmLoader struct {
+	k        *kernel.WITKernel
+	pluginID string
+	path     string
+	logger   *slog.Logger
+}
+
+func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, error) {
+	l.logger.Info("lazy-loading plugin", "id", id, "path", l.path)
+
+	wasmBytes, err := os.ReadFile(l.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read lazy-loaded WASM: %w", err)
+	}
+
+	if err := l.k.RegisterWASMPlugin(id, wasmBytes, nil); err != nil {
+		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
+	}
+
+	p, ok := l.k.GetPlugin(id)
+	if !ok {
+		return nil, fmt.Errorf("plugin %s registered but could not be retrieved", id)
+	}
+
+	return p, nil
 }
 
 // healthMonitor monitors the health of plugins.

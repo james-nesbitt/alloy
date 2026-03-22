@@ -3,49 +3,49 @@
     {
       "id": "health",
       "type": "wasm",
-      "path": "build/wasm/health.wasm",
+      "path": "health.wasm",
       "load_time": "boot"
     },
     {
       "id": "chat",
       "type": "wasm",
-      "path": "build/wasm/chat.wasm",
+      "path": "chat.wasm",
       "load_time": "lazy"
     },
     {
       "id": "buffer",
       "type": "wasm",
-      "path": "build/wasm/buffer.wasm",
+      "path": "buffer.wasm",
       "load_time": "boot"
     },
     {
       "id": "ai",
       "type": "wasm",
-      "path": "build/wasm/ai.wasm",
+      "path": "ai.wasm",
       "load_time": "lazy"
     },
     {
       "id": "iam",
       "type": "wasm",
-      "path": "build/wasm/iam.wasm",
+      "path": "iam.wasm",
       "load_time": "boot"
     },
     {
       "id": "project",
       "type": "wasm",
-      "path": "build/wasm/project.wasm",
+      "path": "project.wasm",
       "load_time": "boot"
     },
     {
       "id": "secrets",
       "type": "wasm",
-      "path": "build/wasm/secrets.wasm",
+      "path": "secrets.wasm",
       "load_time": "lazy"
     },
     {
       "id": "tasks",
       "type": "wasm",
-      "path": "build/wasm/tasks.wasm",
+      "path": "tasks.wasm",
       "load_time": "lazy"
     }
   ]

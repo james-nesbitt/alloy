@@ -200,12 +200,11 @@ func (k *WITKernel) cleanupLoading(id string, ch chan struct{}) {
 }
 
 // RegisterPluginLoader registers a loader for a plugin.
-func (k *WITKernel) RegisterPluginLoader(pluginID string, loader api.PluginLoader) {
+func (k *WITKernel) RegisterPluginLoader(pluginID string, loader api.PluginLoader, metadata api.PluginMetadata) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.loaders[pluginID] = loader
-	// Note: api.PluginLoader doesn't have Metadata() method in current api.
-	// We might need to assume metadata is provided elsewhere or handle it.
+	k.metadata[pluginID] = metadata
 }
 
 // RegisterPlugin registers an already instantiated plugin.
@@ -233,6 +232,14 @@ func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps [
 	}
 
 	k.RegisterPlugin(plugin)
+
+	// Explicitly set metadata to boot load time
+	k.mu.Lock()
+	meta := k.metadata[pluginID]
+	meta.LoadTime = api.LoadTimeBoot
+	k.metadata[pluginID] = meta
+	k.mu.Unlock()
+
 	return nil
 }
 
