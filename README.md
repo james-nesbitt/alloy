@@ -1,6 +1,27 @@
-# Alloy
+# Alloy: The Team-Project Micro-kernel
 
-Alloy is a multi-user, micro-kernel styled application platform written in Go. It features a modular backend kernel and utilizes **WIT-based WASM plugins** for its functionality (WebAssembly Component Model).
+Alloy is a secure, lightweight, and high-performance micro-kernel built in Go, designed specifically for collaborative development and project-centric workflows. It acts as a secure message bus and orchestration layer for high-performance WASM (WebAssembly) plugins that communicate via the WASM Component Model (WIT).
+
+## The Core Philosophy
+
+Alloy is not just a tool; it is a **Project-First Workspace**. Unlike traditional IDEs or CLI tools that treat the "project" as a secondary folder, Alloy treats the active project as the top-level entity, coordinating shared identity, persistent state, and real-time team collaboration.
+
+### 1. Secure-by-Default (mTLS & IAM)
+Every connection to the Alloy kernel is identity-verified using mTLS or Unix credentials. A synchronous **IAM Interceptor** validates every message before it reaches a plugin, ensuring zero-trust security even within the application boundary.
+
+### 2. Project-Centric Context
+Alloy bridges the gap between different tools (AI, Git, Chat, Editors) by providing a unified **Project Manifest**. When you open Alloy in a project directory:
+- **IAM Policies** are scoped to the project.
+- **AI Workers** gain a semantic index of project files and history.
+- **Shared Buffers** are synchronized across the team.
+
+### 3. Composable "Front-end Arbitrated" UI
+Alloy uses a **Data-Driven UI Protocol**. Plugins do not render pixels; they provide **Summaries**, **Actions**, and **State Payloads**. The Frontend (TUI, GUI, or Web) acts as an arbitrator, deciding how to display this data based on:
+- **Project Manifests**: Dictating what information is important for this workspace.
+- **User Preference**: Dictating how those components are laid out (Grids, Panes, or Overlays).
+
+### 4. High-Performance Plugin Ecosystem (WASM)
+Application logic lives in isolated WASM components. This provides language-agnostic SDKs (Go, Rust, C), hot-reloading, and strict sandboxing.
 
 ## 🚀 Quick Start
 

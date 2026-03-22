@@ -1,8 +1,34 @@
-# Alloy Frontends
+# Frontend Philosophy: The Arbitrator Pattern
 
-Alloy is designed with a "headless-first" architecture. The core backend (`alloy-core`) is a long-running service that manages plugins and message routing, while frontends connect to it over a secure IPC bridge to provide user interfaces.
+Alloy's frontends are not just views; they are **arbitrators** of plugin data. To avoid the complexity of a universal rendering protocol, Alloy uses a **Data-Driven UI**.
 
-## 1. Common Frontend Architecture
+## 1. UI Arbitration
+Plugins do not "draw" pixels. Instead, they provide structured data to the Frontend. The Frontend translates this data into a format appropriate for the device (TUI, GUI, or Web).
+
+### The Dashboard Protocol
+Plugins implement the `dashboard-provider` interface to share their status with the user at startup.
+
+- **Request**: `get-summary()`
+  - **Payload**: `{ "title": "AI Agent", "content": "Ready. 4 active tasks." }`
+- **Request**: `get-actions()`
+  - **Payload**: `["Ask a question", "List tasks", "Configure model"]`
+
+## 2. Shared Interface Elements
+The Frontend provides several standardized components that plugins can leverage without writing UI code.
+
+- **The Smart Command Bar**: A global fuzzy search and mnemonic menu.
+- **The Dashboard Grid**: A modular layout of status cards from active plugins.
+- **Multipane Views**: The ability to split the screen into side-by-side plugin viewports.
+- **Overlays**: Transient modals for quick input or confirmation.
+
+## 3. Layout Control
+The layout of these elements is controlled by the **Frontend Registry**, which merges two sources of truth:
+1. **The Project Manifest (`.alloy/workspace.json`)**: Dictates which plugins are "pinned" or "tiled" for specific project workflows.
+2. **The User Profile**: Allows the user to move, resize, or hide panes regardless of the project's defaults.
+
+---
+
+## 4. Current Implementations
 
 All Alloy frontends, regardless of their technology stack (TUI, GUI, Web), share a common core integration layer provided by the backend and the frontend SDK.
 
