@@ -44,9 +44,16 @@ func NewClient(name, socket string, insecure bool) (*Client, error) {
 }
 
 func NewClientWithActor(name, actor, socket string, insecure bool) (*Client, error) {
+	return NewClientWithActorAndSecurity(name, actor, socket, insecure, "")
+}
+
+func NewClientWithActorAndSecurity(name, actor, socket string, insecure bool, securityDir string) (*Client, error) {
 	var tlsConfig *tls.Config
 	if !insecure {
-		store := identity.NewStore(GetAlloyHome())
+		if securityDir == "" {
+			securityDir = GetAlloyHome()
+		}
+		store := identity.NewStore(securityDir)
 		ca, err := store.InitializeMachine()
 		if err != nil {
 			return nil, err

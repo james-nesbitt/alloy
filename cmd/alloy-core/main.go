@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"log/slog"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/kernel"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
+	"github.com/james-nesbitt/alloy/pkg/cmdutil"
+	"github.com/james-nesbitt/alloy/pkg/security/identity"
 )
 
 func getAlloyRuntimeDir() string {
@@ -34,7 +37,10 @@ func main() {
 	listenAddr := flag.String("listen", "unix://" + filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Address to listen on (unix:// or tcp://)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
+	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
+
+	cmdutil.HandleSecurityError(sf.Validate())
 
 	// Adjust logging level
 	if *debug {
@@ -68,6 +74,34 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Set up security/identity
+	var tlsConfig *tls.Config
+	if !*sf.Insecure {
+		secDir := *sf.SecurityDir
+		if secDir == "" {
+			if home := os.Getenv("XDG_CONFIG_HOME"); home != "" {
+				secDir = filepath.Join(home, "alloy")
+			} else {
+				secDir = filepath.Join(os.Getenv("HOME"), ".config", "alloy")
+			}
+		}
+		store := identity.NewStore(secDir)
+		ca, err := store.InitializeMachine()
+		if err == nil {
+			id, err := store.CreateInstanceIdentity(ca, "core")
+			if err == nil {
+				tlsConfig, _ = store.GetServerTLSConfig(ca, id)
+			}
+		}
+		if tlsConfig != nil {
+			logger.Info("mTLS security enabled", "dir", secDir)
+		} else {
+			logger.Warn("mTLS initialization failed, falling back to insecure", "dir", secDir)
+		}
+	} else {
+		logger.Warn("running in INSECURE mode")
+	}
+
 	// Load provisioned plugins if specified
 	if *provisionFile != "" {
 		if err := loadProvisionedPlugins(k, *provisionFile, logger); err != nil {
@@ -84,7 +118,7 @@ func main() {
 	go healthMonitor(k, logger)
 
 	// Create and start IPC server
-	server := ipc.NewServer(logger, k, nil)
+	server := ipc.NewServer(logger, k, tlsConfig)
 
 	go func() {
 		logger.Info("starting IPC server", "addr", *listenAddr)

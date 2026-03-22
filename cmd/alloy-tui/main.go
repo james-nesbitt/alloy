@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
+	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 )
 
 // TUI Layout components
@@ -1134,15 +1135,17 @@ func main() {
 	name := flag.String("name", "alloy-tui", "Name of the TUI component")
 	actor := flag.String("actor", "", "Actor identity (defaults to name)")
 	socket := flag.String("socket", frontend.GetAlloyRuntimeDir()+"/default.sock", "Socket address")
-	insecure := flag.Bool("insecure", false, "Disable mTLS")
+	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
+
+	cmdutil.HandleSecurityError(sf.Validate())
 
 	if *actor == "" {
 		*actor = *name
 	}
 
 	msgCh := make(chan api.Message, 100)
-	client, err := frontend.NewClientWithActor(*name, *actor, *socket, *insecure)
+	client, err := frontend.NewClientWithActorAndSecurity(*name, *actor, *socket, *sf.Insecure, *sf.SecurityDir)
 	if err != nil {
 		fmt.Printf("Failed to connect: %v\n", err)
 		os.Exit(1)
