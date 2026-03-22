@@ -83,6 +83,8 @@ type guiState struct {
 	projectCreate projectCreateState
 	aiSwitch      aiSwitchState
 	aiQuery       aiQueryState
+	selectedIdx   int
+	filtered      []frontend.SearchItem
 }
 
 func main() {
@@ -248,7 +250,10 @@ func run(w *app.Window, client *frontend.Client) error {
 
 			// Capture keyboard events
 			for {
-				ev, ok := gtx.Event(key.Filter{Focus: &gui}, key.Filter{Focus: &input})
+				ev, ok := gtx.Event(
+					key.Filter{Focus: &gui, Name: key.NameDownArrow + "|" + key.NameUpArrow},
+					key.Filter{Focus: &input, Name: key.NameEnter + "|" + key.NameEscape + "|" + key.NameDownArrow + "|" + key.NameUpArrow + "|" + key.NameDeleteBackward + "|" + key.NameSpace},
+				)
 				if !ok {
 					break
 				}
@@ -258,34 +263,59 @@ func run(w *app.Window, client *frontend.Client) error {
 						gui.mode = ModeNormal
 						gui.isLeader = false
 						gui.breadcrumbs = nil
+						gui.selectedIdx = 0
 						gtx.Execute(key.FocusCmd{Tag: &gui})
+					case key.NameDownArrow:
+						if len(gui.filtered) > 0 {
+							gui.selectedIdx = (gui.selectedIdx + 1) % len(gui.filtered)
+						}
+					case key.NameUpArrow:
+						if len(gui.filtered) > 0 {
+							gui.selectedIdx = (gui.selectedIdx - 1 + len(gui.filtered)) % len(gui.filtered)
+						}
 					case key.NameDeleteBackward:
 						if input.Text() == "" && gui.isLeader {
 							if len(gui.breadcrumbs) > 0 {
 								gui.breadcrumbs = gui.breadcrumbs[:len(gui.breadcrumbs)-1]
+								gui.selectedIdx = 0
 							} else {
 								gui.isLeader = false
 								input.SetText(":")
+								gui.selectedIdx = 0
 							}
 							gtx.Execute(key.FocusCmd{Tag: &input})
+							goto skipInput
 						}
 					case key.NameReturn:
 						if gui.mode == ModeCommand {
-							content := input.Text()
-							if content != "" {
-								executeCommand(client, &gui, content, w)
+							if len(gui.filtered) > 0 && gui.selectedIdx >= 0 && gui.selectedIdx < len(gui.filtered) {
+								item := gui.filtered[gui.selectedIdx]
+								executeCommand(client, &gui, fmt.Sprintf("%s %s", item.Target, item.Method), w)
 								input.SetText("")
 								gui.mode = ModeNormal
 								gui.isLeader = false
 								gui.breadcrumbs = nil
+								gui.selectedIdx = 0
 								gtx.Execute(key.FocusCmd{Tag: &gui})
+							} else {
+								content := input.Text()
+								if content != "" {
+									executeCommand(client, &gui, content, w)
+									input.SetText("")
+									gui.mode = ModeNormal
+									gui.isLeader = false
+									gui.breadcrumbs = nil
+									gui.selectedIdx = 0
+									gtx.Execute(key.FocusCmd{Tag: &gui})
+								}
 							}
 						}
-					case key.NameSpace, " ":
+					case key.NameSpace:
 						if gui.mode == ModeNormal {
 							gui.mode = ModeCommand
 							gui.isLeader = true
 							gui.breadcrumbs = nil
+							gui.selectedIdx = 0
 							gtx.Execute(key.FocusCmd{Tag: &input})
 							goto skipInput
 						}
@@ -297,25 +327,32 @@ func run(w *app.Window, client *frontend.Client) error {
 								gui.isLeader = false
 								gui.breadcrumbs = nil
 								input.SetText(":")
+								gui.selectedIdx = 0
 								gtx.Execute(key.FocusCmd{Tag: &input})
 								goto skipInput
 							}
 
 							if len(nameStr) == 1 {
-								gui.breadcrumbs = append(gui.breadcrumbs, strings.ToLower(nameStr))
-								
-								// Check if we matched a leaf command
-								node := gui.commandTree.Find(gui.breadcrumbs)
-								if node != nil && len(node.Children) == 0 {
-									executeCommand(client, &gui, fmt.Sprintf("%s %s", node.Target, node.Method), w)
-									gui.mode = ModeNormal
-									gui.isLeader = false
-									gui.breadcrumbs = nil
-									input.SetText("")
-									gtx.Execute(key.FocusCmd{Tag: &gui})
+								keyLow := strings.ToLower(nameStr)
+								nodeAt := gui.commandTree.Find(gui.breadcrumbs)
+								if nodeAt != nil {
+									if child, ok := nodeAt.Children[keyLow]; ok {
+										if len(child.Children) == 0 {
+											executeCommand(client, &gui, fmt.Sprintf("%s %s", child.Target, child.Method), w)
+											gui.mode = ModeNormal
+											gui.isLeader = false
+											gui.breadcrumbs = nil
+											input.SetText("")
+											gui.selectedIdx = 0
+											gtx.Execute(key.FocusCmd{Tag: &gui})
+										} else {
+											gui.breadcrumbs = append(gui.breadcrumbs, keyLow)
+											gui.selectedIdx = 0
+										}
+										goto skipInput
+									}
 								}
 							}
-							goto skipInput
 						}
 					}
 				}
@@ -437,119 +474,131 @@ func run(w *app.Window, client *frontend.Client) error {
 							}
 
 							content := input.Text()
-							var hints []layout.FlexChild
+							if strings.HasPrefix(content, ":") {
+								content = content[1:]
+							}
 
+							// Update filtered list
 							if gui.isLeader && content == "" {
 								node := gui.commandTree.Find(gui.breadcrumbs)
 								if node != nil {
-									// Title for leader menu
-									hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										txt := "Leader"
-										if len(gui.breadcrumbs) > 0 {
-											txt += " > " + strings.Join(gui.breadcrumbs, " > ")
-										}
-										c := material.H6(th, txt)
-										c.Color = color.NRGBA{R: 0, G: 200, B: 255, A: 255}
-										return layout.UniformInset(unit.Dp(4)).Layout(gtx, c.Layout)
-									}))
-
-									// Create a grid-like view for hints
-									var rows []layout.FlexChild
+									gui.filtered = nil
 									keys := make([]string, 0, len(node.Children))
 									for k := range node.Children {
 										keys = append(keys, k)
 									}
 									sort.Strings(keys)
+									for _, k := range keys {
+										child := node.Children[k]
+										gui.filtered = append(gui.filtered, frontend.SearchItem{
+											FullTitle:   k,
+											Description: child.Description,
+											Target:      child.Target,
+											Method:      child.Method,
+											Shortcut:    child.Shortcut,
+										})
+									}
+								}
+							} else {
+								// Fuzzy search
+								flattened := gui.commandTree.Flatten("")
+								var scored []frontend.SearchItem
+								for _, item := range flattened {
+									if frontend.FuzzyMatch(item.FullTitle, content) {
+										item.Weight = gui.recency[item.Target+" "+item.Method]
+										scored = append(scored, item)
+									}
+								}
+								frontend.SortItems(scored)
+								if len(scored) > 10 {
+									scored = scored[:10]
+								}
+								gui.filtered = scored
+							}
+
+							if gui.selectedIdx >= len(gui.filtered) {
+								gui.selectedIdx = 0
+							}
+
+							var hints []layout.FlexChild
+							if gui.isLeader && content == "" {
+								// Title for leader menu
+								hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									txt := "Leader"
+									if len(gui.breadcrumbs) > 0 {
+										txt += " > " + strings.Join(gui.breadcrumbs, " > ")
+									}
+									c := material.H6(th, txt)
+									c.Color = color.NRGBA{R: 0, G: 200, B: 255, A: 255}
+									return layout.UniformInset(unit.Dp(4)).Layout(gtx, c.Layout)
+								}))
+
+								// Show grid of children
+								var rows []layout.FlexChild
+								for i := 0; i < len(gui.filtered); i += 3 {
+									end := i + 3
+									if end > len(gui.filtered) { end = len(gui.filtered) }
+									rowItems := gui.filtered[i:end]
 									
-									for i := 0; i < len(keys); i += 3 {
-										end := i + 3
-										if end > len(keys) { end = len(keys) }
-										rowKeys := keys[i:end]
-										
-										rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											var cols []layout.FlexChild
-											for _, k := range rowKeys {
-												child := node.Children[k]
-												keyStr := k
-												desc := child.Description
-												if len(child.Children) > 0 { desc = "..." }
-												
-												cols = append(cols, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										var cols []layout.FlexChild
+										for _, item := range rowItems {
+											cols = append(cols, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Body1(th, item.FullTitle)
+														c.Font.Weight = 700
+														c.Color = color.NRGBA{R: 255, G: 255, B: 0, A: 255}
+														return c.Layout(gtx)
+													}),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														desc := item.Description
+														if item.Method == "" { desc = "..." } // Branch
+														c := material.Caption(th, desc)
+														c.Color = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
+														return c.Layout(gtx)
+													}),
+												)
+											}))
+										}
+										return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, cols...)
+										})
+									}))
+								}
+								hints = append(hints, rows...)
+							} else {
+								// Typing or fuzzy mode show vertical list with selection
+								for i, item := range gui.filtered {
+									isSelected := i == gui.selectedIdx
+									hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return layout.Stack{}.Layout(gtx,
+											layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+												if !isSelected { return layout.Dimensions{} }
+												paint.FillShape(gtx.Ops, color.NRGBA{R: 60, G: 60, B: 60, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+												return layout.Dimensions{Size: gtx.Constraints.Min}
+											}),
+											layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+												return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 													return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 														layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-															c := material.Body1(th, keyStr)
+															c := material.Caption(th, item.FullTitle)
 															c.Font.Weight = 700
-															c.Color = color.NRGBA{R: 255, G: 255, B: 0, A: 255}
+															if isSelected { c.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255} }
 															return c.Layout(gtx)
 														}),
-														layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+														layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 														layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-															c := material.Caption(th, desc)
-															c.Color = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
+															c := material.Caption(th, item.Description)
+															c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
+															if isSelected { c.Color = color.NRGBA{R: 220, G: 220, B: 220, A: 255} }
 															return c.Layout(gtx)
 														}),
 													)
-												}))
-											}
-											return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-												return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, cols...)
-											})
-										}))
-									}
-									hints = append(hints, rows...)
-								}
-							} else if gui.mode == ModeCommand {
-								// Leader mode typing or normal command mode
-								if gui.isLeader {
-									hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										c := material.Caption(th, "Search in: "+strings.Join(gui.breadcrumbs, " > "))
-										c.Color = color.NRGBA{R: 0, G: 200, B: 255, A: 255}
-										return c.Layout(gtx)
-									}))
-								}
-
-								// Global fuzzy search if not leader or if leader is typing
-								flattened := gui.commandTree.Flatten("")
-								type scoredItem struct {
-									item   frontend.SearchItem
-									weight int
-								}
-								var scored []scoredItem
-								for _, item := range flattened {
-									if frontend.FuzzyMatch(item.FullTitle, content) {
-										scored = append(scored, scoredItem{
-											item:   item,
-											weight: gui.recency[item.Target+" "+item.Method],
-										})
-									}
-								}
-								
-								sort.Slice(scored, func(i, j int) bool {
-									if scored[i].weight != scored[j].weight {
-										return scored[i].weight > scored[j].weight
-									}
-									return scored[i].item.FullTitle < scored[j].item.FullTitle
-								})
-
-								if len(scored) > 5 { scored = scored[:5] }
-
-								for _, s := range scored {
-									hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													c := material.Caption(th, s.item.FullTitle)
-													c.Font.Weight = 700
-													return c.Layout(gtx)
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													c := material.Caption(th, s.item.Description)
-													c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
-													return c.Layout(gtx)
-												}),
-											)
-										})
+												})
+											}),
+										)
 									}))
 								}
 							}
@@ -791,13 +840,14 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 		method := parts[1]
 		
 		if gui.recency == nil { gui.recency = make(map[string]int) }
-		gui.recency[target+" "+method]++
+		gui.recency[target+" "+method] = int(time.Now().Unix())
 
 		payload := ""
 		if len(parts) > 2 {
 			payload = strings.Join(parts[2:], " ")
 		}
 
+		// Specialized handlers
 		if target == "project" && method == "open" && payload == "" {
 			gui.showProjects = !gui.showProjects
 			w.Invalidate()
