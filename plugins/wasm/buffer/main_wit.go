@@ -428,6 +428,7 @@ func notifyAll(id string, event string) {
 	// Notify events plugin
 	plugin.RouteMessage(AlloyMessage{
 		Id:      "evt-pub-" + tid,
+		MsgType: "request",
 		Method:  "publish",
 		Sender:  "buffer",
 		Target:  Some("events"),
@@ -438,6 +439,7 @@ func notifyAll(id string, event string) {
 	for _, sub := range subscribers[id] {
 		plugin.RouteMessage(AlloyMessage{
 			Id:      "evt-sub-" + tid,
+			MsgType: "event",
 			Method:  "update",
 			Sender:  "buffer",
 			Target:  Some(sub),

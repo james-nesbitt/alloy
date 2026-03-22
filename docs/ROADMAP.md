@@ -67,7 +67,7 @@ Logic-heavy plugins and the user interface.
     - [ ] **Smart Command Bar (Consult/Vertico model)**: Fuzzy-filtering, multi-column results, and live previews.
     - [x] **Visual Mnemonic Feedback**: "Breadcrumb" display in the minibuffer during multi-key sequences.
 - [x] **WASM SDK Standard Library**: Formally abstracted plugin development Kit.
-- [ ] **Security Hardening**: RBAC and fine-grained capability routing.
+- [x] **Security Hardening**: RBAC and fine-grained capability routing via `iam` interceptor.
 
 ## Phase 5: Advanced Refinement & Deployment
 Bringing the system to full maturity.

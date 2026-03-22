@@ -78,6 +78,10 @@ func NewWITKernel(
 	kernel.commands = native.NewCommandManager(logger)
 	kernel.RegisterPlugin(kernel.commands)
 
+	// Initialize and register security interceptor
+	iamInterceptor := NewIAMInterceptor(kernel)
+	kernel.RegisterInterceptor(iamInterceptor)
+
 	// Start the monitor
 	kernel.wasmManager.StartMonitor(context.Background(), 30*time.Second)
 

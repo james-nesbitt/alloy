@@ -264,16 +264,19 @@ func (r *Runtime) readStringFromArgs(mod wazeroapi.Module, ptr, length uint32) s
 
 func (r *Runtime) readMessageFromArgs(
 	mod wazeroapi.Module,
-	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen uint32,
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64,
 ) api.Message {
 	msg := api.Message{
 		ID:        r.readStringFromArgs(mod, idPtr, idLen),
+		Type:      api.MessageType(r.readStringFromArgs(mod, typePtr, typeLen)),
 		Method:    r.readStringFromArgs(mod, methodPtr, methodLen),
 		Sender:    r.readStringFromArgs(mod, senderPtr, senderLen),
 		Timestamp: timestamp,
 	}
+	// For AlloyMessage, the WIT-generated calling convention passes options as discrete args.
+	// We need to check targetSet != 0.
 	if targetSet != 0 {
 		msg.Target = r.readStringFromArgs(mod, targetPtr, targetLen)
 	}
@@ -303,62 +306,69 @@ func (r *Runtime) writeMessage(ctx context.Context, mod wazeroapi.Module, ptr ui
 	}
 
 	writeStr(ptr, msg.ID)
-	writeStr(ptr+8, msg.Method)
-	writeStr(ptr+16, msg.Sender)
+	writeStr(ptr+8, string(msg.Type))
+	writeStr(ptr+16, msg.Method)
+	writeStr(ptr+24, msg.Sender)
 
+	// Offset 32: target (alloy_option_string_t)
+	// bool is_some (4 bytes)
+	// alloy_string_t val (8 bytes, starts at 36)
 	if msg.Target != "" {
-		mod.Memory().WriteUint32Le(ptr+24, 1)
-		writeStr(ptr+28, msg.Target)
+		mod.Memory().WriteUint32Le(ptr+32, 1)
+		writeStr(ptr+36, msg.Target)
 	} else {
-		mod.Memory().WriteUint32Le(ptr+24, 0)
-		mod.Memory().WriteUint32Le(ptr+28, 0)
 		mod.Memory().WriteUint32Le(ptr+32, 0)
-	}
-
-	if len(msg.Payload) > 0 {
-		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(msg.Payload)))
-		mod.Memory().Write(uint32(res[0]), msg.Payload)
-		mod.Memory().WriteUint32Le(ptr+36, uint32(res[0]))
-		mod.Memory().WriteUint32Le(ptr+40, uint32(len(msg.Payload)))
-	} else {
 		mod.Memory().WriteUint32Le(ptr+36, 0)
 		mod.Memory().WriteUint32Le(ptr+40, 0)
 	}
 
-	mod.Memory().WriteUint64Le(ptr+48, uint64(msg.Timestamp))
+	// Offset 44: payload (alloy_list_u8_t - 8 bytes)
+	if len(msg.Payload) > 0 {
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(msg.Payload)))
+		mod.Memory().Write(uint32(res[0]), msg.Payload)
+		mod.Memory().WriteUint32Le(ptr+44, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+48, uint32(len(msg.Payload)))
+	} else {
+		mod.Memory().WriteUint32Le(ptr+44, 0)
+		mod.Memory().WriteUint32Le(ptr+48, 0)
+	}
+
+	// Offset 56: timestamp (uint64_t - 8 bytes)
+	mod.Memory().WriteUint64Le(ptr+56, uint64(msg.Timestamp))
 }
 
 func (r *Runtime) internalHandleMessage(
 	ctx context.Context, mod wazeroapi.Module,
-	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen uint32,
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64, resultPtr uint32,
 ) {
-	msg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
-	r.writeMessage(ctx, mod, resultPtr, api.Message{ID: msg.ID + "-resp", Method: "unimplemented"})
+	msg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	r.writeMessage(ctx, mod, resultPtr, api.Message{ID: msg.ID + "-resp", Type: api.TypeResponse, Method: "unimplemented"})
 }
 
 func (r *Runtime) internalRouteMessage(
 	ctx context.Context, mod wazeroapi.Module,
-	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen uint32,
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64,
 ) {
-	msg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	msg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
 	r.routerFn(ctx, msg)
 }
 
 func (r *Runtime) internalCall(
 	ctx context.Context, mod wazeroapi.Module,
-	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen uint32,
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64, resultPtr uint32,
 ) {
-	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
 	resp, err := r.callFn(ctx, apiMsg)
 	if err != nil {
 		resp = api.Message{
 			ID:      apiMsg.ID + "-resp",
+			Type:    api.TypeResponse,
 			Method:  apiMsg.Method,
 			Sender:  "kernel",
 			Payload: []byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
@@ -393,11 +403,12 @@ func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Modu
 
 func (r *Runtime) internalSendResponse(
 	ctx context.Context, mod wazeroapi.Module,
-	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen uint32,
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64,
 ) {
-	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	apiMsg.Type = api.TypeResponse
 	
 	r.mu.RLock()
 	instance, ok := r.plugins[mod.Name()]

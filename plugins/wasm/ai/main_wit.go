@@ -146,6 +146,7 @@ func main() {
 		// Subscribe to chat events
 		subPayload, _ := json.Marshal(map[string]string{"topic": "chat:message"})
 		plugin.RouteMessage(AlloyMessage{
+			MsgType: "request",
 			Method:  "subscribe",
 			Sender:  "ai",
 			Target:  Some("events"),
@@ -322,10 +323,11 @@ func handleSummarize(msg AlloyMessage) AlloyMessage {
 func discoverNativeLLM() string {
 	// Create discovery message
 	discoverMsg := AlloyMessage{
-		Id:     "ai-discover-" + fmt.Sprint(time.Now().UnixNano()),
-		Method: "discover",
-		Sender: "ai",
-		Target: Some("command-manager"),
+		Id:      "ai-discover-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "discover",
+		Sender:  "ai",
+		Target:  Some("command-manager"),
 	}
 
 	// Call the command manager
@@ -367,6 +369,7 @@ func queryNativeLLM(providerID, prompt string) (string, error) {
 	// Create query message
 	queryMsg := AlloyMessage{
 		Id:      "ai-gen-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
 		Method:  "generate",
 		Sender:  "ai",
 		Target:  Some(providerID),
@@ -528,10 +531,11 @@ func getProjectContext() string {
 func getActiveProject() (*ProjectInfo, error) {
 	// Create message to get active project
 	msg := AlloyMessage{
-		Id:     "get-active-project-" + fmt.Sprint(time.Now().UnixNano()),
-		Method: "get_active",
-		Sender: "ai",
-		Target: Some("project"),
+		Id:      "get-active-project-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "get_active",
+		Sender:  "ai",
+		Target:  Some("project"),
 	}
 
 	// Call the project manager
@@ -591,6 +595,7 @@ func sendChatResponse(channel, response string) {
 	// Create message to send chat response
 	msg := AlloyMessage{
 		Id:      "ai-response-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "event",
 		Method:  "send",
 		Sender:  "ai",
 		Target:  Some("chat"),

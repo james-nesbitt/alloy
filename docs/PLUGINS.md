@@ -38,8 +38,9 @@ The interface for Large Language Models.
 
 ### 3.3 Identity & Access Manager (`iam`)
 Provides the security backbone for the system.
-- **Authorization**: Validates if a user/frontend has permission to send a specific message to a target.
-- **RBAC**: Manages roles and permissions.
+- **Authorization**: Validates if an `Actor` (verified identity) has permission to send a specified message to a `Target`. 
+- **RBAC**: Manages roles and permissions for system users, frontends, and other plugins.
+- **Synchronous Enforcement**: Operates as a kernel interceptor, blocking unauthorized calls *before* they reach their destination.
 
 ### 3.4 Project Manager (`project`)
 Provides a layer of organization above individual resources.

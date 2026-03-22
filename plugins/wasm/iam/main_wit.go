@@ -113,6 +113,27 @@ func main() {
 			_ = policies.Set("admin", defaultPolicy)
 			plugin.Log("info", "Initialized default admin policy")
 		}
+
+		// Initialize default guest policy for common operations
+		_, err = policies.Get("guest")
+		if err != nil {
+			guestPolicy := Policy{
+				Role: "guest",
+				Permissions: []string{
+					"health:*",
+					"command-manager:discover",
+					"events:*",
+					"chat:*",
+					"project:*",
+					"ai:*",
+					"iam:check",
+					"secrets:*",
+					"buffer:*",
+				},
+			}
+			_ = policies.Set("guest", guestPolicy)
+			plugin.Log("info", "Initialized default guest policy")
+		}
 		return nil
 	})
 

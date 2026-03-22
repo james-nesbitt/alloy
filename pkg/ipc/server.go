@@ -214,6 +214,10 @@ func (s *Server) handleConn(netConn net.Conn) {
 				// Update clientID for this connection context
 				clientID = msg.Sender
 			}
+
+			// Security: Set message actor based on verified connection identity
+			msg.Actor = clientID
+
 			s.router.RouteMessage(ctx, msg)
 		}
 	}()

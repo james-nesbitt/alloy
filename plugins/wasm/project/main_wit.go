@@ -300,6 +300,7 @@ func notifyProjectOpened(proj *Project) {
 	})
 
 	plugin.RouteMessage(AlloyMessage{
+		MsgType: "request", // or event
 		Method:  "publish",
 		Sender:  "project",
 		Target:  Some("events"),

@@ -105,6 +105,7 @@ func handleSendMessage(msg AlloyMessage) AlloyMessage {
 		"data":  chatMsg,
 	})
 	plugin.RouteMessage(AlloyMessage{
+		MsgType: "request",
 		Method:  "publish",
 		Sender:  "chat",
 		Target:  Some("events"),
@@ -145,6 +146,7 @@ func handleDirectSend(msg AlloyMessage) AlloyMessage {
 
 	// Broadcast the direct message
 	plugin.RouteMessage(AlloyMessage{
+		MsgType: "event",
 		Method:  "chat:direct",
 		Sender:  "chat-plugin",
 		Payload: newHistoryData,
@@ -187,6 +189,7 @@ func handlePresenceUpdate(msg AlloyMessage) AlloyMessage {
 
 	// Broadcast presence update
 	plugin.RouteMessage(AlloyMessage{
+		MsgType: "event",
 		Method:  "chat:presence",
 		Sender:  "chat-plugin",
 		Payload: msg.Payload,

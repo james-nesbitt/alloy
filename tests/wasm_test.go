@@ -169,6 +169,12 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		"plugins": []map[string]any{
 			{"id": "kv", "type": "native", "load_time": "boot"},
 			{
+				"id":        "iam",
+				"type":      "wasm",
+				"path":      filepath.Join(buildDir, "iam.wasm"),
+				"load_time": "boot",
+			},
+			{
 				"id":           "chat",
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "chat.wasm"),

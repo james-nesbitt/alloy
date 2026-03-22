@@ -5,6 +5,7 @@ world alloy {
         // Message structure for plugin communication
         record message {
             id: string,
+            msg-type: string,
             method: string,
             sender: string,
             target: option<string>,

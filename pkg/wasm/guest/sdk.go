@@ -12,6 +12,7 @@ import (
 // Message is a high-level representation of an Alloy message.
 type Message struct {
 	ID        string
+	Type      string
 	Sender    string
 	Target    string
 	Method    string
@@ -202,6 +203,7 @@ func (p *Plugin) messageLoop() {
 		// Priority 2: SDK Handlers
 		msg := Message{
 			ID:      rawMsg.Id,
+			Type:    rawMsg.MsgType,
 			Method:  rawMsg.Method,
 			Sender:  rawMsg.Sender,
 			Payload: rawMsg.Payload,
@@ -219,6 +221,7 @@ func (p *Plugin) messageLoop() {
 		if resp != nil {
 			guest.AlloySendResponse(guest.AlloyMessage{
 				Id:      resp.ID,
+				MsgType: "response",
 				Method:  resp.Method,
 				Sender:  p.id,
 				Target:  guest.Some(msg.Sender),
@@ -282,6 +285,7 @@ func (p *Plugin) Reply(req guest.AlloyMessage, payload any) guest.AlloyMessage {
 	data, _ := json.Marshal(payload)
 	return guest.AlloyMessage{
 		Id:      req.Id + "-resp",
+		MsgType: "response",
 		Method:  req.Method,
 		Sender:  p.id,
 		Target:  guest.Some(req.Sender),
@@ -295,6 +299,7 @@ func (p *Plugin) ErrorReply(req guest.AlloyMessage, errMsg string) guest.AlloyMe
 	data, _ := json.Marshal(result)
 	return guest.AlloyMessage{
 		Id:      req.Id + "-resp",
+		MsgType: "response",
 		Method:  req.Method,
 		Sender:  p.id,
 		Target:  guest.Some(req.Sender),
@@ -307,6 +312,7 @@ func (p *Plugin) SDKReply(req Message, method string, payload any) *Message {
 	data, _ := json.Marshal(payload)
 	return &Message{
 		ID:      req.ID + "-resp",
+		Type:    "response",
 		Method:  method,
 		Target:  req.Sender,
 		Payload: data,
@@ -319,6 +325,7 @@ func (p *Plugin) ReplyError(req Message, errMsg string) *Message {
 	data, _ := json.Marshal(result)
 	return &Message{
 		ID:      req.ID + "-resp",
+		Type:    "response",
 		Method:  req.Method,
 		Target:  req.Sender,
 		Payload: data,
