@@ -4,58 +4,44 @@ package guest
 
 import (
 	"encoding/json"
+	"fmt"
+
 	guest "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
 )
 
-// Plugin represents a WASM plugin using WIT bindings.
-type Plugin struct {
-	id               string
-	capabilities     []guest.AlloyCapability
-	handlers         map[string]MessageHandler
-	commandHandlers  map[string]CommandHandler
-	defaultHandler   MessageHandler
-	onInit           func() error
-	onStart          func()
-	onSave           func() []byte
-	onLoad           func([]byte)
-	metadata         PluginMetadata
+// Message is a high-level representation of an Alloy message.
+type Message struct {
+	ID        string
+	Sender    string
+	Target    string
+	Method    string
+	Payload   []byte
+	Timestamp int64
 }
 
-// PluginMetadata contains discoverable information about a plugin.
-type PluginMetadata struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description"`
-	Version      string            `json:"version"`
-	Author       string            `json:"author"`
-	Tags         []string          `json:"tags"`
-	Capabilities []CapabilityInfo  `json:"capabilities"`
-}
+// Handler is a function that processes a message and returns an optional response.
+type Handler func(msg Message) *Message
 
-// CapabilityInfo describes a discoverable capability.
-type CapabilityInfo struct {
-	Method       string            `json:"method"`
-	Description  string            `json:"description"`
-	Shortcut     string            `json:"shortcut,omitempty"`
-	Annotations  map[string]string `json:"annotations,omitempty"`
-	Tags         []string          `json:"tags,omitempty"`
-	Type         string            `json:"type,omitempty"` // "message" or "command"
-}
-
-// MessageHandler handles incoming messages.
-type MessageHandler func(msg guest.AlloyMessage) guest.AlloyMessage
-
-// CommandHandler handles command execution.
-type CommandHandler func(cmd Command) CommandResult
-
-// Command represents an executable command.
+// Command is a high-level representation of a plugin command.
 type Command struct {
-	Name    string          `json:"name"`
-	Args    []string        `json:"args"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Method  string          `json:"method,omitempty"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Handler     CommandHandler     `json:"-"`
+	Shortcut    string            `json:"shortcut,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// CommandResult represents the result of command execution.
+// CommandContext provides context for command execution.
+type CommandContext struct {
+	Plugin *Plugin
+	Args   []string
+	Sender string
+}
+
+// CommandHandler is a function that handles a command.
+type CommandHandler func(ctx CommandContext) CommandResult
+
+// CommandResult is the outcome of a command execution.
 type CommandResult struct {
 	Success bool            `json:"success"`
 	Output  string          `json:"output"`
@@ -63,445 +49,200 @@ type CommandResult struct {
 	Error   string          `json:"error,omitempty"`
 }
 
-// NewPlugin creates a new WIT-based plugin.
+// Plugin represents an Alloy WASM plugin with ergonomic Go bindings.
+type Plugin struct {
+	id           string
+	capabilities []guest.AlloyCapability
+	handlers     map[string]Handler
+	commands     map[string]Command
+	onInit       func() error
+	onShutdown   func()
+}
+
+// NewPlugin creates a new ergonomic Alloy plugin.
 func NewPlugin(id string) *Plugin {
 	return &Plugin{
-		id:              id,
-		handlers:        make(map[string]MessageHandler),
-		commandHandlers: make(map[string]CommandHandler),
-		metadata: PluginMetadata{
-			Name:        id,
-			Capabilities: []CapabilityInfo{},
-		},
+		id:       id,
+		handlers: make(map[string]Handler),
+		commands: make(map[string]Command),
 	}
 }
 
-// WithMetadata sets the plugin metadata.
-func (p *Plugin) WithMetadata(name, description, version, author string) *Plugin {
-	p.metadata.Name = name
-	p.metadata.Description = description
-	p.metadata.Version = version
-	p.metadata.Author = author
-	return p
-}
-
-// WithTags adds tags to the plugin.
-func (p *Plugin) WithTags(tags ...string) *Plugin {
-	p.metadata.Tags = append(p.metadata.Tags, tags...)
-	return p
-}
-
-// WithCapability adds a capability to the plugin.
-func (p *Plugin) WithCapability(method, description string) *Plugin {
-	p.capabilities = append(p.capabilities, guest.AlloyCapability{
-		Method:      method,
-		Description: description,
-		Shortcut:    guest.None[string](),
-		Annotations: guest.None[[]guest.AlloyTuple2StringStringT](),
-	})
-
-	// Add to discoverable capabilities
-	p.metadata.Capabilities = append(p.metadata.Capabilities, CapabilityInfo{
-		Method:      method,
-		Description: description,
-		Type:        "message",
-	})
-
-	return p
-}
-
-// WithCapabilityAnnotations adds a capability with annotations.
-func (p *Plugin) WithCapabilityAnnotations(method, description string, annotations map[string]string) *Plugin {
-	cap := guest.AlloyCapability{
-		Method:      method,
-		Description: description,
-		Shortcut:    guest.None[string](),
-	}
-
-	if len(annotations) > 0 {
-		annotList := make([]guest.AlloyTuple2StringStringT, 0, len(annotations))
-		for k, v := range annotations {
-			annotList = append(annotList, guest.AlloyTuple2StringStringT{F0: k, F1: v})
-		}
-		cap.Annotations = guest.Some(annotList)
-	} else {
-		cap.Annotations = guest.None[[]guest.AlloyTuple2StringStringT]()
-	}
-
-	p.capabilities = append(p.capabilities, cap)
-
-	// Add to discoverable capabilities
-	capInfo := CapabilityInfo{
-		Method:      method,
-		Description: description,
-		Annotations: annotations,
-		Type:        "message",
-	}
-	p.metadata.Capabilities = append(p.metadata.Capabilities, capInfo)
-
-	return p
-}
-
-// WithCommand adds a command to the plugin.
-func (p *Plugin) WithCommand(name, description string) *Plugin {
-	// Register the command capability
-	capMethod := "command:" + name
-	p.capabilities = append(p.capabilities, guest.AlloyCapability{
-		Method:      capMethod,
-		Description: description,
-		Shortcut:    guest.None[string](),
-		Annotations: guest.None[[]guest.AlloyTuple2StringStringT](),
-	})
-
-	// Add to discoverable capabilities
-	p.metadata.Capabilities = append(p.metadata.Capabilities, CapabilityInfo{
-		Method:      name,
-		Description: description,
-		Type:        "command",
-	})
-
-	return p
-}
-
-// Handle registers a message handler for a specific method.
-func (p *Plugin) Handle(method string, handler MessageHandler) *Plugin {
+// RegisterMethod registers a handler for a specific message method.
+func (p *Plugin) RegisterMethod(method string, description string, handler Handler) *Plugin {
 	p.handlers[method] = handler
+	p.capabilities = append(p.capabilities, guest.AlloyCapability{
+		Method:      method,
+		Description: description,
+		Shortcut:    guest.None[string](),
+		Annotations: guest.None[[]guest.AlloyTuple2StringStringT](),
+	})
 	return p
 }
 
-// HandleCommand registers a command handler.
-func (p *Plugin) HandleCommand(name string, handler CommandHandler) *Plugin {
-	p.commandHandlers[name] = handler
+// RegisterCommand registers a command with its handler.
+func (p *Plugin) RegisterCommand(cmd Command) *Plugin {
+	p.commands[cmd.Name] = cmd
+	
+	// Register the command as a capability with "command:" prefix
+	method := "command:" + cmd.Name
+	annots := make([]guest.AlloyTuple2StringStringT, 0, len(cmd.Annotations))
+	for k, v := range cmd.Annotations {
+		annots = append(annots, guest.AlloyTuple2StringStringT{F0: k, F1: v})
+	}
+	
+	shortcut := guest.None[string]()
+	if cmd.Shortcut != "" {
+		shortcut = guest.Some(cmd.Shortcut)
+	}
+
+	p.capabilities = append(p.capabilities, guest.AlloyCapability{
+		Method:      method,
+		Description: cmd.Description,
+		Shortcut:    shortcut,
+		Annotations: guest.Some(annots),
+	})
 	return p
 }
 
-// Default registers a default message handler for unknown methods.
-func (p *Plugin) Default(handler MessageHandler) *Plugin {
-	p.defaultHandler = handler
-	return p
-}
-
-// OnInit sets an initialization function.
+// OnInit sets the plugin's initialization function.
 func (p *Plugin) OnInit(fn func() error) *Plugin {
 	p.onInit = fn
 	return p
 }
 
-// OnStart sets a background process to run after initialization.
-func (p *Plugin) OnStart(fn func()) *Plugin {
-	p.onStart = fn
-	return p
-}
-
-// OnSave sets a function to save plugin state.
-func (p *Plugin) OnSave(fn func() []byte) *Plugin {
-	p.onSave = fn
-	p.WithCapability("system:save_state", "Internal: Save state for reload")
-	return p
-}
-
-// OnLoad sets a function to load plugin state.
-func (p *Plugin) OnLoad(fn func([]byte)) *Plugin {
-	p.onLoad = fn
-	p.WithCapability("system:load_state", "Internal: Load state for reload")
-	return p
-}
-
-// GetMetadata returns the plugin metadata.
-func (p *Plugin) GetMetadata() PluginMetadata {
-	return p.metadata
-}
-
-// Run starts the plugin and enters the message loop.
-func (p *Plugin) Run() error {
-	// Initialize the plugin using top-level WIT functions
+// Serve starts the plugin's message loop.
+func (p *Plugin) Serve() {
+	// 1. Initialize with the host
 	guest.AlloyInit(p.id, p.capabilities)
 
-	// Register metadata with the host
-	metadataJSON, err := json.Marshal(p.metadata)
-	if err == nil {
-		guest.AlloyKvSet("plugin:metadata:"+p.id, metadataJSON)
-	}
-
-	// Run initialization if provided
+	// 2. Run user initialization
 	if p.onInit != nil {
 		if err := p.onInit(); err != nil {
-			return err
+			p.Log(LogLevelError, fmt.Sprintf("Initialization failed: %v", err))
+			return
 		}
 	}
 
-	// Start background process if provided
-	if p.onStart != nil {
-		go p.onStart()
-	}
-
-	// Signal that the plugin is ready
+	// 3. Signal readiness
 	guest.AlloyStarted()
 
-	// Enter the message loop
-	return p.messageLoop()
+	// 4. Start message loop
+	p.messageLoop()
 }
 
-// messageLoop handles incoming messages.
-func (p *Plugin) messageLoop() error {
+func (p *Plugin) messageLoop() {
 	for {
-		// Get the next message
 		optMsg := guest.AlloyGetNextMessage()
 		if optMsg.IsNone() {
 			continue
 		}
 
-		msg := optMsg.Unwrap()
-		var resp guest.AlloyMessage
-
-		// Handle system messages
-		switch msg.Method {
-		case "system:save_state":
-			if p.onSave != nil {
-				target := guest.Some(msg.Sender)
-				resp = guest.AlloyMessage{
-					Id:      msg.Id + "-response",
-					Method:  msg.Method,
-					Sender:  p.id,
-					Target:  target,
-					Payload: p.onSave(),
-				}
-			}
-		case "system:load_state":
-			if p.onLoad != nil && len(msg.Payload) > 0 {
-				p.onLoad(msg.Payload)
-				target := guest.Some(msg.Sender)
-				resp = guest.AlloyMessage{
-					Id:      msg.Id + "-response",
-					Method:  msg.Method,
-					Sender:  p.id,
-					Target:  target,
-				}
-			}
-		default:
-			// Check if this is a command
-			if p.isCommandMessage(msg) {
-				resp = p.handleCommandMessage(msg)
-			} else {
-				// Check for a specific message handler
-				handler, ok := p.handlers[msg.Method]
-				if ok {
-					resp = handler(msg)
-				} else if p.defaultHandler != nil {
-					resp = p.defaultHandler(msg)
-				} else {
-					// No handler found
-					errMsg := map[string]string{"error": "method_not_found"}
-					errData, _ := json.Marshal(errMsg)
-					target := guest.Some(msg.Sender)
-					resp = guest.AlloyMessage{
-						Id:      msg.Id + "-response",
-						Method:  msg.Method,
-						Sender:  p.id,
-						Target:  target,
-						Payload: errData,
-					}
-				}
-			}
+		rawMsg := optMsg.Unwrap()
+		msg := Message{
+			ID:      rawMsg.Id,
+			Method:  rawMsg.Method,
+			Sender:  rawMsg.Sender,
+			Payload: rawMsg.Payload,
 		}
 
-		// Send the response if we have one
-		if resp.Id != "" {
-			guest.AlloySendResponse(resp)
+		var resp *Message
+
+		// Check if it's a command
+		if len(msg.Method) > 8 && msg.Method[:8] == "command:" {
+			resp = p.handleCommand(msg)
+		} else if handler, ok := p.handlers[msg.Method]; ok {
+			resp = handler(msg)
+		}
+
+		if resp != nil {
+			target := guest.Some(resp.Target)
+			if resp.Target == "" {
+				target = guest.Some(msg.Sender)
+			}
+			
+			guest.AlloySendResponse(guest.AlloyMessage{
+				Id:      resp.ID,
+				Method:  resp.Method,
+				Sender:  p.id,
+				Target:  target,
+				Payload: resp.Payload,
+			})
 		}
 	}
 }
 
-// isCommandMessage checks if a message represents a command.
-func (p *Plugin) isCommandMessage(msg guest.AlloyMessage) bool {
-	// Check if this is a command message
-	if len(msg.Method) > 8 && msg.Method[:8] == "command:" {
-		return true
-	}
-	return false
-}
-
-// handleCommandMessage handles a command message.
-func (p *Plugin) handleCommandMessage(msg guest.AlloyMessage) guest.AlloyMessage {
-	// Extract command name
-	commandName := msg.Method[8:] // Remove "command:" prefix
-
-	// Parse the command
-	var cmd Command
-	if err := json.Unmarshal(msg.Payload, &cmd); err != nil {
-		return p.ErrorReply(msg, "invalid_command_payload")
-	}
-
-	// Set command name if not provided in payload
-	if cmd.Name == "" {
-		cmd.Name = commandName
-	}
-
-	// Find the command handler
-	handler, ok := p.commandHandlers[cmd.Name]
+func (p *Plugin) handleCommand(msg Message) *Message {
+	cmdName := msg.Method[8:]
+	cmd, ok := p.commands[cmdName]
 	if !ok {
-		return p.ErrorReply(msg, "command_not_found")
+		return p.ReplyError(msg, "Command not found")
 	}
 
-	// Execute the command
-	result := handler(cmd)
-
-	// Create response
-	respData, err := json.Marshal(result)
-	if err != nil {
-		return p.ErrorReply(msg, "failed_to_marshal_result")
+	var args []string
+	if len(msg.Payload) > 0 {
+		_ = json.Unmarshal(msg.Payload, &args)
 	}
 
-	target := guest.Some(msg.Sender)
-	return guest.AlloyMessage{
-		Id:      msg.Id + "-response",
+	result := cmd.Handler(CommandContext{
+		Plugin: p,
+		Args:   args,
+		Sender: msg.Sender,
+	})
+
+	payload, _ := json.Marshal(result)
+	return &Message{
+		ID:      msg.ID + "-reply",
 		Method:  msg.Method,
-		Sender:  p.id,
-		Target:  target,
-		Payload: respData,
+		Payload: payload,
 	}
 }
+
+// Log levels
+const (
+	LogLevelDebug = "debug"
+	LogLevelInfo  = "info"
+	LogLevelWarn  = "warn"
+	LogLevelError = "error"
+)
 
 // Log logs a message to the host.
-func (p *Plugin) Log(level, message string) {
-	guest.AlloyLog(level, message)
+func (p *Plugin) Log(level string, msg string) {
+	guest.AlloyLog(level, msg)
 }
 
-// KVSet sets a key-value pair in storage.
-func (p *Plugin) KVSet(key string, value []byte) bool {
-	return guest.AlloyKvSet(key, value)
+// Reply creates a response message for the given request.
+func (p *Plugin) Reply(req Message, method string, payload any) *Message {
+	data, _ := json.Marshal(payload)
+	return &Message{
+		ID:      req.ID + "-reply",
+		Method:  method,
+		Target:  req.Sender,
+		Payload: data,
+	}
 }
 
-// KVGet gets a value from storage.
+// ReplyError creates an error response message.
+func (p *Plugin) ReplyError(req Message, errMsg string) *Message {
+	result := CommandResult{Success: false, Error: errMsg}
+	data, _ := json.Marshal(result)
+	return &Message{
+		ID:      req.ID + "-reply",
+		Method:  req.Method,
+		Target:  req.Sender,
+		Payload: data,
+	}
+}
+
+// KV Utils
+func (p *Plugin) KVSet(key string, val []byte) bool {
+	return guest.AlloyKvSet(key, val)
+}
+
 func (p *Plugin) KVGet(key string) ([]byte, bool) {
-	optVal := guest.AlloyKvGet(key)
-	if optVal.IsSome() {
-		return optVal.Unwrap(), true
+	res := guest.AlloyKvGet(key)
+	if res.IsSome() {
+		return res.Unwrap(), true
 	}
 	return nil, false
-}
-
-// KVDelete deletes a key from storage.
-func (p *Plugin) KVDelete(key string) bool {
-	return guest.AlloyKvDelete(key)
-}
-
-// KVList lists keys with a prefix.
-func (p *Plugin) KVList(prefix string) ([]string) {
-	return guest.AlloyKvList(prefix)
-}
-
-// RouteMessage routes a message to its target.
-func (p *Plugin) RouteMessage(msg guest.AlloyMessage) {
-	guest.AlloyRouteMessage(msg)
-}
-
-// Call performs a synchronous call to another plugin.
-func (p *Plugin) Call(msg guest.AlloyMessage) (guest.AlloyMessage) {
-	return guest.AlloyCall(msg)
-}
-
-// ExecuteCommand executes a command on another plugin.
-func (p *Plugin) ExecuteCommand(targetPlugin, commandName string, cmd Command) (CommandResult) {
-	// Create a command message
-	cmd.Method = "command:" + commandName
-	cmdData, err := json.Marshal(cmd)
-	if err != nil {
-		return CommandResult{Success: false, Error: "failed_to_marshal_command"}
-	}
-
-	// Create the message
-	target := guest.Some(targetPlugin)
-	msg := guest.AlloyMessage{
-		Method:  "command:" + commandName,
-		Sender:  p.id,
-		Target:  target,
-		Payload: cmdData,
-	}
-
-	// Call the target plugin
-	resp := p.Call(msg)
-	if resp.Id == "" {
-		return CommandResult{Success: false, Error: "command_execution_failed"}
-	}
-
-	// Parse the response
-	var result CommandResult
-	if err := json.Unmarshal(resp.Payload, &result); err != nil {
-		return CommandResult{Success: false, Error: "failed_to_parse_result"}
-	}
-
-	return result
-}
-
-// Reply creates a response message.
-func (p *Plugin) Reply(msg guest.AlloyMessage, payload any) guest.AlloyMessage {
-	var payloadData []byte
-	if payload != nil {
-		var err error
-		payloadData, err = json.Marshal(payload)
-		if err != nil {
-			payloadData = []byte(`{"error":"failed_to_marshal_payload"}`)
-		}
-	}
-
-	var targetStr string
-	if msg.Target.IsSome() {
-		targetStr = msg.Target.Unwrap()
-	}
-
-	target := guest.Some(msg.Sender)
-	return guest.AlloyMessage{
-		Id:      msg.Id + "-response",
-		Method:  msg.Method,
-		Sender:  targetStr, // Response comes from whoever was the target
-		Target:  target,
-		Payload: payloadData,
-	}
-}
-
-// ErrorReply creates an error response message.
-func (p *Plugin) ErrorReply(msg guest.AlloyMessage, err string) guest.AlloyMessage {
-	errMsg := map[string]string{"error": err}
-	errData, _ := json.Marshal(errMsg)
-
-	var targetStr string
-	if msg.Target.IsSome() {
-		targetStr = msg.Target.Unwrap()
-	}
-
-	target := guest.Some(msg.Sender)
-	return guest.AlloyMessage{
-		Id:      msg.Id + "-response",
-		Method:  msg.Method,
-		Sender:  targetStr, // Response comes from whoever was the target
-		Target:  target,
-		Payload: errData,
-	}
-}
-
-// SuccessCommand creates a successful command result.
-func SuccessCommand(output string, data any) CommandResult {
-	var dataJSON json.RawMessage
-	if data != nil {
-		dataBytes, err := json.Marshal(data)
-		if err == nil {
-			dataJSON = dataBytes
-		}
-	}
-
-	return CommandResult{
-		Success: true,
-		Output:  output,
-		Data:    dataJSON,
-	}
-}
-
-// ErrorCommand creates an error command result.
-func ErrorCommand(output, errorMsg string) CommandResult {
-	return CommandResult{
-		Success: false,
-		Output:  output,
-		Error:   errorMsg,
-	}
 }

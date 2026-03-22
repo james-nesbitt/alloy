@@ -3,53 +3,29 @@
 package main
 
 import (
-	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
 	"encoding/json"
+	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
 
 func main() {
-	// Initialize the plugin
-	AlloyInit(
-		"health",
-		[]AlloyCapability{
-			{Method: "status", Description: "Get the health status of this WASM instance"},
-		},
-	)
+	plugin := guest.NewPlugin("health")
 
-	AlloyLog("info", "Health plugin initialized")
-
-	// Main message loop
-	for {
-		msgOption := AlloyGetNextMessage()
-		if msgOption.IsNone() {
-			continue
+	plugin.RegisterMethod("status", "Get the health status of this WASM instance", func(msg guest.Message) *guest.Message {
+		status := map[string]string{
+			"status": "healthy",
+			"uptime": "wasm-monitored",
+			"source": "wasm-sdk-v2",
 		}
 
-		msg := msgOption.Unwrap()
-		if msg.Method == "status" {
-			// Create response payload
-			status := map[string]string{
-				"status": "healthy",
-				"uptime": "wasm-monitored",
-				"source": "wasm-wit",
-			}
-
-			payload, err := json.Marshal(status)
-			if err != nil {
-				AlloyLog("error", "Failed to marshal status: "+err.Error())
-				continue
-			}
-
-			// Create and send response
-			resp := AlloyMessage{
-				Id:        msg.Id + "-response",
-				Method:    msg.Method,
-				Sender:    "health",
-				Target:    Some(msg.Sender),
-				Payload:   payload,
-				Timestamp: 0,
-			}
-			AlloySendResponse(resp)
+		payload, _ := json.Marshal(status)
+		return &guest.Message{
+			ID:      msg.ID + "-response",
+			Method:  msg.Method,
+			Payload: payload,
+			Target:  msg.Sender,
 		}
-	}
+	})
+
+	plugin.Log(guest.LogLevelInfo, "Health plugin (SDK v2.0) initialized")
+	plugin.Serve()
 }
