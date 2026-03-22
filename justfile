@@ -25,6 +25,13 @@ default: help
 help:
     @just --list
 
+# --- FLATPAK ---
+
+# Build everything and then build a flatpak for the GUI
+flatpak: all
+    flatpak-builder --force-clean --user --install build/flatpak com.james_nesbitt.AlloyGui.yaml
+    @echo "Alloy GUI Flatpak (com.james-nesbitt.AlloyGui) built and installed."
+
 # --- CLEANUP ---
 
 # Remove build artifacts and temporary files
