@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +16,10 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/storage"
 	"github.com/tetratelabs/wazero"
 	wazeroapi "github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
+
+var i32le = binary.LittleEndian
 
 // Runtime manages the WASM runtime environment.
 type Runtime struct {
@@ -44,6 +48,17 @@ type Instance struct {
 	metadata     api.PluginMetadata
 }
 
+// Metadata returns the plugin's metadata.
+func (i *Instance) Metadata() api.PluginMetadata {
+	return i.metadata
+}
+
+// Close closes the plugin instance.
+func (i *Instance) Close(ctx context.Context) error {
+	i.cancel()
+	return i.mod.Close(ctx)
+}
+
 // Status represents the plugin's execution status.
 type Status int
 
@@ -53,26 +68,6 @@ const (
 	StatusStopped
 	StatusCrashed
 )
-
-// Protocol types for WIT communication (matching alloy.wit)
-type witMessage struct {
-	Id        string            `json:"id"`
-	Method    string            `json:"method"`
-	Sender    string            `json:"sender"`
-	Target    witOption[string] `json:"target"`
-	Payload   []byte            `json:"payload"`
-	Timestamp uint64            `json:"timestamp"`
-}
-
-type witOption[T any] struct {
-	Value T    `json:"value,omitempty"`
-	Set   bool `json:"set"`
-}
-
-type witCapability struct {
-	Method      string `json:"method"`
-	Description string `json:"description"`
-}
 
 // NewRuntime creates a new WASM runtime.
 func NewRuntime(
@@ -84,6 +79,7 @@ func NewRuntime(
 	call func(ctx context.Context, msg api.Message) (api.Message, error),
 ) (*Runtime, error) {
 	r := wazero.NewRuntime(ctx)
+	logger.Info("creating new WIT-based runtime (v2.6-stable)")
 
 	rt := &Runtime{
 		runtime:  r,
@@ -102,30 +98,291 @@ func NewRuntime(
 	}
 	rt.hostModule = hostMod
 
+	// Instantiate WASI
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
+		return nil, fmt.Errorf("failed to instantiate WASI: %w", err)
+	}
+
+	// Instantiate asyncify (dummy)
+	_, _ = r.NewHostModuleBuilder("asyncify").
+		NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start").
+		NewFunctionBuilder().WithFunc(func() {}).Export("stop").
+		NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start_unwind").
+		NewFunctionBuilder().WithFunc(func() {}).Export("stop_unwind").
+		NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start_rewind").
+		NewFunctionBuilder().WithFunc(func() {}).Export("stop_rewind").
+		Instantiate(ctx)
+
 	return rt, nil
 }
 
 // instantiateHostModule creates the host module with WIT functions.
 func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, error) {
 	builder := r.runtime.NewHostModuleBuilder("alloy")
-	builder = r.registerWITFunctions(builder)
+	
+	builder.NewFunctionBuilder().WithFunc(r.internalInit).Export("init")
+	builder.NewFunctionBuilder().WithFunc(r.internalHandleMessage).Export("handle-message")
+	builder.NewFunctionBuilder().WithFunc(r.internalLog).Export("log")
+	builder.NewFunctionBuilder().WithFunc(r.internalKVSet).Export("kv-set")
+	builder.NewFunctionBuilder().WithFunc(r.internalKVGet).Export("kv-get")
+	builder.NewFunctionBuilder().WithFunc(r.internalKVDelete).Export("kv-delete")
+	builder.NewFunctionBuilder().WithFunc(r.internalKVList).Export("kv-list")
+	builder.NewFunctionBuilder().WithFunc(r.internalRouteMessage).Export("route-message")
+	builder.NewFunctionBuilder().WithFunc(r.internalCall).Export("call")
+	builder.NewFunctionBuilder().WithFunc(r.internalStarted).Export("started")
+	builder.NewFunctionBuilder().WithFunc(r.internalGetNextMessage).Export("get-next-message")
+	builder.NewFunctionBuilder().WithFunc(r.internalSendResponse).Export("send-response")
+	
+	// Complex data types (save/load state) - currently placeholders
+	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
+		mod.Memory().WriteUint32Le(resPtr, 0)
+		mod.Memory().WriteUint32Le(resPtr+4, 0)
+	}).Export("save-state")
+	
+	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, len uint32) {}) .Export("load-state")
+
 	return builder.Instantiate(ctx)
 }
 
-func (r *Runtime) registerWITFunctions(builder wazero.HostModuleBuilder) wazero.HostModuleBuilder {
-	return builder.
-		NewFunctionBuilder().WithFunc(r.witHandleMessage).Export("handle-message").
-		NewFunctionBuilder().WithFunc(r.witRouteMessage).Export("route-message").
-		NewFunctionBuilder().WithFunc(r.witCall).Export("call").
-		NewFunctionBuilder().WithFunc(r.witGetNextMessage).Export("get-next-message").
-		NewFunctionBuilder().WithFunc(r.witSendResponse).Export("send-response").
-		NewFunctionBuilder().WithFunc(r.witLog).Export("log").
-		NewFunctionBuilder().WithFunc(r.witKVSet).Export("kv-set").
-		NewFunctionBuilder().WithFunc(r.witKVGet).Export("kv-get").
-		NewFunctionBuilder().WithFunc(r.witKVDelete).Export("kv-delete").
-		NewFunctionBuilder().WithFunc(r.witKVList).Export("kv-list").
-		NewFunctionBuilder().WithFunc(r.witInit).Export("init").
-		NewFunctionBuilder().WithFunc(r.witStarted).Export("started")
+// Internal host logic
+
+func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, capsPtr, capsLen uint32) {
+}
+
+func (r *Runtime) internalStarted(ctx context.Context, mod wazeroapi.Module) {
+	r.logger.Info("wasm plugin ready", "plugin", mod.Name())
+}
+
+func (r *Runtime) internalLog(ctx context.Context, mod wazeroapi.Module, levelPtr, levelLen, msgPtr, msgLen uint32) {
+	levelData, _ := mod.Memory().Read(levelPtr, levelLen)
+	msgData, _ := mod.Memory().Read(msgPtr, msgLen)
+	r.logger.Info("plugin_log", "id", mod.Name(), "level", string(levelData), "msg", string(msgData))
+}
+
+func (r *Runtime) internalKVSet(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen, valuePtr, valueLen uint32) uint32 {
+	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
+	valueData, _ := mod.Memory().Read(valuePtr, valueLen)
+	if err := r.kv.Set(mod.Name(), string(keyData), valueData); err != nil {
+		return 0
+	}
+	return 1
+}
+
+func (r *Runtime) internalKVGet(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen, resultPtr uint32) {
+	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
+	value, err := r.kv.Get(mod.Name(), string(keyData))
+	if err != nil || value == nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		return
+	}
+
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		return
+	}
+	res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(value)))
+	if err != nil || len(res) == 0 {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		return
+	}
+
+	mod.Memory().Write(uint32(res[0]), value)
+	mod.Memory().WriteUint32Le(resultPtr, 1)                      // is_some = true
+	mod.Memory().WriteUint32Le(resultPtr+4, uint32(res[0]))       // ptr
+	mod.Memory().WriteUint32Le(resultPtr+8, uint32(len(value)))    // len
+}
+
+func (r *Runtime) internalKVDelete(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen uint32) uint32 {
+	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
+	if err := r.kv.Delete(mod.Name(), string(keyData)); err != nil {
+		return 0
+	}
+	return 1
+}
+
+func (r *Runtime) internalKVList(ctx context.Context, mod wazeroapi.Module, prefixPtr, prefixLen, resultPtr uint32) {
+	prefixData, _ := mod.Memory().Read(prefixPtr, prefixLen)
+	keys, err := r.kv.List(mod.Name(), string(prefixData))
+	if err != nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		mod.Memory().WriteUint32Le(resultPtr+4, 0)
+		return
+	}
+
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		return
+	}
+	
+	stringStructs := make([]byte, len(keys)*8) 
+	for i, key := range keys {
+		sRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(key)))
+		if len(sRes) > 0 {
+			mod.Memory().Write(uint32(sRes[0]), []byte(key))
+			i32le.PutUint32(stringStructs[i*8:], uint32(sRes[0]))
+			i32le.PutUint32(stringStructs[i*8+4:], uint32(len(key)))
+		}
+	}
+	
+	lRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(stringStructs)))
+	if len(lRes) > 0 {
+		mod.Memory().Write(uint32(lRes[0]), stringStructs)
+		mod.Memory().WriteUint32Le(resultPtr, uint32(lRes[0]))
+		mod.Memory().WriteUint32Le(resultPtr+4, uint32(len(keys)))
+	}
+}
+
+// Message reading/writing helpers
+
+func (r *Runtime) readStringFromArgs(mod wazeroapi.Module, ptr, length uint32) string {
+	if length == 0 {
+		return ""
+	}
+	data, _ := mod.Memory().Read(ptr, length)
+	return string(data)
+}
+
+func (r *Runtime) readMessageFromArgs(
+	mod wazeroapi.Module,
+	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
+	timestamp int64,
+) api.Message {
+	msg := api.Message{
+		ID:        r.readStringFromArgs(mod, idPtr, idLen),
+		Method:    r.readStringFromArgs(mod, methodPtr, methodLen),
+		Sender:    r.readStringFromArgs(mod, senderPtr, senderLen),
+		Timestamp: timestamp,
+	}
+	if targetSet != 0 {
+		msg.Target = r.readStringFromArgs(mod, targetPtr, targetLen)
+	}
+	if payloadLen > 0 {
+		data, _ := mod.Memory().Read(payloadPtr, payloadLen)
+		msg.Payload = json.RawMessage(data)
+	}
+	return msg
+}
+
+func (r *Runtime) writeMessage(ctx context.Context, mod wazeroapi.Module, ptr uint32, msg api.Message) {
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		return
+	}
+
+	writeStr := func(fieldPtr uint32, s string) {
+		if s == "" {
+			mod.Memory().WriteUint32Le(fieldPtr, 0)
+			mod.Memory().WriteUint32Le(fieldPtr+4, 0)
+			return
+		}
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		mod.Memory().Write(uint32(res[0]), []byte(s))
+		mod.Memory().WriteUint32Le(fieldPtr, uint32(res[0]))
+		mod.Memory().WriteUint32Le(fieldPtr+4, uint32(len(s)))
+	}
+
+	writeStr(ptr, msg.ID)
+	writeStr(ptr+8, msg.Method)
+	writeStr(ptr+16, msg.Sender)
+
+	if msg.Target != "" {
+		mod.Memory().WriteUint32Le(ptr+24, 1)
+		writeStr(ptr+28, msg.Target)
+	} else {
+		mod.Memory().WriteUint32Le(ptr+24, 0)
+		mod.Memory().WriteUint32Le(ptr+28, 0)
+		mod.Memory().WriteUint32Le(ptr+32, 0)
+	}
+
+	if len(msg.Payload) > 0 {
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(msg.Payload)))
+		mod.Memory().Write(uint32(res[0]), msg.Payload)
+		mod.Memory().WriteUint32Le(ptr+36, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+40, uint32(len(msg.Payload)))
+	} else {
+		mod.Memory().WriteUint32Le(ptr+36, 0)
+		mod.Memory().WriteUint32Le(ptr+40, 0)
+	}
+
+	mod.Memory().WriteUint64Le(ptr+48, uint64(msg.Timestamp))
+}
+
+func (r *Runtime) internalHandleMessage(
+	ctx context.Context, mod wazeroapi.Module,
+	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
+	timestamp int64, resultPtr uint32,
+) {
+	msg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	r.writeMessage(ctx, mod, resultPtr, api.Message{ID: msg.ID + "-error", Method: "unimplemented"})
+}
+
+func (r *Runtime) internalRouteMessage(
+	ctx context.Context, mod wazeroapi.Module,
+	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
+	timestamp int64,
+) {
+	msg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	r.routerFn(ctx, msg)
+}
+
+func (r *Runtime) internalCall(
+	ctx context.Context, mod wazeroapi.Module,
+	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
+	timestamp int64, resultPtr uint32,
+) {
+	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	resp, err := r.callFn(ctx, apiMsg)
+	if err != nil {
+		resp = api.Message{
+			ID:      apiMsg.ID + "-error",
+			Method:  apiMsg.Method,
+			Sender:  "kernel",
+			Payload: []byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+		}
+	}
+	r.writeMessage(ctx, mod, resultPtr, resp)
+}
+
+func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+	
+	if !ok {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		return
+	}
+
+	select {
+	case msg := <-instance.msgChan:
+		mod.Memory().WriteUint32Le(resultPtr, 1) // is_some = true
+		r.writeMessage(ctx, mod, resultPtr+8, msg) 
+	default:
+		mod.Memory().WriteUint32Le(resultPtr, 0) // is_some = false
+	}
+}
+
+func (r *Runtime) internalSendResponse(
+	ctx context.Context, mod wazeroapi.Module,
+	idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen uint32,
+	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
+	timestamp int64,
+) {
+	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+	if ok {
+		select {
+		case instance.respChan <- apiMsg:
+		default:
+		}
+	}
 }
 
 func (r *Runtime) LoadPlugin(
@@ -164,8 +421,8 @@ func (r *Runtime) LoadPlugin(
 		cancel:       instCancel,
 		mod:          mod,
 		logger:       r.logger,
-		msgChan:      make(chan api.Message, 32),
-		respChan:     make(chan api.Message, 32),
+		msgChan:      make(chan api.Message, 1024),
+		respChan:     make(chan api.Message, 1024),
 		capabilities: caps,
 		status:       StatusRunning,
 		metadata: api.PluginMetadata{
@@ -198,222 +455,28 @@ func (r *Runtime) LoadPlugin(
 func (r *Runtime) Close(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	for _, instance := range r.plugins {
-		instance.Close(ctx)
+		instance.cancel()
+		_ = instance.mod.Close(ctx)
 	}
+
 	return r.runtime.Close(ctx)
 }
 
-func (i *Instance) Close(ctx context.Context) error {
-	i.cancel()
-	if i.mod != nil {
-		return i.mod.Close(ctx)
+func (r *Runtime) UnloadPlugin(ctx context.Context, id string) error {
+	r.mu.Lock()
+	instance, ok := r.plugins[id]
+	if ok {
+		delete(r.plugins, id)
+	}
+	r.mu.Unlock()
+
+	if ok {
+		instance.cancel()
+		return instance.mod.Close(ctx)
 	}
 	return nil
-}
-
-// Metadata returns the plugin metadata.
-func (i *Instance) Metadata() api.PluginMetadata {
-	return i.metadata
-}
-
-// WIT Host Function Implementations
-
-func (r *Runtime) witLog(ctx context.Context, mod wazeroapi.Module, levelPtr, levelLen, msgPtr, msgLen uint32) {
-	levelData, _ := mod.Memory().Read(levelPtr, levelLen)
-	msgData, _ := mod.Memory().Read(msgPtr, msgLen)
-	level := string(levelData)
-	msg := string(msgData)
-	switch level {
-	case "debug":
-		r.logger.Debug("wasm_log", "plugin", mod.Name(), "msg", msg)
-	case "info":
-		r.logger.Info("wasm_log", "plugin", mod.Name(), "msg", msg)
-	case "warn":
-		r.logger.Warn("wasm_log", "plugin", mod.Name(), "msg", msg)
-	case "error":
-		r.logger.Error("wasm_log", "plugin", mod.Name(), "msg", msg)
-	default:
-		r.logger.Info("wasm_log", "plugin", mod.Name(), "level", level, "msg", msg)
-	}
-}
-
-func (r *Runtime) witKVSet(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen, valuePtr, valueLen uint32) uint32 {
-	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
-	valueData, _ := mod.Memory().Read(valuePtr, valueLen)
-	if err := r.kv.Set(mod.Name(), string(keyData), valueData); err != nil {
-		return 1
-	}
-	return 0
-}
-
-func (r *Runtime) witKVGet(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen, valuePtrPtr, valueSizePtr uint32) uint32 {
-	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
-	value, err := r.kv.Get(mod.Name(), string(keyData))
-	if err != nil || value == nil {
-		return 0
-	}
-
-	// Write to guest memory
-	alloc := mod.ExportedFunction("cabi_realloc")
-	if alloc == nil {
-		return 1
-	}
-	res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(value)))
-	if err != nil || len(res) == 0 {
-		return 1
-	}
-
-	mod.Memory().Write(uint32(res[0]), value)
-	mod.Memory().WriteUint32Le(valuePtrPtr, uint32(res[0]))
-	mod.Memory().WriteUint32Le(valueSizePtr, uint32(len(value)))
-	return 0
-}
-
-func (r *Runtime) witKVDelete(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen uint32) uint32 {
-	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
-	if err := r.kv.Delete(mod.Name(), string(keyData)); err != nil {
-		return 1
-	}
-	return 0
-}
-
-func (r *Runtime) witKVList(ctx context.Context, mod wazeroapi.Module, prefixPtr, prefixLen, keysPtrPtr, keysSizePtr uint32) uint32 {
-	prefixData, _ := mod.Memory().Read(prefixPtr, prefixLen)
-	keys, err := r.kv.List(mod.Name(), string(prefixData))
-	if err != nil {
-		return 1
-	}
-	data, _ := json.Marshal(keys)
-
-	alloc := mod.ExportedFunction("cabi_realloc")
-	res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(data)))
-	if err != nil {
-		return 1
-	}
-
-	mod.Memory().Write(uint32(res[0]), data)
-	mod.Memory().WriteUint32Le(keysPtrPtr, uint32(res[0]))
-	mod.Memory().WriteUint32Le(keysSizePtr, uint32(len(data)))
-	return 0
-}
-
-func (r *Runtime) witInit(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, capsPtr, capsLen uint32) {
-	// Optional sync initialization
-}
-
-func (r *Runtime) witStarted(ctx context.Context, mod wazeroapi.Module) {
-	r.logger.Info("wasm plugin ready", "plugin", mod.Name())
-}
-
-func (r *Runtime) witHandleMessage(ctx context.Context, mod wazeroapi.Module, msgPtr, msgLen uint32) uint32 {
-	// Usually plugins handle messages via get-next-message
-	return 0
-}
-
-func (r *Runtime) witRouteMessage(ctx context.Context, mod wazeroapi.Module, msgPtr, msgLen uint32) {
-	data, _ := mod.Memory().Read(msgPtr, msgLen)
-	var wmsg witMessage
-	if err := json.Unmarshal(data, &wmsg); err == nil {
-		apiMsg := api.Message{
-			ID:      wmsg.Id,
-			Method:  wmsg.Method,
-			Sender:  mod.Name(),
-			Payload: json.RawMessage(wmsg.Payload),
-		}
-		if wmsg.Target.Set {
-			apiMsg.Target = wmsg.Target.Value
-		}
-		r.routerFn(ctx, apiMsg)
-	}
-}
-
-func (r *Runtime) witCall(ctx context.Context, mod wazeroapi.Module, msgPtr, msgLen, respPtrPtr, respSizePtr uint32) uint32 {
-	data, _ := mod.Memory().Read(msgPtr, msgLen)
-	var wmsg witMessage
-	if err := json.Unmarshal(data, &wmsg); err == nil {
-		apiMsg := api.Message{
-			ID:      wmsg.Id,
-			Method:  wmsg.Method,
-			Sender:  mod.Name(),
-			Payload: json.RawMessage(wmsg.Payload),
-		}
-		if wmsg.Target.Set {
-			apiMsg.Target = wmsg.Target.Value
-		}
-
-		resp, err := r.callFn(ctx, apiMsg)
-		if err != nil {
-			return 1
-		}
-
-		wresp := witMessage{
-			Id: resp.ID, Method: resp.Method, Sender: resp.Sender, Payload: []byte(resp.Payload),
-		}
-		if resp.Target != "" {
-			wresp.Target = witOption[string]{Value: resp.Target, Set: true}
-		}
-
-		respData, _ := json.Marshal(wresp)
-		alloc := mod.ExportedFunction("cabi_realloc")
-		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(respData)))
-
-		mod.Memory().Write(uint32(res[0]), respData)
-		mod.Memory().WriteUint32Le(respPtrPtr, uint32(res[0]))
-		mod.Memory().WriteUint32Le(respSizePtr, uint32(len(respData)))
-		return 0
-	}
-	return 1
-}
-
-func (r *Runtime) witGetNextMessage(ctx context.Context, mod wazeroapi.Module, ptrPtr, sizePtr uint32) uint32 {
-	r.mu.RLock()
-	instance, ok := r.plugins[mod.Name()]
-	r.mu.RUnlock()
-	if !ok {
-		return 0
-	}
-
-	select {
-	case msg := <-instance.msgChan:
-		wmsg := witMessage{
-			Id: msg.ID, Method: msg.Method, Sender: msg.Sender, Payload: []byte(msg.Payload),
-		}
-		if msg.Target != "" {
-			wmsg.Target = witOption[string]{Value: msg.Target, Set: true}
-		}
-		data, _ := json.Marshal(wmsg)
-
-		alloc := mod.ExportedFunction("cabi_realloc")
-		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(data)))
-		mod.Memory().Write(uint32(res[0]), data)
-		mod.Memory().WriteUint32Le(ptrPtr, uint32(res[0]))
-		mod.Memory().WriteUint32Le(sizePtr, uint32(len(data)))
-		return 1
-	default:
-		return 0
-	}
-}
-
-func (r *Runtime) witSendResponse(ctx context.Context, mod wazeroapi.Module, msgPtr, msgLen uint32) {
-	r.mu.RLock()
-	instance, ok := r.plugins[mod.Name()]
-	r.mu.RUnlock()
-	if !ok {
-		return
-	}
-
-	data, _ := mod.Memory().Read(msgPtr, msgLen)
-	var wmsg witMessage
-	if err := json.Unmarshal(data, &wmsg); err == nil {
-		resp := api.Message{
-			ID: wmsg.Id, Method: wmsg.Method, Sender: mod.Name(), Payload: json.RawMessage(wmsg.Payload),
-		}
-		select {
-		case instance.respChan <- resp:
-		default:
-		}
-	}
 }
 
 func (r *Runtime) RouteMessage(ctx context.Context, pluginID string, msg api.Message) error {
@@ -445,8 +508,8 @@ func (r *Runtime) GetResponse(ctx context.Context, pluginID string) (api.Message
 		return resp, nil
 	case <-ctx.Done():
 		return api.Message{}, ctx.Err()
-	case <-time.After(1 * time.Second):
-		return api.Message{}, errors.New("timeout")
+	case <-time.After(5 * time.Second):
+		return api.Message{}, errors.New("timeout waiting for WASM response")
 	}
 }
 

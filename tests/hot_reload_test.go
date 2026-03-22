@@ -13,11 +13,11 @@ import (
 func TestHotReloading(t *testing.T) {
 	// 1. Setup core with wasm-manager and health
 	cwd, _ := os.Getwd()
-	healthPath := filepath.Join(filepath.Dir(cwd), "build/wasm/health.wasm")
+	healthPath := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins/health.wasm")
 
 	// Ensure it exists
 	if _, err := os.Stat(healthPath); err != nil {
-		t.Skip("build/wasm/health.wasm not found, run just build-all first")
+		t.Skip("build/dist/usr/lib/alloy/plugins/health.wasm not found, run just build-all first")
 	}
 
 	manifest := map[string]any{

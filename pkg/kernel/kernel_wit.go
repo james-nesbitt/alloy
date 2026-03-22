@@ -2,12 +2,15 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/plugins/native"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 	"github.com/james-nesbitt/alloy/pkg/wasm"
 )
@@ -23,9 +26,14 @@ type WITKernel struct {
 	interceptors []api.Interceptor
 	loading      map[string]chan struct{}
 	stopCh       chan struct{}
+	stopOnce     sync.Once
 	wasmManager  *wasm.Manager
 	storage      storage.StateStore
 	dataDir      string
+
+	// Internal core services
+	events   api.Plugin
+	commands api.Plugin
 }
 
 // NewWITKernel creates a new WIT-based kernel.
@@ -62,6 +70,13 @@ func NewWITKernel(
 	}
 
 	kernel.wasmManager = wasmManager
+
+	// Initialize and register core internal plugins
+	kernel.events = native.NewEventManager(logger)
+	kernel.RegisterPlugin(kernel.events)
+
+	kernel.commands = native.NewCommandManager(logger)
+	kernel.RegisterPlugin(kernel.commands)
 
 	// Start the monitor
 	kernel.wasmManager.StartMonitor(context.Background(), 30*time.Second)
@@ -103,6 +118,11 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 	}
 
 	// Route to a specific plugin or frontend
+	if msg.Target == "kernel" || msg.Target == "system" {
+		k.handleInternalMessage(ctx, msg)
+		return
+	}
+
 	if ch, ok := k.frontends[msg.Target]; ok {
 		select {
 		case ch <- msg:
@@ -112,7 +132,10 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 	} else if plugin, ok := k.plugins[msg.Target]; ok {
 		// Asynchronous routing: we use a background task to handle it via HandleMessage
 		go func() {
-			_, _ = plugin.HandleMessage(ctx, msg)
+			resp, err := plugin.HandleMessage(ctx, msg)
+			if err == nil && resp.ID != "" && resp.Target != "" {
+				k.RouteMessage(ctx, resp)
+			}
 		}()
 	} else if _, ok := k.metadata[msg.Target]; ok {
 		// Target is a lazy-loaded plugin
@@ -209,14 +232,46 @@ func (k *WITKernel) RegisterPluginLoader(pluginID string, loader api.PluginLoade
 
 // RegisterPlugin registers an already instantiated plugin.
 func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
 	id := plugin.ID()
+
+	k.mu.Lock()
 	k.plugins[id] = plugin
 	k.metadata[id] = api.PluginMetadata{
 		ID:           id,
 		Capabilities: plugin.Capabilities(),
 	}
+	k.mu.Unlock()
+
+	// If the plugin needs a router, provide it
+	type routerAcceptor interface {
+		SetRouter(func(context.Context, api.Message))
+	}
+	if ra, ok := plugin.(routerAcceptor); ok {
+		ra.SetRouter(func(ctx context.Context, msg api.Message) {
+			k.RouteMessage(ctx, msg)
+		})
+	}
+
+	// Broadcast registration event
+	reg := struct {
+		ID           string           `json:"id"`
+		Type         string           `json:"type"`
+		Capabilities []api.Capability `json:"capabilities"`
+	}{
+		ID:           id,
+		Type:         "plugin",
+		Capabilities: plugin.Capabilities(),
+	}
+	payload, _ := json.Marshal(reg)
+	go k.RouteMessage(context.Background(), api.Message{
+		ID:        "reg-evt-" + id,
+		Type:      api.TypeEvent,
+		Sender:    "kernel",
+		Target:    "events",
+		Method:    "publish",
+		Payload:   []byte(fmt.Sprintf(`{"topic":"component:registered","data":%s}`, string(payload))),
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 // RegisterWASMPlugin registers a WASM plugin with the kernel.
@@ -286,6 +341,9 @@ func (k *WITKernel) GetPlugin(pluginID string) (api.Plugin, bool) {
 // Shutdown gracefully shuts down the kernel.
 func (k *WITKernel) Shutdown(ctx context.Context) error {
 	k.logger.Info("shutting down kernel")
+	k.stopOnce.Do(func() {
+		close(k.stopCh)
+	})
 	k.mu.Lock()
 	plugins := make([]api.Plugin, 0, len(k.plugins))
 	for _, plugin := range k.plugins {
@@ -325,4 +383,33 @@ func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (
 
 func (p *witPluginWrapper) Shutdown(ctx context.Context) error {
 	return p.manager.UnloadPlugin(ctx, p.id)
+}
+
+func (k *WITKernel) handleInternalMessage(ctx context.Context, msg api.Message) {
+	if msg.Type != api.TypeRequest {
+		return
+	}
+
+	k.logger.Debug("handling internal message", "method", msg.Method)
+
+	switch msg.Method {
+	case "ping":
+		resp := api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Method:    "ping",
+			Payload:   []byte(`{"status":"pong"}`),
+			Timestamp: time.Now().Unix(),
+		}
+		k.RouteMessage(ctx, resp)
+	case "stop":
+		k.logger.Info("stop request received via internal channel")
+		k.stopOnce.Do(func() {
+			close(k.stopCh)
+		})
+	default:
+		k.logger.Warn("unknown internal method", "method", msg.Method)
+	}
 }

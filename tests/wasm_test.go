@@ -13,7 +13,7 @@ import (
 
 func TestWasmLoadMock(t *testing.T) {
 	cwd, _ := os.Getwd()
-	mockPath := filepath.Join(filepath.Dir(cwd), "build/wasm/mock.wasm")
+	mockPath := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins/mock.wasm")
 	if _, err := os.Stat(mockPath); os.IsNotExist(err) {
 		t.Skip("mock.wasm not found")
 	}
@@ -35,7 +35,7 @@ func TestWasmLoadMock(t *testing.T) {
 
 func TestWasmLoadBulk(t *testing.T) {
 	cwd, _ := os.Getwd()
-	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 
 	plugins := []string{"ai", "secrets", "health", "chat", "buffer"}
 	wasmPlugins := []map[string]any{
@@ -169,7 +169,7 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 
 func TestWasmFunctionalSuite(t *testing.T) {
 	cwd, _ := os.Getwd()
-	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{

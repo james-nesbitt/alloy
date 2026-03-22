@@ -12,7 +12,7 @@ import (
 
 func TestBufferPersistence(t *testing.T) {
 	cwd, _ := os.Getwd()
-	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 	bufferWasmPath := filepath.Join(buildDir, "buffer.wasm")
 
 	manifest := map[string]any{

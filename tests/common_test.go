@@ -104,15 +104,15 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 	socketPath := filepath.Join(homeDir, "alloy.sock")
 
 	cwd, _ := os.Getwd()
-	corePath := filepath.Join(filepath.Dir(cwd), "build/core")
+	corePath := filepath.Join(filepath.Dir(cwd), "build/dist/usr/libexec/alloy/alloy-core")
 
 	manifestData, _ := json.Marshal(manifest)
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	os.WriteFile(provisionPath, manifestData, 0644)
 
 	cmd := StartCore(t, corePath, []string{
-		"--socket", "unix://" + socketPath,
-		"--home", homeDir,
+		"--listen", "unix://" + socketPath,
+		"--data-dir", homeDir,
 		"--insecure",
 		"--debug",
 		"--provision", provisionPath,

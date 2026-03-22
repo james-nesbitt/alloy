@@ -99,10 +99,11 @@ build-plugin name: generate
 
 # Build all WIT-based WASM plugins
 build-plugins: generate
-    @echo ">> Building all WASM plugins into {{WASM_BUILD}}..."
-    mkdir -p {{WASM_BUILD}}
-    @chmod +x scripts/build-wasm-all.sh
-    @echo ">> WASM plugins built successfully."
+	@echo ">> Building all WASM plugins into {{WASM_BUILD}}..."
+	mkdir -p {{WASM_BUILD}}
+	@chmod +x scripts/build-wasm-all.sh
+	@./scripts/build-wasm-all.sh
+	@echo ">> WASM plugins built successfully."
 
 # Build everything
 all: setup-dev build-plugins build-binaries pack-config

@@ -21,7 +21,7 @@ type ChatMessage struct {
 
 func TestApplicationPlugins(t *testing.T) {
 	cwd, _ := os.Getwd()
-	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{

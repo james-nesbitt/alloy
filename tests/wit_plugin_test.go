@@ -77,13 +77,13 @@ func TestWITPlugins(t *testing.T) {
 	}{
 		{
 			name:     "health",
-			wasmFile: "build/wasm/health.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/health.wasm",
 			caps:     []api.Capability{{Method: "status", Description: "Get health status"}},
 			tests:    testHealthPlugin,
 		},
 		{
 			name:     "buffer",
-			wasmFile: "build/wasm/buffer.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/buffer.wasm",
 			caps: []api.Capability{
 				{Method: "create", Description: "Create buffer"},
 				{Method: "list", Description: "List buffers"},
@@ -92,7 +92,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "chat",
-			wasmFile: "build/wasm/chat.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/chat.wasm",
 			caps: []api.Capability{
 				{Method: "send", Description: "Send message"},
 				{Method: "history", Description: "Get history"},
@@ -101,7 +101,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "ai",
-			wasmFile: "build/wasm/ai.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/ai.wasm",
 			caps: []api.Capability{
 				{Method: "query", Description: "Query AI"},
 				{Method: "config:get", Description: "Get AI config"},
@@ -110,7 +110,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "project",
-			wasmFile: "build/wasm/project.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/project.wasm",
 			caps: []api.Capability{
 				{Method: "create", Description: "Create project"},
 				{Method: "list", Description: "List projects"},
@@ -119,7 +119,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "iam",
-			wasmFile: "build/wasm/iam.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/iam.wasm",
 			caps: []api.Capability{
 				{Method: "check", Description: "Check authorization"},
 			},
@@ -127,7 +127,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "secrets",
-			wasmFile: "build/wasm/secrets.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/secrets.wasm",
 			caps: []api.Capability{
 				{Method: "store_secret", Description: "Store secret"},
 				{Method: "get_secret", Description: "Get secret"},
@@ -136,7 +136,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "tasks",
-			wasmFile: "build/wasm/tasks.wasm",
+			wasmFile: "build/dist/usr/lib/alloy/plugins/tasks.wasm",
 			caps: []api.Capability{
 				{Method: "create", Description: "Create task"},
 				{Method: "list", Description: "List tasks"},

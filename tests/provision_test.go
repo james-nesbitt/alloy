@@ -22,8 +22,8 @@ func TestDynamicProvisioning(t *testing.T) {
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "command-manager", "type": "native"},
 			{"id": "events", "type": "native"},
+			{"id": "command-manager", "type": "native"},
 			{"id": "kv", "type": "native"},
 		},
 	}
@@ -35,15 +35,15 @@ func TestDynamicProvisioning(t *testing.T) {
 	// For a true functional test, let's assume alloy-core is built.
 
 	// Since we are in the same repo, we can just use the built binary from 'build/'
-	corePath := "../build/core"
+	corePath := "../build/dist/usr/libexec/alloy/alloy-core"
 	if _, err := os.Stat(corePath); err != nil {
 		t.Skip("alloy-core binary not found, skip functional test")
 	}
 
 	// Start core
 	coreProcess := StartCore(t, corePath, []string{
-		"--socket", "unix://" + socketPath,
-		"--home", homeDir,
+		"--listen", "unix://" + socketPath,
+		"--data-dir", homeDir,
 		"--insecure",
 		"--debug",
 		"--provision", provisionPath,

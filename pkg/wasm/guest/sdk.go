@@ -22,6 +22,9 @@ type Message struct {
 // Handler is a function that processes a message and returns an optional response.
 type Handler func(msg Message) *Message
 
+// AlloyHandler is a handler that uses the raw WIT message type.
+type AlloyHandler func(msg guest.AlloyMessage) guest.AlloyMessage
+
 // Command is a high-level representation of a plugin command.
 type Command struct {
 	Name        string            `json:"name"`
@@ -51,32 +54,63 @@ type CommandResult struct {
 
 // Plugin represents an Alloy WASM plugin with ergonomic Go bindings.
 type Plugin struct {
-	id           string
-	capabilities []guest.AlloyCapability
-	handlers     map[string]Handler
-	commands     map[string]Command
-	onInit       func() error
-	onShutdown   func()
+	id            string
+	capabilities  []guest.AlloyCapability
+	handlers      map[string]Handler
+	alloyHandlers map[string]AlloyHandler
+	commands      map[string]Command
+	onInit        func() error
+	onStart       func()
+	onShutdown    func()
 }
 
 // NewPlugin creates a new ergonomic Alloy plugin.
 func NewPlugin(id string) *Plugin {
 	return &Plugin{
-		id:       id,
-		handlers: make(map[string]Handler),
-		commands: make(map[string]Command),
+		id:            id,
+		handlers:      make(map[string]Handler),
+		alloyHandlers: make(map[string]AlloyHandler),
+		commands:      make(map[string]Command),
 	}
 }
 
-// RegisterMethod registers a handler for a specific message method.
-func (p *Plugin) RegisterMethod(method string, description string, handler Handler) *Plugin {
-	p.handlers[method] = handler
+// WithMetadata sets metadata for the plugin.
+func (p *Plugin) WithMetadata(name, description, version, author string) *Plugin {
+	// For now, we don't do much with this in the guest, but it could be added to AlloyInit if needed.
+	return p
+}
+
+// WithTags adds tags to the plugin.
+func (p *Plugin) WithTags(tags ...string) *Plugin {
+	return p
+}
+
+// WithCapability adds a capability to the plugin.
+func (p *Plugin) WithCapability(method, description string) *Plugin {
 	p.capabilities = append(p.capabilities, guest.AlloyCapability{
 		Method:      method,
 		Description: description,
 		Shortcut:    guest.None[string](),
 		Annotations: guest.None[[]guest.AlloyTuple2StringStringT](),
 	})
+	return p
+}
+
+// RegisterMethod registers a handler for a specific message method.
+func (p *Plugin) RegisterMethod(method string, description string, handler Handler) *Plugin {
+	p.handlers[method] = handler
+	return p.WithCapability(method, description)
+}
+
+// Handle registers a handler for a specific method (alias/compat for RegisterMethod).
+func (p *Plugin) Handle(method string, handler any) *Plugin {
+	if h, ok := handler.(Handler); ok {
+		p.handlers[method] = h
+	} else if ah, ok := handler.(AlloyHandler); ok {
+		p.alloyHandlers[method] = ah
+	} else if f, ok := handler.(func(guest.AlloyMessage) guest.AlloyMessage); ok {
+		p.alloyHandlers[method] = AlloyHandler(f)
+	}
 	return p
 }
 
@@ -111,6 +145,18 @@ func (p *Plugin) OnInit(fn func() error) *Plugin {
 	return p
 }
 
+// OnStart sets the plugin's start function.
+func (p *Plugin) OnStart(fn func()) *Plugin {
+	p.onStart = fn
+	return p
+}
+
+// Run starts the plugin's message loop (alias for Serve).
+func (p *Plugin) Run() error {
+	p.Serve()
+	return nil
+}
+
 // Serve starts the plugin's message loop.
 func (p *Plugin) Serve() {
 	// 1. Initialize with the host
@@ -127,7 +173,12 @@ func (p *Plugin) Serve() {
 	// 3. Signal readiness
 	guest.AlloyStarted()
 
-	// 4. Start message loop
+	// 4. Run user onStart
+	if p.onStart != nil {
+		p.onStart()
+	}
+
+	// 5. Start message loop
 	p.messageLoop()
 }
 
@@ -139,6 +190,17 @@ func (p *Plugin) messageLoop() {
 		}
 
 		rawMsg := optMsg.Unwrap()
+		
+		// Priority 1: Raw AlloyHandlers
+		if ah, ok := p.alloyHandlers[rawMsg.Method]; ok {
+			resp := ah(rawMsg)
+			if resp.Id != "" {
+				guest.AlloySendResponse(resp)
+			}
+			continue
+		}
+
+		// Priority 2: SDK Handlers
 		msg := Message{
 			ID:      rawMsg.Id,
 			Method:  rawMsg.Method,
@@ -211,8 +273,51 @@ func (p *Plugin) Log(level string, msg string) {
 	guest.AlloyLog(level, msg)
 }
 
+// RouteMessage sends a message to the host router.
+func (p *Plugin) RouteMessage(msg guest.AlloyMessage) {
+	guest.AlloyRouteMessage(msg)
+}
+
+// Call sends a message to the host and waits for a response.
+func (p *Plugin) Call(msg guest.AlloyMessage) guest.AlloyMessage {
+	return guest.AlloyCall(msg)
+}
+
 // Reply creates a response message for the given request.
-func (p *Plugin) Reply(req Message, method string, payload any) *Message {
+func (p *Plugin) Reply(req guest.AlloyMessage, payload any) guest.AlloyMessage {
+	data, _ := json.Marshal(payload)
+	target := req.Target
+	if target.IsNone() {
+		target = guest.Some(req.Sender)
+	}
+	return guest.AlloyMessage{
+		Id:      req.Id + "-reply",
+		Method:  req.Method,
+		Sender:  p.id,
+		Target:  target,
+		Payload: data,
+	}
+}
+
+// ErrorReply creates an error response message.
+func (p *Plugin) ErrorReply(req guest.AlloyMessage, errMsg string) guest.AlloyMessage {
+	result := CommandResult{Success: false, Error: errMsg}
+	data, _ := json.Marshal(result)
+	target := req.Target
+	if target.IsNone() {
+		target = guest.Some(req.Sender)
+	}
+	return guest.AlloyMessage{
+		Id:      req.Id + "-reply",
+		Method:  req.Method,
+		Sender:  p.id,
+		Target:  target,
+		Payload: data,
+	}
+}
+
+// SDKReply creates a SDK response message for the given high-level request.
+func (p *Plugin) SDKReply(req Message, method string, payload any) *Message {
 	data, _ := json.Marshal(payload)
 	return &Message{
 		ID:      req.ID + "-reply",
@@ -245,4 +350,12 @@ func (p *Plugin) KVGet(key string) ([]byte, bool) {
 		return res.Unwrap(), true
 	}
 	return nil, false
+}
+
+func (p *Plugin) KVDelete(key string) bool {
+	return guest.AlloyKvDelete(key)
+}
+
+func (p *Plugin) KVList(prefix string) []string {
+	return guest.AlloyKvList(prefix)
 }

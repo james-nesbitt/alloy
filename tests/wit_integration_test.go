@@ -68,7 +68,7 @@ func TestWITIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	healthWasm, err := os.ReadFile("build/wasm/health.wasm")
+	healthWasm, err := os.ReadFile("build/dist/usr/lib/alloy/plugins/health.wasm")
 	if err != nil {
 		t.Fatal(err)
 	}

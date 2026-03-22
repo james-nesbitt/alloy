@@ -18,12 +18,12 @@ func TestEmptyBoot(t *testing.T) {
 	defer os.RemoveAll(homeDir)
 
 	socketPath := filepath.Join(homeDir, "alloy.sock")
-	corePath := "../build/core"
+	corePath := "../build/dist/usr/libexec/alloy/alloy-core"
 
 	// Start core WITHOUT --provision and WITHOUT --wasm-plugins
 	coreProcess := StartCore(t, corePath, []string{
-		"--socket", "unix://" + socketPath,
-		"--home", homeDir,
+		"--listen", "unix://" + socketPath,
+		"--data-dir", homeDir,
 		"--insecure",
 		"--debug",
 	})

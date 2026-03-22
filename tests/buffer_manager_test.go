@@ -12,7 +12,7 @@ import (
 
 func TestBufferManagerOperations(t *testing.T) {
 	cwd, _ := os.Getwd()
-	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 	bufferWasmPath := filepath.Join(buildDir, "buffer.wasm")
 
 	if _, err := os.Stat(bufferWasmPath); os.IsNotExist(err) {
@@ -203,7 +203,7 @@ func TestBufferManagerOperations(t *testing.T) {
 
 func TestBufferSubscription(t *testing.T) {
 	cwd, _ := os.Getwd()
-	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
+	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 	bufferWasmPath := filepath.Join(buildDir, "buffer.wasm")
 
 	manifest := map[string]any{

@@ -17,6 +17,7 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/plugins/native"
 	"github.com/james-nesbitt/alloy/pkg/security/identity"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
@@ -131,7 +132,7 @@ func main() {
 
 	// Load provisioned plugins if found
 	if currentProvisionFile != "" {
-		if err := loadProvisionedPlugins(k, currentProvisionFile, logger); err != nil {
+		if err := loadProvisionedPlugins(k, currentProvisionFile, logger, kv); err != nil {
 			logger.Error("failed to load provisioned plugins", "error", err)
 			os.Exit(1)
 		}
@@ -180,7 +181,7 @@ type ProvisionPlugin struct {
 }
 
 // loadProvisionedPlugins loads plugins from a provisioning file.
-func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *slog.Logger) error {
+func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *slog.Logger, kv storage.StateStore) error {
 	logger.Info("loading provisioned plugins", "file", provisionFile)
 	data, err := os.ReadFile(provisionFile)
 	if err != nil {
@@ -193,6 +194,29 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 	}
 
 	for _, p := range manifest.Plugins {
+		if p.Type == "native" {
+			// Register native plugin from the registry
+			constructor, ok := native.Registry[p.ID]
+			if !ok {
+				logger.Error("unsupported native plugin id", "id", p.ID)
+				continue
+			}
+
+			pluginAny, err := constructor(context.Background(), logger, kv)
+			if err != nil {
+				logger.Error("failed to construct native plugin", "id", p.ID, "error", err)
+				continue
+			}
+
+			if plugin, ok := pluginAny.(api.Plugin); ok {
+				k.RegisterPlugin(plugin)
+				logger.Info("registered native plugin", "id", p.ID)
+			} else {
+				logger.Error("native plugin does not implement api.Plugin", "id", p.ID)
+			}
+			continue
+		}
+
 		if p.Type != "wasm" {
 			logger.Warn("unsupported plugin type in manifest", "id", p.ID, "type", p.Type)
 			continue

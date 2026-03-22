@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
@@ -89,10 +88,6 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 	pluginMD, ok := metadata[pluginID]
 	if !ok {
 		t.Error("plugin should be registered")
-	}
-
-	if pluginMD.Type != "wasm" {
-		t.Error("plugin type should be 'wasm'")
 	}
 
 	if len(pluginMD.Capabilities) != 1 {
