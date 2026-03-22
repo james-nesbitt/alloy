@@ -15,6 +15,7 @@ import (
 
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
+	"github.com/james-nesbitt/alloy/pkg/security/identity"
 )
 
 func getAlloyRuntimeDir() string {
@@ -68,10 +69,10 @@ func usage() {
 	fmt.Println("  --provision FILE              Initial provisioning manifest")
 	fmt.Println("\nFrontend Options:")
 	fmt.Println("  --socket ADDR                 Connect to existing core at ADDR")
-	fmt.Println("  --dedicated                   Launch a dedicated core instance for this frontend")
+	fmt.Println("  --dedicated                   Launch a dedicated protected core instance for this frontend")
 	fmt.Println("  --network                     When using --dedicated, use a TCP network socket instead of Unix")
-	fmt.Println("  --insecure                    Disable mTLS and use insecure communication")
-	fmt.Println("  --security-dir PATH           Path to the security/identity directory")
+	fmt.Println("  --insecure                    Disable protection and use plain-text communication")
+	fmt.Println("  --security-dir PATH           Path to the security/identity directory (Auto-generated for dedicated sessions)")
 	fmt.Println("  --debug                       Enable verbose debug logging for all components")
 	os.Exit(1)
 }
@@ -197,12 +198,10 @@ func launchFrontend(name string, args []string) {
 	var coreCmd *exec.Cmd
 
 	forceInsecure := *sf.Insecure
-	if *dedicated {
-		forceInsecure = true
-	}
+	sessionSecurityDir := *sf.SecurityDir
 
 	if *dedicated || targetSocket == "" {
-		// Launch a dedicated core (Dedicated cores are always insecure by default for now)
+		// Launch a dedicated core
 		coreBin, err := findBinary("alloy-core")
 		if err != nil {
 			log.Fatalf("Fatal: alloy-core binary not found for dedicated mode. %v", err)
@@ -217,12 +216,33 @@ func launchFrontend(name string, args []string) {
 		}
 		targetSocket = addr
 
-		coreArgs := []string{"--listen", addr, "--insecure"}
+		coreArgs := []string{"--listen", addr}
 		if *debug {
 			coreArgs = append(coreArgs, "--debug")
 		}
 
-		coreCmd = exec.Command(coreBin, coreArgs...) // Dedicated is always insecure
+		// Handle automated security for dedicated sessions
+		if !forceInsecure && sessionSecurityDir == "" {
+			sessionSecurityDir = filepath.Join(runtimeDir, fmt.Sprintf("session-%d", os.Getpid()))
+			fmt.Printf(">> Provisioning ephemeral credentials in %s\n", sessionSecurityDir)
+
+			store := identity.NewStore(sessionSecurityDir)
+			ca, err := store.InitializeMachine()
+			if err != nil {
+				log.Fatalf("Failed to initialize ephemeral CA: %v", err)
+			}
+			// Pre-generate instance and client identities to ensure they're ready
+			_, _ = store.CreateInstanceIdentity(ca, "core")
+			// No need to create a specific client one here yet, as the frontend will do it via the same store dir.
+		}
+
+		if forceInsecure {
+			coreArgs = append(coreArgs, "--insecure")
+		} else if sessionSecurityDir != "" {
+			coreArgs = append(coreArgs, "--security-dir", sessionSecurityDir)
+		}
+
+		coreCmd = exec.Command(coreBin, coreArgs...)
 		// Propagate logs to stderr only so we don't mess up TUI/GUI output
 		coreCmd.Stderr = os.Stderr
 
@@ -242,8 +262,8 @@ func launchFrontend(name string, args []string) {
 	if forceInsecure {
 		feArgs = append(feArgs, "--insecure")
 	}
-	if *sf.SecurityDir != "" {
-		feArgs = append(feArgs, "--security-dir", *sf.SecurityDir)
+	if sessionSecurityDir != "" {
+		feArgs = append(feArgs, "--security-dir", sessionSecurityDir)
 	}
 	if *debug {
 		feArgs = append(feArgs, "--debug")
@@ -273,11 +293,20 @@ func launchFrontend(name string, args []string) {
 		if coreCmd != nil {
 			coreCmd.Process.Kill()
 		}
+		// Cleanup session security dir if we created one
+		if !forceInsecure && *sf.SecurityDir == "" && sessionSecurityDir != "" {
+			os.RemoveAll(sessionSecurityDir)
+		}
 		log.Fatalf("%s exited with error: %v", name, err)
 	}
 
 	if coreCmd != nil {
 		coreCmd.Process.Signal(os.Interrupt)
 		coreCmd.Wait()
+	}
+
+	// Final cleanup of session security dir
+	if !forceInsecure && *sf.SecurityDir == "" && sessionSecurityDir != "" {
+		os.RemoveAll(sessionSecurityDir)
 	}
 }
