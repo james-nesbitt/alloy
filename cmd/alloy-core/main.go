@@ -10,9 +10,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/pkg/kernel"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/ipc"
 )
+
+func getAlloyRuntimeDir() string {
+	if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
+		return filepath.Join(run, "alloy")
+	}
+	// Fallback to /tmp if XDG_RUNTIME_DIR is not available
+	return filepath.Join(os.TempDir(), "alloy")
+}
 
 func main() {
 	// Set up logging
@@ -22,6 +31,7 @@ func main() {
 
 	// Parse command line flags
 	dataDir := flag.String("data-dir", "./data", "Directory for plugin data")
+	listenAddr := flag.String("listen", "unix://" + filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Address to listen on (unix:// or tcp://)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
 	flag.Parse()
@@ -53,7 +63,7 @@ func main() {
 		logger.Error("failed to create WIT kernel", "error", err)
 		os.Exit(1)
 	}
-	
+
 	// Create context for kernel shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -70,15 +80,27 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start health monitor
+	// Create health monitor
 	go healthMonitor(k, logger)
+
+	// Create and start IPC server
+	server := ipc.NewServer(logger, k, nil)
+
+	go func() {
+		logger.Info("starting IPC server", "addr", *listenAddr)
+		if err := server.ListenAndServe(*listenAddr); err != nil {
+			logger.Error("IPC server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
 
 	logger.Info("Alloy Core started", "data_dir", *dataDir)
 
 	// Wait for shutdown signal
 	<-sigCh
 	logger.Info("shutting down")
-	
+
+	server.Stop()
 	if err := k.Shutdown(ctx); err != nil {
 		logger.Error("kernel shutdown error", "error", err)
 	}

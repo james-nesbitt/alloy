@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
+	"github.com/james-nesbitt/alloy/pkg/wasm/runtime"
 )
 
 func TestManagerBasicOperations(t *testing.T) {
@@ -26,11 +27,10 @@ func TestManagerBasicOperations(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	router := func(ctx context.Context, msg api.Message) {}
@@ -41,7 +41,7 @@ func TestManagerBasicOperations(t *testing.T) {
 	}
 
 	// Test 1: Create manager
-	manager, err := wasm2.NewManager(logger, kv, tempDir, router, call)
+	manager, err := wasm.NewManager(logger, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,10 @@ func TestManagerPluginLifecycle(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	router := func(ctx context.Context, msg api.Message) {}
@@ -82,7 +81,7 @@ func TestManagerPluginLifecycle(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm2.NewManager(logger, kv, tempDir, router, call)
+	manager, err := wasm.NewManager(logger, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +121,7 @@ func TestManagerPluginLifecycle(t *testing.T) {
 		t.Error("plugin should be registered")
 	}
 
-	if status != wasm2.StatusRunning {
+	if status != runtime.StatusRunning {
 		t.Error("plugin should be running")
 	}
 
@@ -154,16 +153,13 @@ func TestManagerMessageRouting(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
-	var receivedMsg api.Message
 	router := func(ctx context.Context, msg api.Message) {
-		receivedMsg = msg
 	}
 
 	// Create call function
@@ -174,7 +170,7 @@ func TestManagerMessageRouting(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm2.NewManager(logger, kv, tempDir, router, call)
+	manager, err := wasm.NewManager(logger, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

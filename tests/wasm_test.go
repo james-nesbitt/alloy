@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestWasmLoadMock(t *testing.T) {
@@ -20,9 +20,9 @@ func TestWasmLoadMock(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-command-manager", "type": "native", "load_time": "boot"},
-			{"id": "plugin-events", "type": "native", "load_time": "boot"},
-			{"id": "plugin-mock", "type": "wasm", "path": mockPath, "load_time": "boot"},
+			{"id": "command-manager", "type": "native", "load_time": "boot"},
+			{"id": "events", "type": "native", "load_time": "boot"},
+			{"id": "mock", "type": "wasm", "path": mockPath, "load_time": "boot"},
 		},
 	}
 
@@ -30,17 +30,17 @@ func TestWasmLoadMock(t *testing.T) {
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, collector, []string{"plugin-mock"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"mock"}, 30*time.Second)
 }
 
 func TestWasmLoadBulk(t *testing.T) {
 	cwd, _ := os.Getwd()
 	buildDir := filepath.Join(filepath.Dir(cwd), "build/wasm")
-	
+
 	plugins := []string{"ai", "secrets", "health", "chat", "buffer"}
 	wasmPlugins := []map[string]any{
-		{"id": "plugin-command-manager", "type": "native", "load_time": "boot"},
-		{"id": "plugin-events", "type": "native", "load_time": "boot"},
+		{"id": "command-manager", "type": "native", "load_time": "boot"},
+		{"id": "events", "type": "native", "load_time": "boot"},
 	}
 	expectedIDs := []string{}
 
@@ -48,14 +48,20 @@ func TestWasmLoadBulk(t *testing.T) {
 		path := filepath.Join(buildDir, p+".wasm")
 		if _, err := os.Stat(path); err == nil {
 			id := "plugin-" + p
-			if p == "ai" { id = "plugin-ai-agent" }
-			if p == "chat" { id = "plugin-chat" }
-			if p == "buffer" { id = "plugin-buffer-manager" }
+			if p == "ai" {
+				id = "ai"
+			}
+			if p == "chat" {
+				id = "chat"
+			}
+			if p == "buffer" {
+				id = "buffer"
+			}
 
 			wasmPlugins = append(wasmPlugins, map[string]any{
-				"id":   id,
-				"type": "wasm",
-				"path": path,
+				"id":        id,
+				"type":      "wasm",
+				"path":      path,
 				"load_time": "boot",
 			})
 			expectedIDs = append(expectedIDs, id)
@@ -75,12 +81,12 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 	// This proves that we can register it WITHOUT checking the file system yet.
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-command-manager", "type": "native", "load_time": "boot"},
-			{"id": "plugin-events", "type": "native", "load_time": "boot"},
+			{"id": "command-manager", "type": "native", "load_time": "boot"},
+			{"id": "events", "type": "native", "load_time": "boot"},
 			{
-				"id": "missing-plugin", 
-				"type": "wasm", 
-				"path": "/tmp/non-existent.wasm", 
+				"id":        "missing-plugin",
+				"type":      "wasm",
+				"path":      "/tmp/non-existent.wasm",
 				"load_time": "lazy",
 				"capabilities": []map[string]any{
 					{"method": "phantom-call", "description": "I don't exist yet"},
@@ -100,16 +106,18 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 		sendMsg(t, conn, api.Message{
 			ID:     "dis-1",
 			Sender: "user",
-			Target: "plugin-command-manager",
+			Target: "command-manager",
 			Method: "discover",
 		})
-		
+
 		resp, ok := collector.Await(1*time.Second, func(m api.Message) bool {
 			return m.ID == "dis-1-resp"
 		})
-		
+
 		if ok {
-			var body struct { Targets []map[string]any `json:"targets" `}
+			var body struct {
+				Targets []map[string]any `json:"targets" `
+			}
 			if err := json.Unmarshal(resp.Payload, &body); err != nil {
 				t.Logf("failed to unmarshal discovery response: %v", err)
 				continue
@@ -122,7 +130,9 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 				}
 			}
 		}
-		if found { break }
+		if found {
+			break
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 
@@ -163,42 +173,42 @@ func TestWasmFunctionalSuite(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-command-manager", "type": "native", "load_time": "boot"},
-			{"id": "plugin-events", "type": "native", "load_time": "boot"},
-			{"id": "plugin-kv", "type": "native", "load_time": "boot"},
+			{"id": "command-manager", "type": "native", "load_time": "boot"},
+			{"id": "events", "type": "native", "load_time": "boot"},
+			{"id": "kv", "type": "native", "load_time": "boot"},
 			{
-				"id": "plugin-chat", 
-				"type": "wasm", 
-				"path": filepath.Join(buildDir, "chat.wasm"), 
-				"load_time": "lazy",
+				"id":           "chat",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "chat.wasm"),
+				"load_time":    "lazy",
 				"capabilities": []map[string]string{{"method": "send"}},
 			},
 			{
-				"id": "plugin-ai-agent", 
-				"type": "wasm", 
-				"path": filepath.Join(buildDir, "ai.wasm"), 
-				"load_time": "lazy",
+				"id":           "ai",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "ai.wasm"),
+				"load_time":    "lazy",
 				"capabilities": []map[string]string{{"method": "query"}},
 			},
 			{
-				"id": "plugin-secrets", 
-				"type": "wasm", 
-				"path": filepath.Join(buildDir, "secrets.wasm"), 
-				"load_time": "lazy",
+				"id":           "secrets",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "secrets.wasm"),
+				"load_time":    "lazy",
 				"capabilities": []map[string]string{{"method": "store_secret"}},
 			},
 			{
-				"id": "plugin-health", 
-				"type": "wasm", 
-				"path": filepath.Join(buildDir, "health.wasm"), 
-				"load_time": "lazy",
+				"id":           "health",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "health.wasm"),
+				"load_time":    "lazy",
 				"capabilities": []map[string]string{{"method": "status"}},
 			},
 			{
-				"id": "plugin-buffer-manager", 
-				"type": "wasm", 
-				"path": filepath.Join(buildDir, "buffer.wasm"), 
-				"load_time": "lazy",
+				"id":           "buffer",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "buffer.wasm"),
+				"load_time":    "lazy",
 				"capabilities": []map[string]string{{"method": "open"}},
 			},
 		},
@@ -209,10 +219,10 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	defer conn.Close()
 
 	expected := []string{
-		"plugin-chat", "plugin-ai-agent", "plugin-secrets", 
-		"plugin-health", "plugin-buffer-manager",
+		"chat", "ai", "secrets",
+		"health", "buffer",
 	}
-	
+
 	// Check that lazy plugins are discoverable via metadata before loading
 	waitForPlugins(t, conn, collector, expected, 30*time.Second)
 
@@ -220,17 +230,17 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "health-1",
 		Sender: "user",
-		Target: "plugin-health",
+		Target: "health",
 		Method: "status",
 	})
 	awaitResponse(t, collector, "health-1")
-	
+
 	// 2. Verify Secrets
 	storeReq, _ := json.Marshal(map[string]string{"id": "db_pass", "value": "password123"})
 	sendMsg(t, conn, api.Message{
 		ID:      "secret-1",
 		Sender:  "user",
-		Target:  "plugin-secrets",
+		Target:  "secrets",
 		Method:  "store_secret",
 		Payload: storeReq,
 	})
@@ -240,7 +250,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "secret-2",
 		Sender:  "user",
-		Target:  "plugin-secrets",
+		Target:  "secrets",
 		Method:  "get_secret",
 		Payload: getReq,
 	})
@@ -258,7 +268,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		ID:      "buf-wasm-1",
 		Type:    api.TypeRequest,
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create", // It was "open" in previous summary but the plugin has "create"
 		Payload: openReq,
 	})
@@ -269,15 +279,15 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	subReq, _ := json.Marshal(map[string]string{"topic": "chat:message"})
 	sendMsg(t, conn, api.Message{
 		ID:      "sub-ai",
-		Sender:  "plugin-ai-agent",
-		Target:  "plugin-events",
+		Sender:  "ai",
+		Target:  "events",
 		Method:  "subscribe",
 		Payload: subReq,
 	})
 	sendMsg(t, conn, api.Message{
 		ID:      "sub-user",
 		Sender:  "user",
-		Target:  "plugin-events",
+		Target:  "events",
 		Method:  "subscribe",
 		Payload: subReq,
 	})
@@ -290,7 +300,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "chat-1",
 		Sender:  "user",
-		Target:  "plugin-chat",
+		Target:  "chat",
 		Method:  "send",
 		Payload: chatReq,
 	})
@@ -298,9 +308,9 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	// AI should react to the chat event
 	chatEvt, ok := collector.Await(60*time.Second, func(m api.Message) bool {
 		if m.Type == api.TypeEvent && m.Method == "chat:message" {
-			var chatMsg struct { Sender string }
+			var chatMsg struct{ Sender string }
 			json.Unmarshal(m.Payload, &chatMsg)
-			if chatMsg.Sender == "plugin-ai-agent" {
+			if chatMsg.Sender == "ai" {
 				return true
 			}
 		}
@@ -309,7 +319,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	if !ok {
 		t.Error("never received AI agent response via Route in WASM")
 	} else {
-		var chatMsg struct { Content string }
+		var chatMsg struct{ Content string }
 		json.Unmarshal(chatEvt.Payload, &chatMsg)
 		t.Logf("AI Response found: %s", chatMsg.Content)
 	}

@@ -1,4 +1,4 @@
-package runtime_test
+package runtime
 
 import (
 	"context"
@@ -9,10 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
-	"github.com/jnesbitt/alloy-go/pkg/wasm/runtime"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func TestRuntimeBasicOperations(t *testing.T) {
@@ -28,16 +26,13 @@ func TestRuntimeBasicOperations(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
-	routerCalled := false
 	router := func(ctx context.Context, msg api.Message) {
-		routerCalled = true
 	}
 
 	// Create call function
@@ -54,7 +49,7 @@ func TestRuntimeBasicOperations(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := runtime.NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +61,7 @@ func TestRuntimeBasicOperations(t *testing.T) {
 	}
 
 	// Test 2: Verify host module instantiation
-	hostMod := rt.HostModule()
+	hostMod := rt.hostModule
 	if hostMod == nil {
 		t.Error("host module should not be nil")
 	}
@@ -102,11 +97,10 @@ func TestRuntimePluginLifecycle(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	router := func(ctx context.Context, msg api.Message) {}
@@ -117,7 +111,7 @@ func TestRuntimePluginLifecycle(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := runtime.NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,25 +133,25 @@ func TestRuntimePluginLifecycle(t *testing.T) {
 	defer instance.Close(context.Background())
 
 	// Test 2: Verify plugin registration
-	rt.Mu().RLock()
-	_, ok := rt.Plugins()[pluginID]
-	rt.Mu().RUnlock()
+	rt.mu.RLock()
+	_, ok := rt.plugins[pluginID]
+	rt.mu.RUnlock()
 
 	if !ok {
 		t.Error("plugin should be registered")
 	}
 
 	// Test 3: Verify plugin capabilities
-	if len(instance.Capabilities()) != 1 {
+	if len(instance.capabilities) != 1 {
 		t.Error("plugin should have 1 capability")
 	}
 
-	if instance.Capabilities()[0].Method != "test:method" {
+	if instance.capabilities[0].Method != "test:method" {
 		t.Error("unexpected capability method")
 	}
 
 	// Test 4: Verify plugin status
-	if instance.Status() != runtime.StatusRunning {
+	if instance.status != StatusRunning {
 		t.Error("plugin should be running")
 	}
 
@@ -177,16 +171,13 @@ func TestRuntimeMessageRouting(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
-	var receivedMsg api.Message
 	router := func(ctx context.Context, msg api.Message) {
-		receivedMsg = msg
 	}
 
 	// Create call function
@@ -195,7 +186,7 @@ func TestRuntimeMessageRouting(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := runtime.NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 // KernelInternal interface to avoid circular dependency.
@@ -36,7 +36,7 @@ func NewRegistryManager(logger *slog.Logger, k KernelInternal, state storage.Sta
 	}
 }
 
-func (r *RegistryManager) ID() string { return "plugin-registry" }
+func (r *RegistryManager) ID() string { return "registry" }
 
 func (r *RegistryManager) Capabilities() []api.Capability {
 	return []api.Capability{
@@ -50,13 +50,13 @@ type ProvisionRequest struct {
 }
 
 type PluginDef struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"` // "native" or "wasm"
-	Path         string           `json:"path,omitempty"`
-	MemoryLimit  uint64           `json:"memory_limit_mb,omitempty"`
-	FuelLimit    uint64           `json:"fuel_limit,omitempty"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"` // "native" or "wasm"
+	Path         string             `json:"path,omitempty"`
+	MemoryLimit  uint64             `json:"memory_limit_mb,omitempty"`
+	FuelLimit    uint64             `json:"fuel_limit,omitempty"`
 	LoadTime     api.PluginLoadTime `json:"load_time,omitempty"`
-	Capabilities []api.Capability `json:"capabilities,omitempty"`
+	Capabilities []api.Capability   `json:"capabilities,omitempty"`
 }
 
 func (r *RegistryManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
@@ -120,7 +120,7 @@ func (r *RegistryManager) delegateRegister(ctx context.Context, def PluginDef) {
 			ID:      "reg-wasm-" + def.ID,
 			Sender:  r.ID(),
 			Actor:   "system",
-			Target:  "plugin-wasm-manager",
+			Target:  "wasm-manager",
 			Method:  "register",
 			Payload: payload,
 		})
@@ -164,7 +164,7 @@ func (r *RegistryManager) LoadPlugin(ctx context.Context, id string) (api.Plugin
 		ID:      "reg-cm-" + p.ID(),
 		Sender:  r.ID(),
 		Actor:   "system",
-		Target:  "plugin-command-manager",
+		Target:  "command-manager",
 		Method:  "register",
 		Payload: []byte(`{"id":"` + p.ID() + `","type":"native","status":"active","capabilities":` + string(capsData) + `}`),
 	})
@@ -191,7 +191,7 @@ func (r *RegistryManager) delegateLoad(ctx context.Context, def PluginDef) {
 			ID:      "load-wasm-" + def.ID,
 			Sender:  r.ID(),
 			Actor:   "system",
-			Target:  "plugin-wasm-manager",
+			Target:  "wasm-manager",
 			Method:  "load",
 			Payload: payload,
 		})

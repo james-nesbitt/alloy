@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jnesbitt/alloy-go/pkg/security/pki"
+	"github.com/james-nesbitt/alloy/pkg/security/pki"
 )
 
 type Store struct {

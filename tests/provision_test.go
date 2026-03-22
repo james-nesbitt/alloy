@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestDynamicProvisioning(t *testing.T) {
@@ -17,23 +17,23 @@ func TestDynamicProvisioning(t *testing.T) {
 	defer os.RemoveAll(homeDir)
 
 	socketPath := filepath.Join(homeDir, "alloy.sock")
-	
+
 	// Create a provision manifest
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-kv", "type": "native"},
+			{"id": "command-manager", "type": "native"},
+			{"id": "events", "type": "native"},
+			{"id": "kv", "type": "native"},
 		},
 	}
 	manifestData, _ := json.Marshal(manifest)
 	os.WriteFile(provisionPath, manifestData, 0644)
 
 	// 2. Start alloy-core in minimal mode, but with the manifest
-	// We'll run it as a subprocess or just use the packages. 
+	// We'll run it as a subprocess or just use the packages.
 	// For a true functional test, let's assume alloy-core is built.
-	
+
 	// Since we are in the same repo, we can just use the built binary from 'build/'
 	corePath := "../build/core"
 	if _, err := os.Stat(corePath); err != nil {
@@ -66,10 +66,10 @@ func TestDynamicProvisioning(t *testing.T) {
 		ID:     "disc-1",
 		Type:   api.TypeRequest,
 		Sender: "test-frontend",
-		Target: "plugin-command-manager",
+		Target: "command-manager",
 		Method: "discover",
 	}
-	
+
 	encoded, _ := json.Marshal(discoverMsg)
 	conn.Write(append(encoded, '\n'))
 
@@ -90,10 +90,10 @@ func TestDynamicProvisioning(t *testing.T) {
 	foundEvents := false
 	foundKV := false
 	for _, p := range result.Targets {
-		if p["id"] == "plugin-events" {
+		if p["id"] == "events" {
 			foundEvents = true
 		}
-		if p["id"] == "plugin-kv" {
+		if p["id"] == "kv" {
 			foundKV = true
 		}
 	}

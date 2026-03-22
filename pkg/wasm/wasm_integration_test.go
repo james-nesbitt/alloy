@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
-	"github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm/runtime"
 )
 
 func TestWITRuntimeIntegration(t *testing.T) {
@@ -34,11 +33,10 @@ func TestWITRuntimeIntegration(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	var receivedMessages []api.Message
@@ -62,7 +60,7 @@ func TestWITRuntimeIntegration(t *testing.T) {
 	}
 
 	// Create runtime
-	runtime, err := wasm2.NewRuntime(context.Background(), nil, kv, tempDir, router, call)
+	runtime, err := runtime.NewRuntime(context.Background(), nil, kv, tempDir, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

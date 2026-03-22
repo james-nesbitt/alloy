@@ -3,8 +3,8 @@
 package main
 
 import (
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
+	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
+	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -64,7 +64,7 @@ type ProjectSummary struct {
 
 var (
 	plugin      *Plugin
-	configStore = NewKVStore[ProviderConfig]("ai-agent:config")
+	configStore = NewKVStore[ProviderConfig]("ai:config")
 )
 
 // KVStore provides type-safe KV storage.
@@ -104,7 +104,7 @@ func (s *KVStore[T]) Set(key string, value T) error {
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = NewPlugin("ai-agent").
+	plugin = NewPlugin("ai").
 		WithMetadata(
 			"AI Agent", 
 			"Provides AI capabilities including chat and summarization",
@@ -146,8 +146,8 @@ func main() {
 		// Subscribe to chat events
 		plugin.RouteMessage(AlloyMessage{
 			Method: "subscribe",
-			Sender: "ai-agent",
-			Target: Some("plugin-events"),
+			Sender: "ai",
+			Target: Some("events"),
 			Payload: json.RawMessage(`{"event":"chat:message"}`),
 		})
 	})
@@ -323,8 +323,8 @@ func discoverNativeLLM() string {
 	discoverMsg := AlloyMessage{
 		Id:     "ai-discover-" + fmt.Sprint(time.Now().UnixNano()),
 		Method: "discover",
-		Sender: "ai-agent",
-		Target: Some("plugin-command-manager"),
+		Sender: "ai",
+		Target: Some("command-manager"),
 	}
 
 	// Call the command manager
@@ -367,7 +367,7 @@ func queryNativeLLM(providerID, prompt string) (string, error) {
 	queryMsg := AlloyMessage{
 		Id:      "ai-gen-" + fmt.Sprint(time.Now().UnixNano()),
 		Method:  "generate",
-		Sender:  "ai-agent",
+		Sender:  "ai",
 		Target:  Some(providerID),
 		Payload: json.RawMessage(`{"prompt":"` + prompt + `"}`),
 	}
@@ -529,8 +529,8 @@ func getActiveProject() (*ProjectInfo, error) {
 	msg := AlloyMessage{
 		Id:     "get-active-project-" + fmt.Sprint(time.Now().UnixNano()),
 		Method: "get_active",
-		Sender: "ai-agent",
-		Target: Some("plugin-project-manager"),
+		Sender: "ai",
+		Target: Some("project"),
 	}
 
 	// Call the project manager
@@ -579,7 +579,7 @@ func handleChatMessage(payload json.RawMessage) {
 	}
 
 	// Skip messages from ourselves or the chat plugin
-	if chatMsg.Sender == "ai-agent" || chatMsg.Sender == "plugin-chat" {
+	if chatMsg.Sender == "ai" || chatMsg.Sender == "chat" {
 		return
 	}
 
@@ -602,8 +602,8 @@ func sendChatResponse(channel, response string) {
 	msg := AlloyMessage{
 		Id:      "ai-response-" + fmt.Sprint(time.Now().UnixNano()),
 		Method:  "send",
-		Sender:  "ai-agent",
-		Target:  Some("plugin-chat"),
+		Sender:  "ai",
+		Target:  Some("chat"),
 		Payload: json.RawMessage(fmt.Sprintf(`{"channel":"%s","content":"%s"}`, channel, response)),
 	}
 

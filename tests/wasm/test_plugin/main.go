@@ -4,7 +4,7 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/jnesbitt/alloy-go/pkg/wasm/guest"
+	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
 
 func main() {

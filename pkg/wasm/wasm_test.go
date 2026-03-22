@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
 )
 
 func TestWITRuntime(t *testing.T) {
 	// Create a temporary directory for test data
-	tempDir, err := os.MkdirTemp("", "wasm2-test")
+	tempDir, err := os.MkdirTemp("", "wasm-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,11 +26,10 @@ func TestWITRuntime(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// Set up storage
-	kv, err := storage.NewBadgerStore(filepath.Join(tempDir, "storage"))
+	kv, err := storage.NewFileStateStore(filepath.Join(tempDir, "storage"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	router := func(ctx context.Context, msg api.Message) {
@@ -52,7 +51,7 @@ func TestWITRuntime(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm2.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestBufferManagerOperations(t *testing.T) {
@@ -21,10 +21,10 @@ func TestBufferManagerOperations(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-kv", "type": "native"},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
+			{"id": "events", "type": "native"},
+			{"id": "command-manager", "type": "native"},
+			{"id": "kv", "type": "native"},
+			{"id": "buffer", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
 		},
 	}
 
@@ -32,7 +32,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, collector, []string{"plugin-buffer-manager"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"buffer"}, 30*time.Second)
 
 	// 1. Test Create Buffer
 	createReq, _ := json.Marshal(map[string]any{
@@ -45,7 +45,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-create-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: createReq,
 	})
@@ -66,7 +66,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-read-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readReq,
 	})
@@ -88,7 +88,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-append-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "append",
 		Payload: appendReq,
 	})
@@ -98,7 +98,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-read-2",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readReq,
 	})
@@ -118,7 +118,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-write-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "write",
 		Payload: writeReq,
 	})
@@ -128,7 +128,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-read-3",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readReq,
 	})
@@ -148,7 +148,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-meta-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "set_metadata",
 		Payload: metaReq,
 	})
@@ -158,7 +158,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "buf-list-1",
 		Sender: "user",
-		Target: "plugin-buffer-manager",
+		Target: "buffer",
 		Method: "list",
 	})
 	resp = awaitResponse(t, collector, "buf-list-1-resp")
@@ -181,7 +181,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-del-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "delete",
 		Payload: delReq,
 	})
@@ -191,7 +191,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "buf-list-2",
 		Sender: "user",
-		Target: "plugin-buffer-manager",
+		Target: "buffer",
 		Method: "list",
 	})
 	resp = awaitResponse(t, collector, "buf-list-2-resp")
@@ -208,9 +208,9 @@ func TestBufferSubscription(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
+			{"id": "events", "type": "native"},
+			{"id": "command-manager", "type": "native"},
+			{"id": "buffer", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
 		},
 	}
 
@@ -218,7 +218,7 @@ func TestBufferSubscription(t *testing.T) {
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, collector, []string{"plugin-buffer-manager"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"buffer"}, 30*time.Second)
 
 	// 1. Create Buffer
 	createReq, _ := json.Marshal(map[string]any{
@@ -228,7 +228,7 @@ func TestBufferSubscription(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-create-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: createReq,
 	})
@@ -243,7 +243,7 @@ func TestBufferSubscription(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-sub-1",
 		Sender:  "other-user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "subscribe",
 		Payload: subReq,
 	})
@@ -257,7 +257,7 @@ func TestBufferSubscription(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "buf-app-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "append",
 		Payload: appendReq,
 	})

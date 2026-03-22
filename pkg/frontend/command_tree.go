@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 // Registration is the frontend's view of a plugin's surface area.
@@ -39,7 +39,7 @@ func BuildCommandTree(regs []Registration) *CommandNode {
 			// Split by space for keystroke sequences
 			keys := strings.Fields(cap.Shortcut)
 			curr := root
-			
+
 			for i, k := range keys {
 				if _, ok := curr.Children[k]; !ok {
 					curr.Children[k] = &CommandNode{
@@ -79,7 +79,7 @@ func (n *CommandNode) Find(path []string) *CommandNode {
 
 // SearchItem is a flattened representation of a command for fuzzy searching.
 type SearchItem struct {
-	FullTitle   string // e.g., "plugin-project-manager open"
+	FullTitle   string // e.g., "project open"
 	Description string
 	Shortcut    string
 	Target      string
@@ -92,7 +92,7 @@ type SearchItem struct {
 // Flatten extracts all leaf commands from the tree.
 func (n *CommandNode) Flatten(prefix string) []SearchItem {
 	var results []SearchItem
-	
+
 	for _, child := range n.Children {
 		newPrefix := child.Key
 		if prefix != "" {
@@ -108,7 +108,7 @@ func (n *CommandNode) Flatten(prefix string) []SearchItem {
 				Method:      child.Method,
 			})
 		}
-		
+
 		results = append(results, child.Flatten(newPrefix)...)
 	}
 	return results

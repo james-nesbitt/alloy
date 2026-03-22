@@ -1,7 +1,7 @@
-module github.com/jnesbitt/alloy-go/pkg/wasm/guest
+module github.com/james-nesbitt/alloy/pkg/wasm/guest
 
 go 1.25.8
 
-replace github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest => ../bindings/guest
+replace github.com/james-nesbitt/alloy/build/gen/bindings/guest => ../../../build/gen/bindings/guest
 
-require github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest v0.0.0-00010101000000-000000000000
+require github.com/james-nesbitt/alloy/build/gen/bindings/guest v0.0.0-00010101000000-000000000000

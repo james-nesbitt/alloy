@@ -8,16 +8,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
 const (
-	auditContextKey      = "alloy.no_audit"
-	skipInterceptorsKey  = "alloy.skip_interceptors"
-	tracerName           = "alloy-kernel"
+	auditContextKey     = "alloy.no_audit"
+	skipInterceptorsKey = "alloy.skip_interceptors"
+	tracerName          = "alloy-kernel"
 )
 
 // Kernel is the core component that manages plugins and message routing.
@@ -96,12 +96,12 @@ func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoad
 			"type":         "plugin-meta",
 			"capabilities": info.Capabilities,
 		})
-		
+
 		publishPayload, _ := json.Marshal(map[string]any{
 			"topic": "component:registered",
 			"data":  json.RawMessage(metaData),
 		})
-		
+
 		systemCtx := context.WithValue(context.Background(), auditContextKey, true)
 		systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
 
@@ -110,7 +110,7 @@ func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoad
 			ID:        "event-reg-meta-" + info.ID,
 			Type:      api.TypeEvent,
 			Sender:    "kernel",
-			Target:    "plugin-events",
+			Target:    "events",
 			Method:    "publish",
 			Payload:   publishPayload,
 			Timestamp: time.Now().Unix(),
@@ -259,7 +259,7 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	k.logger.Info("plugin registered and active", "plugin_id", p.ID())
 
 	// Handle IAM enforcement natively
-	if p.ID() == "plugin-iam" {
+	if p.ID() == "iam" {
 		k.logger.Info("IAM plugin detected, enabling RBAC enforcement")
 		// In a real system, we might promote IAM to a first-class interceptor
 	}
@@ -276,7 +276,7 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 			ID:        "event-reg-" + p.ID(),
 			Type:      api.TypeEvent,
 			Sender:    "kernel",
-			Target:    "plugin-events",
+			Target:    "events",
 			Method:    "publish",
 			Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(capsData) + `}}`),
 			Timestamp: time.Now().Unix(),
@@ -294,7 +294,7 @@ func (k *Kernel) deliverToPlugin(ctx context.Context, p api.Plugin, msg api.Mess
 		// but preserve the trace span from parentCtx.
 		deliveryCtx := context.Background()
 		if parentCtx != nil {
-			// Copy important values 
+			// Copy important values
 			if audit, ok := parentCtx.Value(auditContextKey).(bool); ok {
 				deliveryCtx = context.WithValue(deliveryCtx, auditContextKey, audit)
 			}
@@ -346,11 +346,11 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	if ctx.Value(skipInterceptorsKey) == nil {
 		k.mu.RLock()
 		interceptors := k.interceptors
-		iam, hasIAM := k.plugins["plugin-iam"]
+		iam, hasIAM := k.plugins["iam"]
 		k.mu.RUnlock()
 
-		// Core RBAC Enforcement via plugin-iam
-		if hasIAM && msg.Sender != "system" && msg.Sender != "plugin-iam" && msg.Method != "check" && msg.Type == api.TypeRequest {
+		// Core RBAC Enforcement via iam
+		if hasIAM && msg.Sender != "system" && msg.Sender != "iam" && msg.Method != "check" && msg.Type == api.TypeRequest {
 			// Ask IAM for permission
 			checkPayload, _ := json.Marshal(map[string]string{
 				"actor":  msg.Actor,
@@ -359,28 +359,28 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			})
 			iamCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 			defer cancel()
-			
+
 			// Call the plugin handler directly to avoid recursive routing
 			resp, err := iam.HandleMessage(iamCtx, api.Message{
 				ID:      "iam-check-" + msg.ID,
 				Type:    api.TypeRequest,
 				Sender:  "kernel",
-				Target:  "plugin-iam",
+				Target:  "iam",
 				Method:  "check",
 				Payload: checkPayload,
 			})
-			
+
 			if err != nil {
 				k.logger.Error("IAM check failed", "error", err)
 				return
 			}
-			
+
 			var result struct {
 				Allowed bool `json:"allowed"`
 			}
 			if err := json.Unmarshal(resp.Payload, &result); err == nil && !result.Allowed {
 				k.logger.Warn("IAM: authorization denied", "actor", msg.Actor, "target", msg.Target, "method", msg.Method)
-				
+
 				// Optional: Send access denied response back to sender
 				k.RouteMessage(context.WithValue(ctx, skipInterceptorsKey, true), api.Message{
 					ID:      msg.ID + "-error",
@@ -472,7 +472,7 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			k.logger.Info("lazy loading plugin on message request", "plugin_id", msg.Target)
 			loadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			
+
 			p, err := loader.LoadPlugin(loadCtx, msg.Target)
 			if err == nil {
 				k.RegisterPlugin(p)
@@ -515,7 +515,7 @@ func (k *Kernel) publishCrashEvent(id, err string) {
 		ID:        "evt-crash-" + id + "-" + fmt.Sprint(time.Now().UnixNano()),
 		Type:      api.TypeEvent,
 		Sender:    "kernel",
-		Target:    "plugin-events",
+		Target:    "events",
 		Method:    "publish",
 		Payload:   []byte(`{"topic":"plugin:crashed","data":{"id":"` + id + `","error":"` + err + `"}}`),
 		Timestamp: time.Now().Unix(),
@@ -542,7 +542,7 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 		ID:        "event-reg-" + id,
 		Type:      api.TypeEvent,
 		Sender:    "kernel",
-		Target:    "plugin-events",
+		Target:    "events",
 		Method:    "publish",
 		Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + id + `","type":"frontend"}}`),
 		Timestamp: time.Now().Unix(),
@@ -587,8 +587,8 @@ func (k *Kernel) StopCh() <-chan struct{} {
 func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action, status string) {
 	return
 	// Avoid recursive auditing and system noise:
-	if msg.Target == "plugin-events" || msg.Target == "plugin-logger" || msg.Target == "plugin-kv" ||
-		msg.Sender == "kernel" || msg.Sender == "plugin-events" || msg.Sender == "plugin-logger" || msg.Sender == "plugin-kv" ||
+	if msg.Target == "events" || msg.Target == "logger" || msg.Target == "kv" ||
+		msg.Sender == "kernel" || msg.Sender == "events" || msg.Sender == "logger" || msg.Sender == "kv" ||
 		msg.Sender == "system" || msg.Sender == "ipc-server" ||
 		msg.Method == "system:audit" || msg.Method == "component:registered" {
 		return
@@ -613,7 +613,7 @@ func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action,
 			ID:        "audit-" + time.Now().Format("150405.000"),
 			Type:      api.TypeEvent,
 			Sender:    "kernel",
-			Target:    "plugin-events",
+			Target:    "events",
 			Method:    "publish",
 			Payload:   []byte(`{"topic":"system:audit","data":` + string(details) + `}`),
 			Timestamp: time.Now().Unix(),

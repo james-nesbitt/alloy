@@ -1,4 +1,4 @@
-# Group Chat Plugin (`plugin-chat`)
+# Group Chat Plugin (`chat`)
 
 The Group Chat plugin provides real-time communication, direct messaging, and presence tracking.
 

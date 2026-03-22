@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -19,7 +19,7 @@ type TelemetryManager struct {
 }
 
 func NewTelemetryManager(ctx context.Context, logger *slog.Logger) (*TelemetryManager, error) {
-	// For now, we use a simple STDOUT exporter. 
+	// For now, we use a simple STDOUT exporter.
 	// In the future, this can be swapped for OTLP/gRPC.
 	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 	if err != nil {
@@ -38,7 +38,7 @@ func NewTelemetryManager(ctx context.Context, logger *slog.Logger) (*TelemetryMa
 	return &TelemetryManager{tp: tp}, nil
 }
 
-func (t *TelemetryManager) ID() string { return "plugin-otel" }
+func (t *TelemetryManager) ID() string { return "telemetry" }
 
 func (t *TelemetryManager) Capabilities() []api.Capability {
 	return []api.Capability{

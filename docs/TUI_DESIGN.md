@@ -5,10 +5,10 @@ This document outlines the design for the Alloy TUI (`alloy-tui`), focusing on a
 ## Core Interface Principles
 
 - **Modal Interaction**: Inspired by Vim, the TUI will have distinct modes (e.g., `Normal`, `Insert`, `Command-line`).
-- **Command-Line First**: A dedicated command bar (minibuffer) for executing actions, searching, and switching buffers (e.g., `:buffer 1`, `:chat`, `:ai-agent help`).
+- **Command-Line First**: A dedicated command bar (minibuffer) for executing actions, searching, and switching buffers (e.g., `:buffer 1`, `:chat`, `:ai help`).
 - **Pane Management**: Support for splitting the view into multiple panes (vertical/horizontal) to view different plugin contents simultaneously.
 - **Mouse Support**: Click-to-focus panes and scroll support, integrated with `bubbletea`'s mouse events.
-- **Dynamic Discovery**: Commands available in the command-line are dynamically populated from the `plugin-command-manager`.
+- **Dynamic Discovery**: Commands available in the command-line are dynamically populated from the `command-manager`.
 
 ## Layout Architecture
 
@@ -22,7 +22,7 @@ This document outlines the design for the Alloy TUI (`alloy-tui`), focusing on a
     -   **Right**: Cursor position (row/col) and time.
 4.  **Command Bar (Minibuffer)**:
     -   Hidden by default, activated by `:` (command) or `/` (search).
-    -   Provides auto-completion for plugin methods discovered via `plugin-command-manager`.
+    -   Provides auto-completion for plugin methods discovered via `command-manager`.
 
 ## Keyboard Shortcuts (Vim-inspired)
 
@@ -44,10 +44,10 @@ This document outlines the design for the Alloy TUI (`alloy-tui`), focusing on a
 - [ ] **Layout Manager**: Implement a basic pane manager that can split the screen area between multiple `tea.Model` components.
 
 ### Phase 2: Buffer Service Integration
-- [ ] **Buffer Listing**: Command `:ls` or `:buffers` calls `plugin-buffer-manager:list`.
-- [ ] **Buffer Selection**: Command `:b <id>` calls `plugin-buffer-manager:open`.
+- [ ] **Buffer Listing**: Command `:ls` or `:buffers` calls `buffer:list`.
+- [ ] **Buffer Selection**: Command `:b <id>` calls `buffer:open`.
 - [ ] **Syncing events**: Handle `buffer:updated` events to refresh the active pane.
 
 ### Phase 3: Plugin Interaction
-- [ ] **Generic Plugin Proxy**: Any method discovered via `plugin-command-manager` can be called via `:call <plugin> <method> <payload>`.
-- [ ] **Specialized Views**: Create a "Chat View" for `plugin-chat` and a "Log View" for kernel logs.
+- [ ] **Generic Plugin Proxy**: Any method discovered via `command-manager` can be called via `:call <plugin> <method> <payload>`.
+- [ ] **Specialized Views**: Create a "Chat View" for `chat` and a "Log View" for kernel logs.

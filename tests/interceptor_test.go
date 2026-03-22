@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/kernel"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/kernel"
 )
 
 type mockInterceptor struct {
@@ -30,8 +30,8 @@ func (m *mockInterceptor) PreRoute(ctx context.Context, msg api.Message) (api.Me
 }
 
 // Implement Plugin interface so it can be registered
-func (m *mockInterceptor) ID() string                        { return "mock-interceptor" }
-func (m *mockInterceptor) Capabilities() []api.Capability   { return nil }
+func (m *mockInterceptor) ID() string                         { return "mock-interceptor" }
+func (m *mockInterceptor) Capabilities() []api.Capability     { return nil }
 func (m *mockInterceptor) Shutdown(ctx context.Context) error { return nil }
 func (m *mockInterceptor) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	return api.Message{}, nil

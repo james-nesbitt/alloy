@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 type ChatMessage struct {
@@ -25,14 +25,14 @@ func TestApplicationPlugins(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-kv", "type": "native"},
-			{"id": "plugin-logger", "type": "native"},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
-			{"id": "plugin-project-manager", "type": "wasm", "path": filepath.Join(buildDir, "project.wasm")},
-			{"id": "plugin-chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
-			{"id": "plugin-ai-agent", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm"), "memory_limit_mb": 64},
+			{"id": "events", "type": "native"},
+			{"id": "command-manager", "type": "native"},
+			{"id": "kv", "type": "native"},
+			{"id": "logger", "type": "native"},
+			{"id": "buffer", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
+			{"id": "project", "type": "wasm", "path": filepath.Join(buildDir, "project.wasm")},
+			{"id": "chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
+			{"id": "ai", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm"), "memory_limit_mb": 64},
 		},
 	}
 
@@ -42,7 +42,7 @@ func TestApplicationPlugins(t *testing.T) {
 
 	t.Log("Polling for WASM plugins to register...")
 	expected := []string{
-		"plugin-chat", "plugin-ai-agent", "plugin-buffer-manager", "plugin-project-manager",
+		"chat", "ai", "buffer", "project",
 	}
 	waitForPlugins(t, conn, collector, expected, 30*time.Second)
 	t.Log("All WASM plugins registered")
@@ -53,7 +53,7 @@ func TestApplicationPlugins(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "sub-test",
 		Sender:  "user-1",
-		Target:  "plugin-events",
+		Target:  "events",
 		Method:  "subscribe",
 		Payload: subReq,
 	})
@@ -62,8 +62,8 @@ func TestApplicationPlugins(t *testing.T) {
 	// AI Agent subscription
 	sendMsg(t, conn, api.Message{
 		ID:      "sub-ai",
-		Sender:  "plugin-ai-agent",
-		Target:  "plugin-events",
+		Sender:  "ai",
+		Target:  "events",
 		Method:  "subscribe",
 		Payload: subReq,
 	})
@@ -81,19 +81,21 @@ func TestApplicationPlugins(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "proj-create-1",
 		Sender:  "user-1",
-		Target:  "plugin-project-manager",
+		Target:  "project",
 		Method:  "create",
 		Payload: projReq,
 	})
 	resp := awaitResponse(t, collector, "proj-create-1-resp")
-	var project struct{ ID string `json:"id"` }
+	var project struct {
+		ID string `json:"id"`
+	}
 	json.Unmarshal(resp.Payload, &project)
 
 	openReq, _ := json.Marshal(map[string]string{"id": project.ID})
 	sendMsg(t, conn, api.Message{
 		ID:      "proj-open-1",
 		Sender:  "user-1",
-		Target:  "plugin-project-manager",
+		Target:  "project",
 		Method:  "open",
 		Payload: openReq,
 	})
@@ -107,7 +109,7 @@ func TestApplicationPlugins(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "chat-1",
 		Sender:  "user-1",
-		Target:  "plugin-chat",
+		Target:  "chat",
 		Method:  "send",
 		Payload: chatReq,
 	})
@@ -118,7 +120,7 @@ func TestApplicationPlugins(t *testing.T) {
 		if m.Method == "chat:message" && m.Type == "event" {
 			var chatMsg ChatMessage
 			json.Unmarshal(m.Payload, &chatMsg)
-			return chatMsg.Sender == "plugin-ai-agent"
+			return chatMsg.Sender == "ai"
 		}
 		return false
 	})
@@ -140,7 +142,7 @@ func TestApplicationPlugins(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "hist-1",
 		Sender:  "user-1",
-		Target:  "plugin-chat",
+		Target:  "chat",
 		Method:  "history",
 		Payload: []byte(`{"channel":"test-channel"}`),
 	})

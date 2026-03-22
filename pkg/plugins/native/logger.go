@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/security/audit"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/security/audit"
 )
 
 // LoggerManager consumes audit events and persists them to a tamper-evident log.
@@ -37,7 +37,7 @@ func (l *LoggerManager) SetRouter(r func(context.Context, api.Message)) {
 			ID:        "sub-logger-audit",
 			Type:      api.TypeRequest,
 			Sender:    l.ID(),
-			Target:    "plugin-events",
+			Target:    "events",
 			Method:    "subscribe",
 			Payload:   []byte(`{"topic":"system:audit"}`),
 			Timestamp: time.Now().Unix(),
@@ -45,7 +45,7 @@ func (l *LoggerManager) SetRouter(r func(context.Context, api.Message)) {
 	}()
 }
 
-func (l *LoggerManager) ID() string { return "plugin-logger" }
+func (l *LoggerManager) ID() string { return "logger" }
 
 func (l *LoggerManager) Capabilities() []api.Capability {
 	return []api.Capability{
@@ -60,13 +60,13 @@ func (l *LoggerManager) HandleMessage(ctx context.Context, msg api.Message) (api
 			l.logger.Error("failed to unmarshal audit entry", "error", err)
 			return api.Message{}, nil
 		}
-		
+
 		// Correlate with trace if present in message metadata
 		if sc, ok := msg.SpanContext(); ok {
 			entry.TraceID = sc.TraceID().String()
 			entry.SpanID = sc.SpanID().String()
 		}
-		
+
 		l.audit.Log(entry)
 	}
 	return api.Message{}, nil

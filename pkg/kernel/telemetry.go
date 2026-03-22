@@ -16,7 +16,7 @@ import (
 
 type Telemetry struct {
 	meter metric.Meter
-	
+
 	msgCounter  metric.Int64Counter
 	errCounter  metric.Int64Counter
 	pluginGauge metric.Int64UpDownCounter
@@ -27,18 +27,18 @@ func initTelemetry(metricsAddr string) (*Telemetry, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
 	otel.SetMeterProvider(provider)
-	
+
 	meter := otel.Meter("alloy-kernel")
-	
-	msgCounter, _ := meter.Int64Counter("alloy_messages_total", 
+
+	msgCounter, _ := meter.Int64Counter("alloy_messages_total",
 		metric.WithDescription("Total number of messages routed by kernel"))
-	
-	errCounter, _ := meter.Int64Counter("alloy_errors_total", 
+
+	errCounter, _ := meter.Int64Counter("alloy_errors_total",
 		metric.WithDescription("Total number of errors encountered during routing"))
-	
+
 	pluginGauge, _ := meter.Int64UpDownCounter("alloy_plugins_active",
 		metric.WithDescription("Number of active plugins"))
 
@@ -63,7 +63,9 @@ func initTelemetry(metricsAddr string) (*Telemetry, error) {
 }
 
 func (t *Telemetry) RecordMessage(ctx context.Context, sender, target, method string) {
-	if t == nil { return }
+	if t == nil {
+		return
+	}
 	t.msgCounter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("alloy.msg.sender", sender),
 		attribute.String("alloy.msg.target", target),
@@ -72,7 +74,9 @@ func (t *Telemetry) RecordMessage(ctx context.Context, sender, target, method st
 }
 
 func (t *Telemetry) RecordError(ctx context.Context, target, errorType string) {
-	if t == nil { return }
+	if t == nil {
+		return
+	}
 	t.errCounter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("alloy.target", target),
 		attribute.String("alloy.err_type", errorType),
@@ -80,6 +84,8 @@ func (t *Telemetry) RecordError(ctx context.Context, target, errorType string) {
 }
 
 func (t *Telemetry) PluginCountChange(ctx context.Context, delta int64) {
-	if t == nil { return }
+	if t == nil {
+		return
+	}
 	t.pluginGauge.Add(ctx, delta)
 }

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestBufferExpansion(t *testing.T) {
@@ -17,10 +17,10 @@ func TestBufferExpansion(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-kv", "type": "native"},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
+			{"id": "events", "type": "native"},
+			{"id": "command-manager", "type": "native"},
+			{"id": "kv", "type": "native"},
+			{"id": "buffer", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
 		},
 	}
 
@@ -28,7 +28,7 @@ func TestBufferExpansion(t *testing.T) {
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, collector, []string{"plugin-buffer-manager"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"buffer"}, 30*time.Second)
 
 	// 1. Test Indirect Buffers
 	// Create base buffer
@@ -39,7 +39,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "base-create",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: createReq,
 	})
@@ -58,7 +58,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "indirect-create",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: indirectReq,
 	})
@@ -71,7 +71,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "indirect-read-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readReq,
 	})
@@ -95,7 +95,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "double-create",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: doubleIndirectReq,
 	})
@@ -111,7 +111,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "double-write",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "write",
 		Payload: writeReq,
 	})
@@ -122,7 +122,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "base-read-verify",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readBaseReq,
 	})
@@ -146,7 +146,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "stream-create",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: streamReq,
 	})
@@ -162,7 +162,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "stream-append-1",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "append",
 		Payload: appendReq,
 	})
@@ -173,7 +173,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "stream-read-verify",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readStreamReq,
 	})
@@ -190,7 +190,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "stream-clear",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "clear",
 		Payload: json.RawMessage(`{"id":"` + streamBuf.ID + `"}`),
 	})
@@ -200,7 +200,7 @@ func TestBufferExpansion(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "stream-read-empty",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readStreamReq,
 	})

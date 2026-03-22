@@ -49,7 +49,7 @@ Provides a layer of organization above individual resources.
 ## 4. Development Guidelines
 
 When creating a new plugin:
-1. **Use the SDK**: Always use `github.com/jnesbitt/alloy-go/pkg/wasm/guest` for a consistent experience.
+1. **Use the SDK**: Always use `github.com/james-nesbitt/alloy/pkg/wasm/guest` for a consistent experience.
 2. **Standardize Naming**: Use short, lowercase IDs without prefixes like `plugin-` or `-manager`.
 3. **Define Capabilities**: Explicitly register capabilities in the `AlloyInit` block so the system can discover your plugin's features.
 4. **Message Safety**: Use the `AlloyMessage` struct and its helper methods for IPC.

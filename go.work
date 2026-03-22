@@ -2,7 +2,7 @@ go 1.25.8
 
 use (
 	.
-	./pkg/wasm/bindings/guest
+	./build/gen/bindings/guest
 	./pkg/wasm/guest
 	./plugins/wasm/ai
 	./plugins/wasm/buffer

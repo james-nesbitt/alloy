@@ -3,8 +3,8 @@
 package main
 
 import (
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
+	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
+	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"time"

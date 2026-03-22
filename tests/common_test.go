@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 // StartCore starts the alloy-core as a subprocess and ensures it's killed when the test finishes.
@@ -117,7 +117,7 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 		"--debug",
 		"--provision", provisionPath,
 	})
-	
+
 	// Wait for socket
 	for i := 0; i < 20; i++ {
 		if _, err := os.Stat(socketPath); err == nil {
@@ -147,7 +147,7 @@ func waitForPlugins(t *testing.T, conn net.Conn, collector *MessageCollector, ex
 			ID:     id,
 			Type:   api.TypeRequest,
 			Sender: "test-waiter",
-			Target: "plugin-command-manager",
+			Target: "command-manager",
 			Method: "discover",
 		})
 
@@ -188,8 +188,8 @@ type targetPlugin struct {
 	received chan api.Message
 }
 
-func (t *targetPlugin) ID() string                      { return "target-plugin" }
-func (t *targetPlugin) Capabilities() []api.Capability { return nil }
+func (t *targetPlugin) ID() string                         { return "target-plugin" }
+func (t *targetPlugin) Capabilities() []api.Capability     { return nil }
 func (t *targetPlugin) Shutdown(ctx context.Context) error { return nil }
 func (t *targetPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	t.received <- msg

@@ -3,7 +3,7 @@
 package main
 
 import (
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
 	"encoding/json"
 )
 

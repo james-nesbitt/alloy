@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 // EventManager handles pub/sub for the Alloy ecosystem.
@@ -29,7 +29,7 @@ func (e *EventManager) SetRouter(r func(context.Context, api.Message)) {
 	e.route = r
 }
 
-func (e *EventManager) ID() string { return "plugin-events" }
+func (e *EventManager) ID() string { return "events" }
 
 func (e *EventManager) Capabilities() []api.Capability {
 	return []api.Capability{

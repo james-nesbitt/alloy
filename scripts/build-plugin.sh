@@ -12,12 +12,12 @@ mkdir -p "$BUILD_DIR"
 cd "$PLUGIN_DIR"
 
 if [ ! -f "go.mod" ]; then
-    go mod init "github.com/jnesbitt/alloy-go/plugins/wasm/$PLUGIN_NAME"
+    go mod init "github.com/james-nesbitt/alloy/plugins/wasm/$PLUGIN_NAME"
 fi
 
 # Set project-relative replacements
-go mod edit -replace github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest=../../../pkg/wasm/bindings/guest
-go mod edit -replace github.com/jnesbitt/alloy-go/pkg/wasm/guest=../../../pkg/wasm/guest
+go mod edit -replace github.com/james-nesbitt/alloy/build/gen/bindings/guest=../../../build/gen/bindings/guest
+go mod edit -replace github.com/james-nesbitt/alloy/pkg/wasm/guest=../../../pkg/wasm/guest
 sed -i 's|^go .*|go 1.25.8|' go.mod
 go mod tidy || true
 

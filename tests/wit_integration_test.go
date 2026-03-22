@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
 )
 
 func TestWITIntegration(t *testing.T) {
@@ -30,11 +31,10 @@ func TestWITIntegration(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	var receivedMessages []api.Message
@@ -56,19 +56,19 @@ func TestWITIntegration(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm2.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Close(context.Background())
 
 	// Build and load the health plugin
-	justBuildHealth := exec.Command("just", "build-plugins-plugin", "health-wasm")
+	justBuildHealth := exec.Command("just", "build-plugins-plugin", "health")
 	if err := justBuildHealth.Run(); err != nil {
 		t.Fatal(err)
 	}
 
-	healthWasm, err := os.ReadFile("build/wasm/health-wasm.wasm")
+	healthWasm, err := os.ReadFile("build/wasm/health.wasm")
 	if err != nil {
 		t.Fatal(err)
 	}

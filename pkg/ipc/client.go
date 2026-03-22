@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 type Client struct {

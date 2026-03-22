@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jnesbitt/alloy-go/pkg/wasm/guest"
+	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
 
 func TestHealthPlugin(t *testing.T) {
 	// 1. Initialize our plugin mock environment
 	wasm.ResetMock()
 	
-	p := wasm.New("plugin-health").
+	p := wasm.New("health").
 		WithCapability("status", "Get status", "h s").
 		Handle("status", func(msg wasm.Message) wasm.Message {
 			return wasm.Reply(msg, map[string]string{"status": "ok"})
@@ -23,7 +23,7 @@ func TestHealthPlugin(t *testing.T) {
 		ID:     "123",
 		Method: "status",
 		Sender: "client",
-		Target: "plugin-health",
+		Target: "health",
 	}
 	
 	output := p.MockSimulate(input)

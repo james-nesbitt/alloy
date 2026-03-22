@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
 )
 
 func TestWITPlugins(t *testing.T) {
@@ -30,11 +31,10 @@ func TestWITPlugins(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	var receivedMessages []api.Message
@@ -56,7 +56,7 @@ func TestWITPlugins(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm2.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestWITPlugins(t *testing.T) {
 		name     string
 		wasmFile string
 		caps     []api.Capability
-		tests    func(t *testing.T, manager *wasm2.Manager)
+		tests    func(t *testing.T, manager *wasm.Manager)
 	}{
 		{
 			name:     "health",
@@ -84,64 +84,64 @@ func TestWITPlugins(t *testing.T) {
 		{
 			name:     "buffer",
 			wasmFile: "build/wasm/buffer.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "create", Description: "Create buffer"},
 				{Method: "list", Description: "List buffers"},
 			},
-			tests:    testBufferPlugin,
+			tests: testBufferPlugin,
 		},
 		{
 			name:     "chat",
 			wasmFile: "build/wasm/chat.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "send", Description: "Send message"},
 				{Method: "history", Description: "Get history"},
 			},
-			tests:    testChatPlugin,
+			tests: testChatPlugin,
 		},
 		{
 			name:     "ai",
 			wasmFile: "build/wasm/ai.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "query", Description: "Query AI"},
 				{Method: "config:get", Description: "Get AI config"},
 			},
-			tests:    testAIPlugin,
+			tests: testAIPlugin,
 		},
 		{
 			name:     "project",
 			wasmFile: "build/wasm/project.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "create", Description: "Create project"},
 				{Method: "list", Description: "List projects"},
 			},
-			tests:    testProjectPlugin,
+			tests: testProjectPlugin,
 		},
 		{
 			name:     "iam",
 			wasmFile: "build/wasm/iam.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "check", Description: "Check authorization"},
 			},
-			tests:    testIAMPlugin,
+			tests: testIAMPlugin,
 		},
 		{
 			name:     "secrets",
 			wasmFile: "build/wasm/secrets.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "store_secret", Description: "Store secret"},
 				{Method: "get_secret", Description: "Get secret"},
 			},
-			tests:    testSecretsPlugin,
+			tests: testSecretsPlugin,
 		},
 		{
 			name:     "tasks",
 			wasmFile: "build/wasm/tasks.wasm",
-			caps:     []api.Capability{
+			caps: []api.Capability{
 				{Method: "create", Description: "Create task"},
 				{Method: "list", Description: "List tasks"},
 			},
-			tests:    testTasksPlugin,
+			tests: testTasksPlugin,
 		},
 	}
 
@@ -173,7 +173,7 @@ func TestWITPlugins(t *testing.T) {
 
 // Test functions for each plugin
 
-func testHealthPlugin(t *testing.T, manager *wasm2.Manager) {
+func testHealthPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test health status
 	testMsg := api.Message{
 		ID:      "test-health",
@@ -207,7 +207,7 @@ func testHealthPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testBufferPlugin(t *testing.T, manager *wasm2.Manager) {
+func testBufferPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test buffer creation
 	testMsg := api.Message{
 		ID:      "test-buffer-create",
@@ -243,7 +243,7 @@ func testBufferPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testChatPlugin(t *testing.T, manager *wasm2.Manager) {
+func testChatPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test sending a message
 	testMsg := api.Message{
 		ID:      "test-chat-send",
@@ -268,7 +268,7 @@ func testChatPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testAIPlugin(t *testing.T, manager *wasm2.Manager) {
+func testAIPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test getting AI config
 	testMsg := api.Message{
 		ID:      "test-ai-config",
@@ -304,7 +304,7 @@ func testAIPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testProjectPlugin(t *testing.T, manager *wasm2.Manager) {
+func testProjectPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test project creation
 	testMsg := api.Message{
 		ID:      "test-project-create",
@@ -340,7 +340,7 @@ func testProjectPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testIAMPlugin(t *testing.T, manager *wasm2.Manager) {
+func testIAMPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test authorization check
 	testMsg := api.Message{
 		ID:      "test-iam-check",
@@ -377,7 +377,7 @@ func testIAMPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testSecretsPlugin(t *testing.T, manager *wasm2.Manager) {
+func testSecretsPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test storing a secret
 	testMsg := api.Message{
 		ID:      "test-secrets-store",
@@ -402,7 +402,7 @@ func testSecretsPlugin(t *testing.T, manager *wasm2.Manager) {
 	}
 }
 
-func testTasksPlugin(t *testing.T, manager *wasm2.Manager) {
+func testTasksPlugin(t *testing.T, manager *wasm.Manager) {
 	// Test creating a task
 	testMsg := api.Message{
 		ID:      "test-tasks-create",

@@ -7,25 +7,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
 )
 
 // WITKernel is a kernel implementation that uses the WIT-based WASM runtime.
 type WITKernel struct {
-	logger      *slog.Logger
-	mu          sync.RWMutex
-	plugins     map[string]api.Plugin
-	metadata    map[string]api.PluginMetadata
-	loaders     map[string]api.PluginLoader
-	frontends   map[string]chan<- api.Message
+	logger       *slog.Logger
+	mu           sync.RWMutex
+	plugins      map[string]api.Plugin
+	metadata     map[string]api.PluginMetadata
+	loaders      map[string]api.PluginLoader
+	frontends    map[string]chan<- api.Message
 	interceptors []api.Interceptor
-	loading     map[string]chan struct{}
-	stopCh      chan struct{}
-	wasmManager *wasm.Manager
-	storage     storage.StateStore
-	dataDir     string
+	loading      map[string]chan struct{}
+	stopCh       chan struct{}
+	wasmManager  *wasm.Manager
+	storage      storage.StateStore
+	dataDir      string
 }
 
 // NewWITKernel creates a new WIT-based kernel.
@@ -36,20 +36,20 @@ func NewWITKernel(
 ) (*WITKernel, error) {
 	// Create the kernel
 	kernel := &WITKernel{
-		logger:      logger,
-		plugins:     make(map[string]api.Plugin),
-		metadata:    make(map[string]api.PluginMetadata),
-		loaders:     make(map[string]api.PluginLoader),
-		frontends:   make(map[string]chan<- api.Message),
-		loading:     make(map[string]chan struct{}),
-		stopCh:      make(chan struct{}),
-		storage:     storage,
-		dataDir:     dataDir,
+		logger:    logger,
+		plugins:   make(map[string]api.Plugin),
+		metadata:  make(map[string]api.PluginMetadata),
+		loaders:   make(map[string]api.PluginLoader),
+		frontends: make(map[string]chan<- api.Message),
+		loading:   make(map[string]chan struct{}),
+		stopCh:    make(chan struct{}),
+		storage:   storage,
+		dataDir:   dataDir,
 	}
 
 	// Create the WASM manager
 	router := func(ctx context.Context, msg api.Message) {
-		kernel.routeMessage(ctx, msg)
+		kernel.RouteMessage(ctx, msg)
 	}
 
 	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
@@ -70,7 +70,7 @@ func NewWITKernel(
 }
 
 // routeMessage routes messages to the appropriate destination.
-func (k *WITKernel) routeMessage(ctx context.Context, msg api.Message) {
+func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
@@ -161,8 +161,10 @@ func (k *WITKernel) lazyLoadPlugin(ctx context.Context, pluginID string) error {
 		ch := k.loading[pluginID]
 		k.mu.Unlock()
 		select {
-		case <-ch: return nil
-		case <-ctx.Done(): return ctx.Err()
+		case <-ch:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	ch := make(chan struct{})
@@ -213,7 +215,7 @@ func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 	id := plugin.ID()
 	k.plugins[id] = plugin
 	k.metadata[id] = api.PluginMetadata{
-		ID: id,
+		ID:           id,
 		Capabilities: plugin.Capabilities(),
 	}
 }
@@ -225,9 +227,9 @@ func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps [
 	}
 
 	plugin := &witPluginWrapper{
-		id:       pluginID,
-		manager:  k.wasmManager,
-		caps:     caps,
+		id:      pluginID,
+		manager: k.wasmManager,
+		caps:    caps,
 	}
 
 	k.RegisterPlugin(plugin)
@@ -293,18 +295,20 @@ func (k *WITKernel) Shutdown(ctx context.Context) error {
 
 // witPluginWrapper wraps a WASM plugin for the kernel API.
 type witPluginWrapper struct {
-	id       string
-	manager  *wasm.Manager
-	caps     []api.Capability
+	id      string
+	manager *wasm.Manager
+	caps    []api.Capability
 }
 
-func (p *witPluginWrapper) ID() string { return p.id }
+func (p *witPluginWrapper) ID() string                     { return p.id }
 func (p *witPluginWrapper) Capabilities() []api.Capability { return p.caps }
 
 func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	if msg.Type == api.TypeRequest {
 		err := p.manager.RouteMessage(ctx, p.id, msg)
-		if err != nil { return api.Message{}, err }
+		if err != nil {
+			return api.Message{}, err
+		}
 		return p.manager.GetResponse(ctx, p.id)
 	}
 	// For events, just route and return empty

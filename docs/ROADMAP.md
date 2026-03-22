@@ -11,7 +11,7 @@ Establish the micro-kernel, secure communication, and basic orchestration.
 - [x] **Message Bus**: Basic request/response and internal kernel message handling.
 - [x] **Orchestration & Discovery**:
     - [x] **Instance Tracking**: Core writes `info.json` (PID, socket, metadata) to the runtime directory.
-    - [x] **CLI Orchestration**: `alloy-cli list` and `alloy-cli stop` using the instance tracking.
+    - [x] **CLI Orchestration**: `alloy list` and `alloy stop` using the instance tracking.
     - [x] **Service Discovery**: Kernel method for clients to query active targets and their capabilities.
 - [x] **Audit & Logging**:
     - [x] **Structured Audit Log**: Persistent, tamper-evident record of identity-verified events.
@@ -35,7 +35,7 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
     - [x] Host-provided KV storage interface for WASM guests.
 - [x] **Core Plugins & Standard Services**:
     - [x] **Infrastructure Plugins**:
-        - [x] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
+        - [x] **Local Storage (`storage`)**: Virtual Filesystem (WASI) provider.
         - [x] **Identity & Access (`iam`)**: Authorization and RBAC.
         - [x] **Command Manager (`command-manager`)**: Central registry for executable actions.
         - [x] **Event Bus (`events`)**: Advanced Pub/Sub and event filtering.

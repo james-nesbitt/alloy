@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/kernel"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func TestWITKernelBasicOperations(t *testing.T) {
@@ -26,11 +26,10 @@ func TestWITKernelBasicOperations(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Test 1: Create WIT kernel
 	kernel, err := kernel.NewWITKernel(logger, kv, tempDir)
@@ -59,11 +58,10 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create WIT kernel
 	kernel, err := kernel.NewWITKernel(logger, kv, tempDir)
@@ -121,11 +119,10 @@ func TestWITKernelMessageRouting(t *testing.T) {
 
 	// Set up storage
 	storagePath := filepath.Join(tempDir, "storage")
-	kv, err := storage.NewBadgerStore(storagePath)
+	kv, err := storage.NewFileStateStore(storagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create WIT kernel
 	kernel, err := kernel.NewWITKernel(logger, kv, tempDir)

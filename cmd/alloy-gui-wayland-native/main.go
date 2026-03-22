@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/frontend"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 	"github.com/rajveermalviya/go-wayland/wayland/stable/xdg-shell"
 	"golang.org/x/sys/unix"

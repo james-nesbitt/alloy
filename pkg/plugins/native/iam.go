@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 // IdentityManager implements a native plugin that controls message routing permissions.
@@ -15,7 +15,7 @@ type IdentityManager struct {
 	logger *slog.Logger
 	state  storage.StateStore
 	mu     sync.RWMutex
-	
+
 	// policies maps sender to allowed targets
 	policies map[string]map[string]bool
 }
@@ -26,17 +26,17 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 		state:    state,
 		policies: make(map[string]map[string]bool),
 	}
-	
+
 	// Initial bootstrap policies
 	iam.policies["system"] = map[string]bool{"*": true}
 	iam.policies["kernel"] = map[string]bool{"*": true}
-	iam.policies["plugin-registry"] = map[string]bool{"*": true}
-	iam.policies["plugin-command-manager"] = map[string]bool{"*": true}
-	
+	iam.policies["registry"] = map[string]bool{"*": true}
+	iam.policies["command-manager"] = map[string]bool{"*": true}
+
 	return iam, nil
 }
 
-func (i *IdentityManager) ID() string { return "plugin-iam" }
+func (i *IdentityManager) ID() string { return "iam" }
 
 func (i *IdentityManager) Capabilities() []api.Capability {
 	return []api.Capability{

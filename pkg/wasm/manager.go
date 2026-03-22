@@ -6,19 +6,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm/runtime"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm/runtime"
 )
 
 // Manager handles WASM plugin instances.
 type Manager struct {
-	runtime    *runtime.Runtime
-	logger     *slog.Logger
-	plugins    map[string]*PluginInstance
-	mu         sync.RWMutex
-	routerFn   func(ctx context.Context, msg api.Message)
-	callFn     func(ctx context.Context, msg api.Message) (api.Message, error)
+	runtime  *runtime.Runtime
+	logger   *slog.Logger
+	plugins  map[string]*PluginInstance
+	mu       sync.RWMutex
+	routerFn func(ctx context.Context, msg api.Message)
+	callFn   func(ctx context.Context, msg api.Message) (api.Message, error)
 }
 
 // PluginInstance represents a loaded plugin instance.

@@ -29,7 +29,7 @@ Plugins extend the capabilities of the Alloy backend.
 - **Lifecycle Management**: 
     - The Backend Kernel provides low-level mechanisms for starting, stopping, and **hot-reloading** plugins.
     - The `WasmManager` supports a `reload` command that can swap a plugin's binary at runtime while preserving the registry state.
-    - High-level orchestration (downloading, upgrading, and managing the plugin catalog) is handled by the **Registry & Plugin Manager** plugin (see [Plugin Roadmap](PLUGINS_ROADMAP.md)).
+    - High-level orchestration (downloading, upgrading, and managing the plugin catalog) is handled by the **Registry & Plugin Manager** plugin (see [Plugin Roadmap](PLUGINS.md)).
 - **Discovery**: While the core supports explicit provisioning, it can also automatically discover WASM plugins in directories specified via the `--wasm-plugins` flag at startup.
 - **Standard Interface**: Plugins must implement a standard interface for message handling.
 - **Inter-Plugin Communication**: Plugins can communicate with each other via the kernel's message bus.
@@ -46,7 +46,7 @@ Plugins extend the capabilities of the Alloy backend.
     - **Storage**: Plugins use a Virtual Filesystem (WASI) scoped to a specific, kernel-managed directory.
     - **Concurrency**: Host-calls are non-blocking where possible, ensuring plugins remain responsive to the message bus.
     - **Versioning**: Uses a SemVer-based ABI. Plugins must declare their ABI version and required capabilities in a manifest.
-- **Examples**: Core functionality like buffer management, user roles, chat, and AI agents are implemented as plugins (see [Plugin Roadmap](PLUGINS_ROADMAP.md)).
+- **Examples**: Core functionality like buffer management, user roles, chat, and AI agents are implemented as plugins (see [Plugin Roadmap](PLUGINS.md)).
 - **SDK**: A core library in Go/AssemblyScript/Rust for developing plugins.
 
 ## 3. Frontends

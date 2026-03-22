@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 // ParseAddress returns the network and address for net.Listen/net.Dial.
@@ -158,7 +158,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 				ID:      "audit-conn-" + clientID,
 				Type:    api.TypeEvent,
 				Sender:  "ipc-server",
-				Target:  "plugin-events",
+				Target:  "events",
 				Method:  "publish",
 				Payload: []byte(`{"topic":"system:audit","data":{"actor":"` + clientID + `","action":"connection","status":"success","details":{"type":"mtls"}}}`),
 			})
@@ -168,7 +168,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 			ID:      "audit-conn-" + clientID,
 			Type:    api.TypeEvent,
 			Sender:  "ipc-server",
-			Target:  "plugin-events",
+			Target:  "events",
 			Method:  "publish",
 			Payload: []byte(`{"topic":"system:audit","data":{"actor":"` + clientID + `","action":"connection","status":"success","details":{"type":"plain"}}}`),
 		})

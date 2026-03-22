@@ -5,39 +5,39 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 type PluginConstructor func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error)
 
 var Registry = map[string]PluginConstructor{
-	"plugin-events": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"events": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewEventManager(logger), nil
 	},
-	"plugin-kv": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"kv": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewKVManager(state), nil
 	},
-	"plugin-cache": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"cache": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewCacheManager(), nil
 	},
-	"plugin-doc": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"doc": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewDocStore(), nil
 	},
-	"plugin-network": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"network": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewNetworkManager(), nil
 	},
-	"plugin-storage": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"storage": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewStorageManager(), nil
 	},
-	"plugin-iam": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"iam": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewIdentityManager(ctx, logger, state)
 	},
-	"plugin-health": NewHealthManagerPlugin,
-	"plugin-otel": NewTelemetryManagerPlugin,
-	"plugin-command-manager": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"health":    NewHealthManagerPlugin,
+	"telemetry": NewTelemetryManagerPlugin,
+	"command-manager": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewCommandManager(logger), nil
 	},
-	"plugin-logger": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"logger": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		auditDir := state.BaseDir()
 		if auditDir != "" {
 			auditDir = filepath.Join(filepath.Dir(auditDir), "audit")
@@ -47,7 +47,7 @@ var Registry = map[string]PluginConstructor{
 		}
 		return NewLoggerManager(logger, auditDir)
 	},
-	"plugin-ollama": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
+	"ollama": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		return NewOllamaProvider(ctx, logger, state)
 	},
 }

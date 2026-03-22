@@ -14,37 +14,37 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/frontend"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
 
 // TUI Layout components
 
 type model struct {
-	client    *frontend.Client
-	messages  []string
-	viewport  viewport.Model
-	textarea  textarea.Model
-	targets   []frontend.Registration
-	err       error
-	width     int
-	height    int
-	ready     bool
-	msgCh     chan api.Message
+	client   *frontend.Client
+	messages []string
+	viewport viewport.Model
+	textarea textarea.Model
+	targets  []frontend.Registration
+	err      error
+	width    int
+	height   int
+	ready    bool
+	msgCh    chan api.Message
 
 	// Modal interface state
-	mode          int
-	commandInput  textarea.Model
-	activeBuffer  string
-	activeChannel string
-	isLeader      bool
-	breadcrumbs   []string
-	subscriptions map[string]bool
-	commandTree   *frontend.CommandNode
-	recency       map[string]int
-	frequency     map[string]int
-	statuses      map[string]string
-	selectedCmdIdx int
+	mode            int
+	commandInput    textarea.Model
+	activeBuffer    string
+	activeChannel   string
+	isLeader        bool
+	breadcrumbs     []string
+	subscriptions   map[string]bool
+	commandTree     *frontend.CommandNode
+	recency         map[string]int
+	frequency       map[string]int
+	statuses        map[string]string
+	selectedCmdIdx  int
 	leaderMenuWidth int
 
 	activeProject *Project
@@ -72,9 +72,9 @@ const (
 )
 
 type Project struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type discoveryMsg struct {
@@ -139,7 +139,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case discoveryMsg:
 		m.targets = msg.Targets
-		if m.statuses == nil { m.statuses = make(map[string]string) }
+		if m.statuses == nil {
+			m.statuses = make(map[string]string)
+		}
 		for _, t := range m.targets {
 			if t.Status != "" {
 				m.statuses[t.ID] = t.Status
@@ -148,7 +150,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandTree = frontend.BuildCommandTree(m.targets)
 		var cmds []tea.Cmd
 		for _, t := range m.targets {
-			if t.ID == "plugin-events" && !m.subscriptions["chat:message"] {
+			if t.ID == "events" && !m.subscriptions["chat:message"] {
 				cmds = append(cmds, m.subscribe("chat:message"))
 				cmds = append(cmds, m.subscribe("chat:direct"))
 				cmds = append(cmds, m.subscribe("chat:presence"))
@@ -160,7 +162,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.subscribe("plugin:crashed"))
 				cmds = append(cmds, m.subscribe("plugin:load_failed"))
 			}
-			if t.ID == "plugin-project-manager" && m.activeProject == nil {
+			if t.ID == "project" && m.activeProject == nil {
 				cmds = append(cmds, m.fetchActiveProject())
 			}
 		}
@@ -183,7 +185,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messageMsg:
 		var displayMsg string
-		if msg.Sender == "plugin-events" && msg.Method == "project:opened" {
+		if msg.Sender == "events" && msg.Method == "project:opened" {
 			var event struct {
 				Topic string  `json:"topic"`
 				Data  Project `json:"data"`
@@ -194,14 +196,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if displayMsg == "" && msg.Sender == "plugin-project-manager" && msg.Method == "active-resp" {
+		if displayMsg == "" && msg.Sender == "project" && msg.Method == "active-resp" {
 			var p Project
 			if err := json.Unmarshal(msg.Payload, &p); err == nil {
 				m.activeProject = &p
 			}
 		}
 
-		if displayMsg == "" && msg.Sender == "plugin-project-manager" && msg.Method == "list-resp" {
+		if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-resp" {
 			var resp struct {
 				Projects []Project `json:"projects"`
 			}
@@ -212,7 +214,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if displayMsg == "" && msg.Sender == "plugin-events" {
+		if displayMsg == "" && msg.Sender == "events" {
 			switch msg.Method {
 			case "plugin:crashed":
 				var ev struct {
@@ -223,7 +225,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} `json:"data"`
 				}
 				if err := json.Unmarshal(msg.Payload, &ev); err == nil {
-					if m.statuses == nil { m.statuses = make(map[string]string) }
+					if m.statuses == nil {
+						m.statuses = make(map[string]string)
+					}
 					m.statuses[ev.Data.ID] = "crashed"
 					displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render(
 						fmt.Sprintf("[%s] !!! Plugin %s CRASHED: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
@@ -355,7 +359,7 @@ func (m model) subscribe(topic string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		payload, _ := json.Marshal(map[string]string{"topic": topic})
-		_, _ = m.client.Send(ctx, "plugin-events", "subscribe", payload)
+		_, _ = m.client.Send(ctx, "events", "subscribe", payload)
 		return nil
 	}
 }
@@ -382,7 +386,7 @@ func (m model) sendChatMessage(content string) tea.Cmd {
 			})
 		}
 
-		_, err := m.client.Send(ctx, "plugin-chat", method, payload)
+		_, err := m.client.Send(ctx, "chat", method, payload)
 		if err != nil {
 			return errMsg(err)
 		}
@@ -397,7 +401,7 @@ func (m model) sendPresenceHeartbeat() tea.Cmd {
 		payload, _ := json.Marshal(map[string]string{
 			"status": "online",
 		})
-		_, _ = m.client.Send(ctx, "plugin-chat", "presence:update", payload)
+		_, _ = m.client.Send(ctx, "chat", "presence:update", payload)
 		return nil
 	}
 }
@@ -406,7 +410,7 @@ func (m model) fetchActiveProject() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		resp, _ := m.client.Send(ctx, "plugin-project-manager", "active", nil)
+		resp, _ := m.client.Send(ctx, "project", "active", nil)
 		if resp.ID != "" {
 			resp.Method = "active-resp"
 			return messageMsg(resp)
@@ -419,7 +423,7 @@ func (m model) fetchProjects() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		resp, _ := m.client.Send(ctx, "plugin-project-manager", "list", nil)
+		resp, _ := m.client.Send(ctx, "project", "list", nil)
 		if resp.ID != "" {
 			resp.Method = "list-resp"
 			return messageMsg(resp)
@@ -467,7 +471,7 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 				m.commandInput.Blur()
 				m.selectType = SelectNone
 				m.commandInput.SetValue("")
-				return m.executeCommand(fmt.Sprintf("plugin-project-manager open %s", opt.Raw))
+				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
 			}
 			if m.isLeader {
 				if opt.IsDir {
@@ -579,7 +583,7 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
-					resp, _ := m.client.Send(ctx, "plugin-project-manager", "create", payload)
+					resp, _ := m.client.Send(ctx, "project", "create", payload)
 					return messageMsg(resp)
 				}
 
@@ -595,7 +599,7 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
-					resp, _ := m.client.Send(ctx, "plugin-ai-agent", "provider:set", payload)
+					resp, _ := m.client.Send(ctx, "ai", "provider:set", payload)
 					return messageMsg(resp)
 				}
 
@@ -607,7 +611,7 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
-					resp, _ := m.client.Send(ctx, "plugin-ai-agent", "query", payload)
+					resp, _ := m.client.Send(ctx, "ai", "query", payload)
 					return messageMsg(resp)
 				}
 			}
@@ -624,7 +628,7 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 func (m model) doDiscovery() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	resp, err := m.client.Send(ctx, "plugin-command-manager", "discover", nil)
+	resp, err := m.client.Send(ctx, "command-manager", "discover", nil)
 	if err != nil {
 		return nil
 	}
@@ -653,7 +657,7 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 
 	verb := parts[0]
 	switch verb {
-	case "ai", "plugin-ai-agent":
+	case "ai":
 		if len(parts) >= 2 && (parts[1] == "switch" || parts[1] == "provider:set") {
 			m.mode = ModeForm
 			m.formTitle = "Switch AI Provider"
@@ -678,7 +682,7 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-	case "p", "plugin-project-manager":
+	case "p", "project":
 		if len(parts) >= 2 && parts[1] == "open" {
 			if len(parts) == 2 {
 				m.mode = ModeCommand
@@ -725,10 +729,14 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 			target := parts[0]
 			method := parts[1]
 			payload := ""
-			
+
 			// Increment recency & frequency for "plugin-id method"
-			if m.recency == nil { m.recency = make(map[string]int) }
-			if m.frequency == nil { m.frequency = make(map[string]int) }
+			if m.recency == nil {
+				m.recency = make(map[string]int)
+			}
+			if m.frequency == nil {
+				m.frequency = make(map[string]int)
+			}
 			key := target + " " + method
 			m.recency[key] = int(time.Now().Unix())
 			m.frequency[key]++
@@ -804,24 +812,34 @@ func (m model) filteredCommands() []CommandOption {
 		sort.Slice(results, func(i, j int) bool {
 			// 1. Status priority
 			if results[i].Status != results[j].Status {
-				if results[i].Status == "crashed" { return false }
-				if results[j].Status == "crashed" { return true }
+				if results[i].Status == "crashed" {
+					return false
+				}
+				if results[j].Status == "crashed" {
+					return true
+				}
 			}
-			
+
 			// 2. Exact prefix match bonus
 			prefI := strings.HasPrefix(results[i].Display, input)
 			prefJ := strings.HasPrefix(results[j].Display, input)
-			if prefI != prefJ { return prefI }
+			if prefI != prefJ {
+				return prefI
+			}
 
 			// 3. Recency (last used in session)
 			ri := m.recency[results[i].Raw]
 			rj := m.recency[results[j].Raw]
-			if ri != rj { return ri > rj }
+			if ri != rj {
+				return ri > rj
+			}
 
 			// 4. Frequency
 			fi := results[i].Frequency
 			fj := results[j].Frequency
-			if fi != fj { return fi > fj }
+			if fi != fj {
+				return fi > fj
+			}
 
 			return results[i].Display < results[j].Display
 		})
@@ -855,16 +873,22 @@ func (m model) filteredCommands() []CommandOption {
 					})
 				}
 			}
-			
+
 			// Weight by recency/frequency/status
 			sort.Slice(results, func(i, j int) bool {
 				if results[i].Status != results[j].Status {
-					if results[i].Status == "crashed" { return false }
-					if results[j].Status == "crashed" { return true }
+					if results[i].Status == "crashed" {
+						return false
+					}
+					if results[j].Status == "crashed" {
+						return true
+					}
 				}
 				ri := m.recency[results[i].Raw]
 				rj := m.recency[results[j].Raw]
-				if ri != rj { return ri > rj }
+				if ri != rj {
+					return ri > rj
+				}
 
 				return results[i].Display < results[j].Display
 			})
@@ -881,7 +905,7 @@ func (m model) leaderMenuView() string {
 	if !m.isLeader {
 		return ""
 	}
-	
+
 	node := m.commandTree.Find(m.breadcrumbs)
 	if node == nil {
 		return ""
@@ -901,19 +925,21 @@ func (m model) leaderMenuView() string {
 		if len(child.Children) > 0 {
 			desc = "..."
 		}
-		
+
 		item := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("226")).Bold(true).Render(label) + " " + 
+			Foreground(lipgloss.Color("226")).Bold(true).Render(label) + " " +
 			lipgloss.NewStyle().Foreground(lipgloss.Color("200")).Render("→") + " " +
 			lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render(desc)
-		
+
 		items = append(items, item)
 	}
 
 	// Calculate column layout - simple for now, but better than flat list
 	columnCount := 3
-	if len(items) < 5 { columnCount = 1 }
-	
+	if len(items) < 5 {
+		columnCount = 1
+	}
+
 	var rows []string
 	for i := 0; i < len(items); i += columnCount {
 		rowItems := items[i:min(i+columnCount, len(items))]
@@ -926,9 +952,9 @@ func (m model) leaderMenuView() string {
 
 	title := " " + strings.Join(append([]string{"Leader"}, m.breadcrumbs...), " > ") + " "
 	titleStyle := lipgloss.NewStyle().Background(lipgloss.Color("62")).Foreground(lipgloss.Color("255")).Bold(true)
-	
+
 	menuBody := strings.Join(rows, "\n")
-	
+
 	menuStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
@@ -938,7 +964,9 @@ func (m model) leaderMenuView() string {
 }
 
 func min(a, b int) int {
-	if a < b { return a }
+	if a < b {
+		return a
+	}
 	return b
 }
 
@@ -1021,14 +1049,19 @@ func (m model) View() string {
 				var rows []string
 				for i, opt := range filtered {
 					label := opt.Display
-					
+
 					statusStr := ""
 					switch opt.Status {
-					case "crashed": statusStr = " (CRASHED)"
-					case "error":   statusStr = " (ERROR)"
-					case "loading": statusStr = " (LOADING...)"
-					case "registered": statusStr = " (LAZY)"
-					case "active":    statusStr = "" // Active is normal, omit for brevity
+					case "crashed":
+						statusStr = " (CRASHED)"
+					case "error":
+						statusStr = " (ERROR)"
+					case "loading":
+						statusStr = " (LOADING...)"
+					case "registered":
+						statusStr = " (LAZY)"
+					case "active":
+						statusStr = "" // Active is normal, omit for brevity
 					}
 
 					if m.isLeader {

@@ -9,14 +9,14 @@ import (
 )
 
 type Entry struct {
-	Timestamp  time.Time      `json:"timestamp"`
-	Actor      string         `json:"actor"`
-	Action     string         `json:"action"`
-	Target     string         `json:"target,omitempty"`
-	Status     string         `json:"status"`
-	TraceID    string         `json:"trace_id,omitempty"`
-	SpanID     string         `json:"span_id,omitempty"`
-	Details    map[string]any `json:"details,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
+	Actor     string         `json:"actor"`
+	Action    string         `json:"action"`
+	Target    string         `json:"target,omitempty"`
+	Status    string         `json:"status"`
+	TraceID   string         `json:"trace_id,omitempty"`
+	SpanID    string         `json:"span_id,omitempty"`
+	Details   map[string]any `json:"details,omitempty"`
 }
 
 type Logger struct {

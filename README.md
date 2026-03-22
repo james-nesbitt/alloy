@@ -12,7 +12,21 @@ To build the entire project (Core, Plugins, GUIs, CLI):
 just all
 ```
 
+The primary entry point is the `alloy` tool:
+
+```bash
+# Start a standalone core
+./build/bin/alloy core --listen unix://./alloy.sock
+
+# Start TUI with a dedicated core instance
+./build/bin/alloy tui --dedicated
+
+# Connect TUI to an existing backend
+./build/bin/alloy tui --socket unix://./alloy.sock
+```
+
 The resulting binaries will be placed in the `./build/` directory:
+- `./build/bin/alloy`: Unified CLI entry point
 - `./build/bin/alloy-core`: Main backend kernel
 - `./build/bin/alloy-tui`: Terminal user interface
 - `./build/bin/alloy-gui`: Native graphical user interface

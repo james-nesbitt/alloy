@@ -15,7 +15,7 @@ This document defines how AI agents, like yourselves, should interact with the A
 ## Project Structure Guidelines
 
 - **`cmd/alloy-core`**: The main backend server.
-- **`cmd/alloy-cli`**: Tooling for managing backends.
+- **`cmd/alloy`**: Tooling for managing backends.
 - **`cmd/alloy-tui`**, `cmd/alloy-gui`, `cmd/alloy-web`: Frontend entry points.
 - **`pkg/kernel`**: Core logic for the backend.
 - **`pkg/wasm`**: WASM runtime and plugin management logic.

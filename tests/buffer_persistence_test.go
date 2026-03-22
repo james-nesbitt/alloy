@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestBufferPersistence(t *testing.T) {
@@ -17,10 +17,10 @@ func TestBufferPersistence(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-kv", "type": "native"},
-			{"id": "plugin-buffer-manager", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
+			{"id": "command-manager", "type": "native"},
+			{"id": "events", "type": "native"},
+			{"id": "kv", "type": "native"},
+			{"id": "buffer", "type": "wasm", "path": bufferWasmPath, "memory_limit": 128},
 		},
 	}
 
@@ -28,7 +28,7 @@ func TestBufferPersistence(t *testing.T) {
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, collector, []string{"plugin-buffer-manager"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"buffer"}, 30*time.Second)
 
 	// 1. Create a buffer
 	createReq, _ := json.Marshal(map[string]any{
@@ -38,7 +38,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "create-req",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "create",
 		Payload: createReq,
 	})
@@ -52,7 +52,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "save-req",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "save",
 		Payload: saveReq,
 	})
@@ -71,7 +71,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "del-req",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "delete",
 		Payload: delReq,
 	})
@@ -81,7 +81,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "list-req-1",
 		Sender: "user",
-		Target: "plugin-buffer-manager",
+		Target: "buffer",
 		Method: "list",
 	})
 	resp = awaitResponse(t, collector, "list-req-1-resp")
@@ -97,7 +97,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "load-req",
 		Sender: "user",
-		Target: "plugin-buffer-manager",
+		Target: "buffer",
 		Method: "load",
 	})
 	awaitResponse(t, collector, "load-req-resp")
@@ -109,7 +109,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "list-req-2",
 		Sender: "user",
-		Target: "plugin-buffer-manager",
+		Target: "buffer",
 		Method: "list",
 	})
 	resp = awaitResponse(t, collector, "list-req-2-resp")
@@ -123,7 +123,7 @@ func TestBufferPersistence(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:      "read-req",
 		Sender:  "user",
-		Target:  "plugin-buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: readReq,
 	})

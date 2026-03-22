@@ -1,4 +1,4 @@
-package wasm2_test
+package wasm_test
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
 )
 
 func TestWITPluginIntegration(t *testing.T) {
@@ -18,7 +18,7 @@ func TestWITPluginIntegration(t *testing.T) {
 	t.Skip("WIT integration test - implementation in progress")
 
 	// Create a temporary directory for test data
-	tempDir, err := os.MkdirTemp("", "wasm2-integration-test")
+	tempDir, err := os.MkdirTemp("", "wasm-integration-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,11 +35,10 @@ func TestWITPluginIntegration(t *testing.T) {
 	}
 
 	// Set up storage
-	kv, err := storage.NewBadgerStore(filepath.Join(tempDir, "storage"))
+	kv, err := storage.NewFileStateStore(filepath.Join(tempDir, "storage"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kv.Close()
 
 	// Create message router
 	var receivedMessages []api.Message
@@ -61,7 +60,7 @@ func TestWITPluginIntegration(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm2.NewManager(nil, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(nil, kv, filepath.Join(tempDir, "plugins"), router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

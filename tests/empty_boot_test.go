@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestEmptyBoot(t *testing.T) {
@@ -51,7 +51,7 @@ func TestEmptyBoot(t *testing.T) {
 		Target: "kernel",
 		Method: "ping",
 	}
-	
+
 	sendMsg(t, conn, pingMsg)
 	collector := NewMessageCollector(json.NewDecoder(conn))
 	resp := awaitResponse(t, collector, "ping-1")
@@ -63,10 +63,10 @@ func TestEmptyBoot(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "bad-req-1",
 		Sender: "test-frontend",
-		Target: "plugin-kv", // Only exists if provisioned
+		Target: "kv", // Only exists if provisioned
 		Method: "set",
 	})
-	
+
 	// We expect NO response or a warning in logs, but since we're in a test
 	// we'll just wait a bit and move on.
 	time.Sleep(1 * time.Second)

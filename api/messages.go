@@ -59,7 +59,7 @@ type Plugin interface {
 	Shutdown(ctx context.Context) error
 }
 
-// ReadinessProvider is an optional interface for plugins that need time to 
+// ReadinessProvider is an optional interface for plugins that need time to
 // initialize after loading but before receiving their first message.
 type ReadinessProvider interface {
 	Ready(ctx context.Context) error
@@ -80,7 +80,7 @@ func (m Message) SpanContext() (trace.SpanContext, bool) {
 	if m.Metadata == nil {
 		return trace.SpanContext{}, false
 	}
-	
+
 	traceIDStr, ok1 := m.Metadata["trace_id"].(string)
 	spanIDStr, ok2 := m.Metadata["span_id"].(string)
 	if !ok1 || !ok2 {
@@ -112,7 +112,7 @@ func (m *Message) InjectSpanContext(sc trace.SpanContext) {
 	m.Metadata["span_id"] = sc.SpanID().String()
 }
 
-// Interceptor is an optional interface that plugins can implement to intercept 
+// Interceptor is an optional interface that plugins can implement to intercept
 // and potentially filter or modify messages before they are routed by the kernel.
 type Interceptor interface {
 	PreRoute(ctx context.Context, msg Message) (Message, bool, error)

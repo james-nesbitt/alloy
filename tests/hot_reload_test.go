@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestHotReloading(t *testing.T) {
-	// 1. Setup core with plugin-wasm-manager and health-wasm
+	// 1. Setup core with wasm-manager and health
 	cwd, _ := os.Getwd()
 	healthPath := filepath.Join(filepath.Dir(cwd), "build/wasm/health.wasm")
-	
+
 	// Ensure it exists
 	if _, err := os.Stat(healthPath); err != nil {
 		t.Skip("build/wasm/health.wasm not found, run just build-all first")
@@ -22,10 +22,10 @@ func TestHotReloading(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "plugin-command-manager", "type": "native"},
-			{"id": "plugin-events", "type": "native"},
-			{"id": "plugin-wasm-manager", "type": "native"},
-			{"id": "plugin-iam", "type": "native"},
+			{"id": "command-manager", "type": "native"},
+			{"id": "events", "type": "native"},
+			{"id": "wasm-manager", "type": "native"},
+			{"id": "iam", "type": "native"},
 		},
 	}
 
@@ -36,20 +36,20 @@ func TestHotReloading(t *testing.T) {
 	// 2. Load the health plugin
 	loadID := "load-1"
 	loadPayload, _ := json.Marshal(map[string]any{
-		"id":   "plugin-health",
+		"id":   "health",
 		"path": healthPath,
 	})
 	sendMsg(t, conn, api.Message{
 		ID:      loadID,
 		Type:    api.TypeRequest,
 		Sender:  "test-loader",
-		Target:  "plugin-wasm-manager",
+		Target:  "wasm-manager",
 		Method:  "load",
 		Payload: loadPayload,
 	})
 
 	// Wait for registration
-	waitForPlugins(t, conn, collector, []string{"plugin-health"}, 10*time.Second)
+	waitForPlugins(t, conn, collector, []string{"health"}, 10*time.Second)
 
 	// 3. Verify health works
 	pingID := "ping-v1"
@@ -57,7 +57,7 @@ func TestHotReloading(t *testing.T) {
 		ID:     pingID,
 		Type:   api.TypeRequest,
 		Sender: "test-pinger",
-		Target: "plugin-health",
+		Target: "health",
 		Method: "status",
 	})
 	resp1 := awaitResponse(t, collector, pingID)
@@ -71,12 +71,12 @@ func TestHotReloading(t *testing.T) {
 
 	// 4. Enable Watch
 	watchID := "watch-1"
-	watchPayload, _ := json.Marshal(map[string]any{"id": "plugin-health"})
+	watchPayload, _ := json.Marshal(map[string]any{"id": "health"})
 	sendMsg(t, conn, api.Message{
 		ID:      watchID,
 		Type:    api.TypeRequest,
 		Sender:  "test-watcher",
-		Target:  "plugin-wasm-manager",
+		Target:  "wasm-manager",
 		Method:  "watch",
 		Payload: watchPayload,
 	})
@@ -97,7 +97,7 @@ func TestHotReloading(t *testing.T) {
 		ID:     ping2ID,
 		Type:   api.TypeRequest,
 		Sender: "test-pinger",
-		Target: "plugin-health",
+		Target: "health",
 		Method: "status",
 	})
 	resp2 := awaitResponse(t, collector, ping2ID)

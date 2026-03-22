@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/kernel"
-	"github.com/jnesbitt/alloy-go/pkg/plugins/native"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/plugins/native"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func TestIAMInterceptor(t *testing.T) {
@@ -56,7 +56,7 @@ func TestIAMInterceptor(t *testing.T) {
 		})
 		k.RouteMessage(noAuditCtx, api.Message{
 			Method:  "allow",
-			Target:  "plugin-iam",
+			Target:  "iam",
 			Payload: payload,
 		})
 
@@ -87,7 +87,7 @@ func TestIAMInterceptor(t *testing.T) {
 		})
 		k.RouteMessage(noAuditCtx, api.Message{
 			Method:  "allow",
-			Target:  "plugin-iam",
+			Target:  "iam",
 			Payload: payload,
 		})
 

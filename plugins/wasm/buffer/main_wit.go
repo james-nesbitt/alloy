@@ -3,8 +3,8 @@
 package main
 
 import (
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
-	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
+	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
+	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -34,7 +34,7 @@ var (
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = NewPlugin("buffer-manager").
+	plugin = NewPlugin("buffer").
 		WithMetadata(
 			"Buffer Manager", 
 			"Manages data buffers for the system",
@@ -429,8 +429,8 @@ func notifyAll(id string, event string) {
 	plugin.RouteMessage(AlloyMessage{
 		Id:      "evt-pub-" + tid,
 		Method:  "publish",
-		Sender:  "buffer-manager",
-		Target:  Some("plugin-events"),
+		Sender:  "buffer",
+		Target:  Some("events"),
 		Payload: payload,
 	})
 
@@ -439,7 +439,7 @@ func notifyAll(id string, event string) {
 		plugin.RouteMessage(AlloyMessage{
 			Id:      "evt-sub-" + tid,
 			Method:  "update",
-			Sender:  "buffer-manager",
+			Sender:  "buffer",
 			Target:  Some(sub),
 			Payload: payload,
 		})

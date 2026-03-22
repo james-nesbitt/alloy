@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/ipc"
-	"github.com/jnesbitt/alloy-go/pkg/kernel"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/ipc"
+	"github.com/james-nesbitt/alloy/pkg/kernel"
 )
 
 func TestIPCMessageFlow(t *testing.T) {

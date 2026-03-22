@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 // CacheManager handles high-speed transient data.
 type CacheManager struct{}
 
 func NewCacheManager() *CacheManager { return &CacheManager{} }
-func (c *CacheManager) ID() string   { return "plugin-cache" }
+func (c *CacheManager) ID() string   { return "cache" }
 func (c *CacheManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "get", Description: "Get cached value"},
@@ -34,7 +34,7 @@ func (c *CacheManager) Shutdown(ctx context.Context) error { return nil }
 type DocStore struct{}
 
 func NewDocStore() *DocStore   { return &DocStore{} }
-func (d *DocStore) ID() string { return "plugin-doc" }
+func (d *DocStore) ID() string { return "doc" }
 func (d *DocStore) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "find", Description: "Query documents"},
@@ -57,7 +57,7 @@ func (d *DocStore) Shutdown(ctx context.Context) error { return nil }
 type NetworkManager struct{}
 
 func NewNetworkManager() *NetworkManager { return &NetworkManager{} }
-func (n *NetworkManager) ID() string     { return "plugin-network" }
+func (n *NetworkManager) ID() string     { return "network" }
 func (n *NetworkManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "fetch", Description: "Perform a policy-checked HTTP request"},
@@ -79,7 +79,7 @@ func (n *NetworkManager) Shutdown(ctx context.Context) error { return nil }
 type StorageManager struct{}
 
 func NewStorageManager() *StorageManager { return &StorageManager{} }
-func (s *StorageManager) ID() string     { return "plugin-storage" }
+func (s *StorageManager) ID() string     { return "storage" }
 func (s *StorageManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "list", Description: "List files in a scoped directory"},

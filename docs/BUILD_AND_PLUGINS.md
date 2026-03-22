@@ -36,7 +36,7 @@ build/
 ├── bin/             # Host binaries
 │   ├── alloy-core   # Main backend
 │   ├── alloy-tui    # Terminal interface
-│   ├── alloy-cli    # Command line tool
+│   ├── alloy    # Command line tool
 │   └── alloy-gui    # Gio-based native GUI
 └── wasm/            # Compiled WASM plugins
     ├── ai.wasm

@@ -22,8 +22,8 @@ The `pkg/frontend` package provides a high-level Go SDK for building new fronten
 
 ### 1.3 Message Protocol
 Frontends interact with the system by sending `api.Message` structures.
-- **Targeting**: Frontends can address messages to the `kernel`, native internal plugins (e.g., `plugin-iam`), or WASM-based application plugins.
-- **Capabilities**: Frontends typically start by sending a `discover` request to the `plugin-command-manager` to learn what actions are currently available in the running core instance.
+- **Targeting**: Frontends can address messages to the `kernel`, native internal plugins (e.g., `iam`), or WASM-based application plugins.
+- **Capabilities**: Frontends typically start by sending a `discover` request to the `command-manager` to learn what actions are currently available in the running core instance.
 
 ---
 
@@ -60,7 +60,7 @@ Frontends interact with the system by sending `api.Message` structures.
 ## 3. Developing a New Frontend
 
 To create a new frontend for Alloy:
-1. Import `github.com/jnesbitt/alloy-go/pkg/frontend`.
+1. Import `github.com/james-nesbitt/alloy/pkg/frontend`.
 2. Initialize a `frontend.NewClient` with a unique name and the path to the `alloy-core` socket.
 3. Use `client.OnMessage` to update your UI state when events arrive.
 4. Implement a message-sending loop using `client.Send`.

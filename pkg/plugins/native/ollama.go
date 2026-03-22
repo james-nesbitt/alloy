@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 type OllamaProvider struct {
@@ -22,20 +22,20 @@ func NewOllamaProvider(ctx context.Context, logger *slog.Logger, state storage.S
 	}, nil
 }
 
-func (o *OllamaProvider) ID() string { return "plugin-ollama" }
+func (o *OllamaProvider) ID() string { return "ollama" }
 
 func (o *OllamaProvider) Capabilities() []api.Capability {
 	return []api.Capability{
 		{
-			Method: "generate", 
+			Method:      "generate",
 			Description: "Generate text using local Ollama model",
 			Annotations: map[string]string{
-				"type": "llm",
+				"type":     "llm",
 				"provider": "ollama",
 			},
 		},
 		{
-			Method: "models", 
+			Method:      "models",
 			Description: "List available local models",
 		},
 	}
@@ -57,23 +57,23 @@ func (o *OllamaProvider) HandleMessage(ctx context.Context, msg api.Message) (ap
 		}
 		payload, _ := json.Marshal(res)
 		return api.Message{
-			ID:      msg.ID + "-resp",
-			Type:    api.TypeResponse,
-			Sender:  o.ID(),
-			Target:  msg.Sender,
-			Payload: payload,
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    o.ID(),
+			Target:    msg.Sender,
+			Payload:   payload,
 			Timestamp: time.Now().Unix(),
 		}, nil
-		
+
 	case "models":
 		res := []string{"llama3", "mistral", "phi3"}
 		payload, _ := json.Marshal(map[string]any{"models": res})
 		return api.Message{
-			ID:      msg.ID + "-resp",
-			Type:    api.TypeResponse,
-			Sender:  o.ID(),
-			Target:  msg.Sender,
-			Payload: payload,
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    o.ID(),
+			Target:    msg.Sender,
+			Payload:   payload,
 			Timestamp: time.Now().Unix(),
 		}, nil
 	}

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
+	"github.com/james-nesbitt/alloy/api"
 )
 
 type registration struct {
@@ -39,14 +39,14 @@ func (c *CommandManager) SetRouter(r func(context.Context, api.Message)) {
 		ID:        "sub-cm-reg",
 		Type:      api.TypeRequest,
 		Sender:    c.ID(),
-		Target:    "plugin-events",
+		Target:    "events",
 		Method:    "subscribe",
 		Payload:   []byte(`{"topic":"component:registered"}`),
 		Timestamp: time.Now().Unix(),
 	})
 }
 
-func (c *CommandManager) ID() string { return "plugin-command-manager" }
+func (c *CommandManager) ID() string { return "command-manager" }
 
 func (c *CommandManager) Capabilities() []api.Capability {
 	return []api.Capability{
@@ -76,7 +76,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		if err := json.Unmarshal(msg.Payload, &reg); err != nil {
 			return api.Message{}, err
 		}
-		
+
 		id := reg.ID
 		if id == "" {
 			id = msg.Sender
@@ -84,7 +84,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 
 		c.logger.Info("registering component in command-manager", "id", id, "type", reg.Type, "status", reg.Status)
 		c.mu.Lock()
-		
+
 		existing := c.registry[id]
 		if reg.Capabilities != nil {
 			existing.Capabilities = reg.Capabilities
@@ -94,7 +94,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		}
 		existing.ID = id
 		existing.Type = reg.Type
-		
+
 		c.registry[id] = existing
 		c.mu.Unlock()
 		if msg.Sender == "" {

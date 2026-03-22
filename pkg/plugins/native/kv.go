@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/storage"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 // KVManager is a facade for the host KV store.
@@ -18,7 +18,7 @@ func NewKVManager(kv storage.StateStore) *KVManager {
 	return &KVManager{kv: kv}
 }
 
-func (k *KVManager) ID() string { return "plugin-kv" }
+func (k *KVManager) ID() string { return "kv" }
 
 func (k *KVManager) Capabilities() []api.Capability {
 	return []api.Capability{

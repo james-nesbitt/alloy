@@ -25,8 +25,8 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/frontend"
+	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
 
 type Project struct {
@@ -134,7 +134,7 @@ func run(w *app.Window, client *frontend.Client) error {
 	go func() {
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			resp, err := client.Send(ctx, "plugin-command-manager", "discover", nil)
+			resp, err := client.Send(ctx, "command-manager", "discover", nil)
 			cancel()
 			if err == nil {
 				var dMsg discoveryMsg
@@ -144,30 +144,30 @@ func run(w *app.Window, client *frontend.Client) error {
 
 					// Auto-subscribe to events and fetch active project
 					for _, t := range gui.targets {
-						if t.ID == "plugin-events" {
+						if t.ID == "events" {
 							if !gui.subscriptions["project:opened"] {
 								subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
 								subReq, _ := json.Marshal(map[string]string{"topic": "project:opened"})
-								_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq)
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq)
 								subCancel()
 								gui.subscriptions["project:opened"] = true
 							}
 							if !gui.subscriptions["plugin:crashed"] {
 								subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
 								subReq, _ := json.Marshal(map[string]string{"topic": "plugin:crashed"})
-								_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq)
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq)
 								subReq2, _ := json.Marshal(map[string]string{"topic": "plugin:load_failed"})
-								_, _ = client.Send(subCtx, "plugin-events", "subscribe", subReq2)
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq2)
 								subCancel()
 								gui.subscriptions["plugin:crashed"] = true
 							}
 						}
-						if t.ID == "plugin-project-manager" {
+						if t.ID == "project" {
 							if gui.activeProject == nil {
 								go func() {
 									pCtx, pCancel := context.WithTimeout(context.Background(), time.Second)
 									defer pCancel()
-									pResp, err := client.Send(pCtx, "plugin-project-manager", "active", nil)
+									pResp, err := client.Send(pCtx, "project", "active", nil)
 									if err == nil && pResp.ID != "" {
 										var p Project
 										if err := json.Unmarshal(pResp.Payload, &p); err == nil {
@@ -181,7 +181,7 @@ func run(w *app.Window, client *frontend.Client) error {
 							go func() {
 								pCtx, pCancel := context.WithTimeout(context.Background(), time.Second)
 								defer pCancel()
-								pResp, err := client.Send(pCtx, "plugin-project-manager", "list", nil)
+								pResp, err := client.Send(pCtx, "project", "list", nil)
 								if err == nil {
 									var resp struct {
 										Projects []Project `json:"projects"`
@@ -203,7 +203,7 @@ func run(w *app.Window, client *frontend.Client) error {
 
 	// Refresh UI on incoming messages
 	client.OnMessage(func(msg api.Message) {
-		if msg.Sender == "plugin-events" {
+		if msg.Sender == "events" {
 			var ev struct {
 				Topic string  `json:"topic"`
 				Data  Project `json:"data"`
@@ -337,7 +337,7 @@ func run(w *app.Window, client *frontend.Client) error {
 			// Handle project clicks
 			for i, p := range gui.projects {
 				if projClicks[i].Clicked(gtx) {
-					executeCommand(client, &gui, "plugin-project-manager open "+p.ID, w)
+					executeCommand(client, &gui, "project open "+p.ID, w)
 					gui.showProjects = false
 				}
 			}
@@ -631,7 +631,7 @@ func run(w *app.Window, client *frontend.Client) error {
 																		"name":        name,
 																		"description": description,
 																	})
-																	go client.Send(context.Background(), "plugin-project-manager", "create", payload)
+																	go client.Send(context.Background(), "project", "create", payload)
 																	gui.mode = ModeNormal
 																	gui.projectCreate.name.SetText("")
 																	gui.projectCreate.description.SetText("")
@@ -682,7 +682,7 @@ func run(w *app.Window, client *frontend.Client) error {
 												m := gui.aiSwitch.model.Text()
 												u := gui.aiSwitch.url.Text()
 												payload, _ := json.Marshal(map[string]string{"type": t, "model": m, "url": u})
-												go client.Send(context.Background(), "plugin-ai-agent", "provider:set", payload)
+												go client.Send(context.Background(), "ai", "provider:set", payload)
 												gui.mode = ModeNormal
 											}
 											return material.Button(th, &gui.aiSwitch.submit, "Switch").Layout(gtx)
@@ -715,7 +715,7 @@ func run(w *app.Window, client *frontend.Client) error {
 											if gui.aiQuery.submit.Clicked(gtx) {
 												p := gui.aiQuery.prompt.Text()
 												payload, _ := json.Marshal(map[string]string{"prompt": p})
-												go client.Send(context.Background(), "plugin-ai-agent", "query", payload)
+												go client.Send(context.Background(), "ai", "query", payload)
 												gui.mode = ModeNormal
 											}
 											return material.Button(th, &gui.aiQuery.submit, "Ask").Layout(gtx)
@@ -742,7 +742,7 @@ func paintOverlay(gtx layout.Context, c color.NRGBA) {
 
 func formatMessage(msg api.Message) string {
 	ts := time.Unix(msg.Timestamp, 0).Format("15:04:05")
-	if msg.Sender == "plugin-events" {
+	if msg.Sender == "events" {
 		switch msg.Method {
 		case "plugin:crashed", "plugin:load_failed":
 			var ev struct {
@@ -795,25 +795,25 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 			payload = strings.Join(parts[2:], " ")
 		}
 
-		if target == "plugin-project-manager" && method == "open" && payload == "" {
+		if target == "project" && method == "open" && payload == "" {
 			gui.showProjects = !gui.showProjects
 			w.Invalidate()
 			return
 		}
 
-		if target == "plugin-project-manager" && method == "create" && payload == "" {
+		if target == "project" && method == "create" && payload == "" {
 			gui.mode = ModeProjectCreate
 			w.Invalidate()
 			return
 		}
 
-		if (target == "plugin-ai-agent" || target == "ai") && (method == "switch" || method == "provider:set") && payload == "" {
+		if (target == "ai") && (method == "switch" || method == "provider:set") && payload == "" {
 			gui.mode = ModeAiSwitch
 			w.Invalidate()
 			return
 		}
 
-		if (target == "plugin-ai-agent" || target == "ai") && method == "query" && payload == "" {
+		if (target == "ai") && method == "query" && payload == "" {
 			gui.mode = ModeAiQuery
 			w.Invalidate()
 			return
