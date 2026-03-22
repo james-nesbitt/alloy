@@ -66,6 +66,9 @@ func BuildCommandTree(regs []Registration) *CommandNode {
 
 // Find locates a node by its sequential key path.
 func (n *CommandNode) Find(path []string) *CommandNode {
+	if n == nil {
+		return nil
+	}
 	curr := n
 	for _, k := range path {
 		if child, ok := curr.Children[k]; ok {
@@ -92,6 +95,9 @@ type SearchItem struct {
 // Flatten extracts all leaf commands from the tree.
 func (n *CommandNode) Flatten(prefix string) []SearchItem {
 	var results []SearchItem
+	if n == nil {
+		return results
+	}
 
 	for _, child := range n.Children {
 		newPrefix := child.Key

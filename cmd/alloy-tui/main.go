@@ -789,6 +789,10 @@ func (m model) filteredCommands() []CommandOption {
 			input = input[1:]
 		}
 
+		if m.commandTree == nil {
+			return nil
+		}
+
 		// Flatten the entire tree and fuzzy find
 		flattened := m.commandTree.Flatten("")
 		for _, item := range flattened {
@@ -902,7 +906,7 @@ func (m model) filteredCommands() []CommandOption {
 }
 
 func (m model) leaderMenuView() string {
-	if !m.isLeader {
+	if !m.isLeader || m.commandTree == nil {
 		return ""
 	}
 
