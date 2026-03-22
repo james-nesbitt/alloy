@@ -13,22 +13,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev libx11-dev libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.24'
 
-      - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.56.2
+      - name: Install Just
+        uses: extractions/setup-just@v2
 
-      - name: Run golangci-lint
-        run: golangci-lint run
+      - name: Install WebAssembly Bindgen
+        run: |
+          cargo install wit-bindgen-cli --version 0.36.0 || \
+          (curl -L https://github.com/bytecodealliance/wit-bindgen/releases/download/wit-bindgen-0.36.0/wit-bindgen-v0.36.0-x86_64-linux.tar.gz | tar xz && sudo mv wit-bindgen-v0.36.0-x86_64-linux/wit-bindgen /usr/local/bin/)
+
+      - name: Install TinyGo
+        run: |
+          wget https://github.com/tinygo-org/tinygo/releases/download/v0.35.0/tinygo_0.35.0_amd64.deb
+          sudo dpkg -i tinygo_0.35.0_amd64.deb
+
+      - name: Build Everything (Standard FHS Layout)
+        run: just all
+
+      - name: Verify Build Layout
+        run: |
+          test -f build/dist/usr/bin/alloy
+          test -f build/dist/usr/bin/alloy-tui
+          test -f build/dist/usr/libexec/alloy/alloy-core
+          test -d build/dist/usr/lib/alloy/plugins
+          ls build/dist/usr/lib/alloy/plugins/*.wasm
 
       - name: Run Tests
-        run: go test -v -race -cover ./...
-
-      - name: Build Core
-        run: go build -o build/core cmd/alloy-core/main.go || true # Ignore failure if main.go doesn't exist yet
-
-      - name: Build CLI
-        run: go build -o build/frontend cmd/alloy/main.go || true # Ignore failure if main.go doesn't exist yet
+        run: just test
