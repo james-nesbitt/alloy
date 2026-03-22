@@ -19,6 +19,7 @@ type Project struct {
 	Channels    []string `json:"channels,omitempty"`
 	Files       []string `json:"files,omitempty"`
 	Active      bool     `json:"active"`
+	Layout      json.RawMessage `json:"layout,omitempty"`
 }
 
 // ProjectCreateRequest represents a request to create a project.
@@ -79,6 +80,52 @@ func (s *KVStore[T]) Set(key string, value T) error {
 	return nil
 }
 
+func (m *Project) toDashboardTile() map[string]interface{} {
+	content := []string{
+		fmt.Sprintf("Name: %s", m.Name),
+		fmt.Sprintf("ID: %s", m.ID),
+	}
+	if m.Description != "" {
+		content = append(content, m.Description)
+	}
+	content = append(content, fmt.Sprintf("Buffers: %d", len(m.Buffers)))
+	content = append(content, fmt.Sprintf("Channels: %d", len(m.Channels)))
+
+	status := "Active"
+	if !m.Active {
+		status = "Inactive"
+	}
+
+	return map[string]interface{}{
+		"title":   "Project Status",
+		"content": content,
+		"status":  status,
+		"actions": []string{"Open", "Create"},
+	}
+}
+
+func emitDashboardUpdate() {
+	var active *Project
+	for _, p := range projects {
+		if p.Active {
+			active = p
+			break
+		}
+	}
+
+	if active == nil {
+		active = &Project{Name: "No Active Project", ID: "none", Active: false}
+	}
+
+	payload, _ := json.Marshal(active.toDashboardTile())
+	plugin.RouteMessage(AlloyMessage{
+		MsgType: "event",
+		Method:  "dashboard-update",
+		Sender:  "project",
+		Payload: payload,
+	})
+}
+
 func main() {
 	// Create a new WIT-based plugin
 	plugin = NewPlugin("project").
@@ -94,6 +141,7 @@ func main() {
 		WithCapability("get_active", "Get current active project").
 		WithCapability("add:buffer", "Add a buffer to a project").
 		WithCapability("add:channel", "Add a chat channel to a project").
+		WithCapability("import", "Import a workspace from a path").
 		WithCapability("open", "Open a project").
 		WithCapability("save", "Save projects to durable store")
 
@@ -105,6 +153,7 @@ func main() {
 	plugin.Handle("add:channel", handleAddChannel)
 	plugin.Handle("open", handleOpen)
 	plugin.Handle("save", handleSave)
+	plugin.Handle("import", handleImport)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -113,6 +162,7 @@ func main() {
 		if data, err := store.Get("all"); err == nil {
 			projects = data
 			plugin.Log("info", fmt.Sprintf("Restored %d projects", len(projects)))
+			emitDashboardUpdate()
 		}
 		return nil
 	})
@@ -140,6 +190,9 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 
 	// Save projects to persistent storage
 	saveProjects()
+
+	// Update dashboard
+	emitDashboardUpdate()
 
 	plugin.Log("info", fmt.Sprintf("Created project: %s (%s)", proj.Name, proj.ID))
 
@@ -237,6 +290,25 @@ func handleAddChannel(msg AlloyMessage) AlloyMessage {
 	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }
 
+// handleImport handles project imports from JSON payloads.
+func handleImport(msg AlloyMessage) AlloyMessage {
+	var proj Project
+	if err := json.Unmarshal(msg.Payload, &proj); err != nil {
+		return plugin.ErrorReply(msg, "invalid_project_json: "+err.Error())
+	}
+
+	if proj.ID == "" {
+		proj.ID = fmt.Sprintf("proj-%d", time.Now().UnixNano())
+	}
+
+	projects[proj.ID] = &proj
+	saveProjects()
+
+	plugin.Log("info", fmt.Sprintf("Imported project: %s (%s)", proj.Name, proj.ID))
+
+	return plugin.Reply(msg, proj)
+}
+
 // handleOpen handles requests to open a project.
 func handleOpen(msg AlloyMessage) AlloyMessage {
 	var req ProjectOpenRequest
@@ -260,6 +332,9 @@ func handleOpen(msg AlloyMessage) AlloyMessage {
 
 	// Notify about the project opening
 	notifyProjectOpened(proj)
+
+	// Update Dashboard
+	emitDashboardUpdate()
 
 	plugin.Log("info", fmt.Sprintf("Opened project: %s (%s)", proj.Name, proj.ID))
 

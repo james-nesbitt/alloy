@@ -102,6 +102,35 @@ func (s *KVStore[T]) Set(key string, value T) error {
 	return nil
 }
 
+func emitDashboardUpdate() {
+	cfg, err := configStore.Get("current")
+	if err != nil {
+		cfg = ProviderConfig{Type: ProviderMock, Model: "mock-model"}
+	}
+
+	content := []string{
+		fmt.Sprintf("Provider: %s", cfg.Type),
+		fmt.Sprintf("Model: %s", cfg.Model),
+	}
+	if cfg.URL != "" {
+		content = append(content, fmt.Sprintf("URL: %s", cfg.URL))
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"title":   "AI Assistant",
+		"content": content,
+		"status":  "Ready",
+		"actions": []string{"query", "summarize", "config:set"},
+	})
+
+	plugin.RouteMessage(AlloyMessage{
+		MsgType: "event",
+		Method:  "dashboard-update",
+		Sender:  "ai",
+		Payload: payload,
+	})
+}
+
 func main() {
 	// Create a new WIT-based plugin
 	plugin = NewPlugin("ai").
@@ -116,7 +145,8 @@ func main() {
 		WithCapability("config:get", "Get current configuration").
 		WithCapability("provider:set", "Switch AI provider").
 		WithCapability("query", "Query the AI directly").
-		WithCapability("summarize", "Summarize provided text")
+		WithCapability("summarize", "Summarize provided text").
+		WithCapability("dashboard-update", "Internal dashboard update")
 
 	// Set up message handlers
 	plugin.Handle("config:set", handleConfigSet)
@@ -125,6 +155,10 @@ func main() {
 	plugin.Handle("query", handleQuery)
 	plugin.Handle("summarize", handleSummarize)
 	plugin.Handle("chat:message", handleChatMessageEvent)
+	plugin.Handle("dashboard-update", func(msg AlloyMessage) AlloyMessage {
+		emitDashboardUpdate()
+		return AlloyMessage{}
+	})
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -138,6 +172,8 @@ func main() {
 			}
 			_ = configStore.Set("current", defaultConfig)
 		}
+
+		emitDashboardUpdate()
 		return nil
 	})
 

@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    { "id": "project", "type": "wasm", "path": "project.wasm", "load_time": "boot" },
+    { "id": "ai", "type": "wasm", "path": "ai.wasm", "load_time": "boot" },
+    { "id": "buffer", "type": "wasm", "path": "buffer.wasm", "load_time": "boot" },
+    { "id": "chat", "type": "wasm", "path": "chat.wasm", "load_time": "lazy" },
+    { "id": "iam", "type": "wasm", "path": "iam.wasm", "load_time": "boot" }
+  ]
+}

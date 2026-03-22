@@ -58,6 +58,10 @@ type model struct {
 	formFields []string
 	formValues []string
 	formIdx    int
+
+	// Dashboard state
+	dashboardTiles map[string]DashboardTile
+	tileOrder      []string
 }
 
 const (
@@ -66,17 +70,38 @@ const (
 )
 
 const (
-	ModeNormal  = 0
-	ModeInsert  = 1
-	ModeCommand = 2
-	ModeChat    = 3
-	ModeForm    = 4
+	ModeNormal    = 0
+	ModeInsert    = 1
+	ModeCommand   = 2
+	ModeChat      = 3
+	ModeForm      = 4
+	ModeDashboard = 5
 )
 
+type DashboardTile struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Content   []string `json:"content"`
+	Status    string   `json:"status"`
+	Actions   []string `json:"actions"`
+	Timestamp int64    `json:"timestamp"`
+}
+
+type WorkspaceConfig struct {
+	DefaultMode string `json:"default_mode"`
+	Dashboard   struct {
+		Tiles []struct {
+			Plugin string `json:"plugin"`
+			Weight int    `json:"weight"`
+		} `json:"tiles"`
+	} `json:"dashboard"`
+}
+
 type Project struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Layout      WorkspaceConfig `json:"layout,omitempty"`
 }
 
 type discoveryMsg struct {
@@ -195,6 +220,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := json.Unmarshal(msg.Payload, &event); err == nil {
 				m.activeProject = &event.Data
 				displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.activeProject.Name)
+				
+				// Handle layout switch
+				if m.activeProject.Layout.DefaultMode == "dashboard" {
+					m.mode = ModeDashboard
+				} else if m.activeProject.Layout.DefaultMode == "chat" {
+					m.mode = ModeChat
+				}
+			}
+		}
+
+		if msg.Method == "dashboard-update" {
+			var tile DashboardTile
+			if err := json.Unmarshal(msg.Payload, &tile); err == nil {
+				if m.dashboardTiles == nil {
+					m.dashboardTiles = make(map[string]DashboardTile)
+				}
+				m.dashboardTiles[msg.Sender] = tile
+				
+				found := false
+				for _, id := range m.tileOrder {
+					if id == msg.Sender { 
+						found = true 
+						break 
+					}
+				}
+				if !found {
+					m.tileOrder = append(m.tileOrder, msg.Sender)
+				}
+				return m, m.listenForMessages()
 			}
 		}
 
@@ -319,6 +373,14 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		m.mode = ModeInsert
 		m.textarea.Focus()
+		return m, nil
+	case "d":
+		m.mode = ModeDashboard
+		m.isLeader = false
+		return m, nil
+	case "v":
+		m.mode = ModeNormal
+		m.isLeader = false
 		return m, nil
 	case "c":
 		m.mode = ModeChat
@@ -996,6 +1058,57 @@ func max(a, b int) int {
 	return b
 }
 
+func (m model) dashboardView() string {
+	if len(m.tileOrder) == 0 {
+		return lipgloss.NewStyle().
+			Width(m.width).
+			Height(m.height - 3).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render("No active dashboard tiles.\nPress ':' and type 'dashboard' to see providers.")
+	}
+
+	tileStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1, 2).
+		Margin(1, 1).
+		Width((m.width / 2) - 4).
+		Height((m.height / 3) - 2)
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
+	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
+	var rows []string
+	var currentRow []string
+
+	for i, id := range m.tileOrder {
+		tile := m.dashboardTiles[id]
+		
+		content := strings.Join(tile.Content, "\n")
+		footer := ""
+		if len(tile.Actions) > 0 {
+			footer = "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Actions: " + strings.Join(tile.Actions, ", "))
+		}
+
+		tileView := tileStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				lipgloss.JoinHorizontal(lipgloss.Top, titleStyle.Render(tile.Title), " ", statusStyle.Render(" "+tile.Status)),
+				"",
+				content,
+				footer,
+			),
+		)
+
+		currentRow = append(currentRow, tileView)
+		if (i+1)%2 == 0 || i == len(m.tileOrder)-1 {
+			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, currentRow...))
+			currentRow = []string{}
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
 func (m model) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
@@ -1014,6 +1127,9 @@ func (m model) View() string {
 	case ModeForm:
 		modeStr = " FORM "
 		modeStyle = modeStyle.Background(lipgloss.Color("13"))
+	case ModeDashboard:
+		modeStr = " DASHBOARD "
+		modeStyle = modeStyle.Background(lipgloss.Color("14"))
 	case ModeCommand:
 		if m.isLeader {
 			modeStr = " LEADER "
@@ -1038,6 +1154,8 @@ func (m model) View() string {
 	var mainView string
 	if m.mode == ModeInsert || m.mode == ModeChat {
 		mainView = m.textarea.View()
+	} else if m.mode == ModeDashboard {
+		mainView = m.dashboardView()
 	} else {
 		mainView = m.viewport.View()
 	}
@@ -1247,8 +1365,34 @@ func main() {
 		commandInput:  ci,
 		msgCh:         msgCh,
 		activeChannel: "general",
+		mode:          ModeDashboard,
 		subscriptions: make(map[string]bool),
 		recency:       make(map[string]int),
+		dashboardTiles: map[string]DashboardTile{
+			"team": {
+				Title:   "Team Presence",
+				Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
+				Status:  "Active",
+				Actions: []string{"Invite", "Call"},
+			},
+			"ai": {
+				Title:   "AI Assistant",
+				Content: []string{"● Ollama (Running)", "○ Active Model: llama3", "Tasks: 0/1 completed"},
+				Actions: []string{"Query", "Summarize"},
+			},
+			"chat": {
+				Title:   "Team Chat",
+				Content: []string{"#general", "<James> Anyone online?", "<AI> Ready to help."},
+				Status:  "2 unread",
+				Actions: []string{"Open", "Clear"},
+			},
+			"project": {
+				Title:   "Current Project",
+				Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-uipolish", "Health: Stable"},
+				Status:  "OK",
+			},
+		},
+		tileOrder: []string{"ai", "chat", "project"},
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

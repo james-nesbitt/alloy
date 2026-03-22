@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "name": "Team Workspace",
+  "description": "Collaboration-focused project template",
+  "layout": {
+    "default_mode": "dashboard",
+    "dashboard": {
+      "tiles": [
+        { "plugin": "team", "weight": 2 },
+        { "plugin": "chat", "weight": 2 },
+        { "plugin": "project", "weight": 1 }
+      ]
+    },
+    "panes": [
+      {
+        "split": "horizontal",
+        "top": { "plugin": "chat" },
+        "bottom": { "plugin": "team" }
+      }
+    ]
+  },
+  "provision": {
+    "wasm": ["project", "ai", "chat", "team-presence"]
+  }
+}
