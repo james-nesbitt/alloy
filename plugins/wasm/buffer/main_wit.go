@@ -47,6 +47,7 @@ func main() {
 		WithCapability("read", "Read buffer content").
 		WithCapability("write", "Write buffer content").
 		WithCapability("delete", "Delete a buffer").
+		WithCapability("unload", "Remove a buffer from memory only").
 		WithCapability("save", "Save buffer to persistent storage").
 		WithCapability("load", "Load buffers from persistent storage")
 
@@ -57,6 +58,7 @@ func main() {
 	plugin.Handle("append", handleAppend)
 	plugin.Handle("list", handleList)
 	plugin.Handle("delete", handleDelete)
+	plugin.Handle("unload", handleUnload)
 	plugin.Handle("subscribe", handleSubscribe)
 	plugin.Handle("clear", handleClear)
 	plugin.Handle("save", handleSave)
@@ -292,6 +294,23 @@ func handleDelete(msg AlloyMessage) AlloyMessage {
 	})
 }
 
+// handleUnload removes a buffer from memory without deleting it from disk.
+func handleUnload(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
+	}
+
+	delete(buffers, req.ID)
+	notifyAll(req.ID, "unload")
+
+	return plugin.Reply(msg, map[string]string{
+		"status": "unloaded",
+	})
+}
+
 // handleClear handles buffer clear requests.
 func handleClear(msg AlloyMessage) AlloyMessage {
 	var req struct {
@@ -357,17 +376,25 @@ func handleSave(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
+	plugin.Log("info", "Saving buffer "+b.ID)
+
 	// Persist metadata
 	metaKey := fmt.Sprintf("buffer:%s:meta", b.ID)
 	metaData, _ := json.Marshal(b)
-	plugin.KVSet(metaKey, metaData)
+	if !plugin.KVSet(metaKey, metaData) {
+		return plugin.ErrorReply(msg, "failed_to_save_metadata")
+	}
 
 	// Persist content (only for root buffers)
 	root, rootOk := findRootBuffer(b.ID)
 	if rootOk && root.ID == b.ID {
 		contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
-		plugin.KVSet(contentKey, root.Data)
+		if !plugin.KVSet(contentKey, root.Data) {
+			return plugin.ErrorReply(msg, "failed_to_save_content")
+		}
 	}
+
+	plugin.Log("info", "Saved buffer "+b.ID)
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",

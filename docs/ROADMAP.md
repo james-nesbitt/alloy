@@ -74,6 +74,7 @@ Bringing the system to full maturity.
 
 - [x] **Alloy GUI**: Wayland-compatible graphical client (**Stable Gio + Experimental Native**).
 - [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
+- [ ] **Modal Consolidation (The "Bridged" Approach)**: Unify Leader-menu (`SPC`) and Command Bar (`:`) into a single high-performance "Omni-palette" with auto-transition logic and scoped fuzzy searching.
 - [x] **Hot-Reloading**: Allow WASM plugins to be updated or swapped without restarting the core. 
     - [x] Runtime manager reload support.
     - [ ] Automatic file watching.

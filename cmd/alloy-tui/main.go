@@ -16,8 +16,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/james-nesbitt/alloy/api"
-	"github.com/james-nesbitt/alloy/pkg/frontend"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
 
 // TUI Layout components
@@ -898,7 +898,7 @@ func (m model) filteredCommands() []CommandOption {
 						return true
 					}
 				}
-				
+
 				if results[i].Score != results[j].Score {
 					return results[i].Score > results[j].Score
 				}
@@ -1063,9 +1063,9 @@ func (m model) View() string {
 		} else {
 			filtered := m.filteredCommands()
 			if len(filtered) > 0 {
-				// Live Preview Panel 
+				// Live Preview Panel
 				selected := filtered[m.selectedCmdIdx]
-				
+
 				previewStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("0")).
 					Foreground(lipgloss.Color("7")).
@@ -1079,13 +1079,13 @@ func (m model) View() string {
 				if s, ok := m.statuses[strings.Split(selected.Raw, " ")[0]]; ok && s == "crashed" {
 					statusLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✘ CRASHED")
 				}
-				
+
 				previewContent := fmt.Sprintf(
 					"%s  %s\n\n%s\n\n%s",
 					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(selected.Display),
 					statusLabel,
 					lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(selected.Description),
-					lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Usage: " + selected.Raw),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Usage: "+selected.Raw),
 				)
 
 				view = lipgloss.JoinVertical(lipgloss.Left, view, previewStyle.Render(previewContent))
@@ -1128,22 +1128,26 @@ func (m model) View() string {
 						if opt.IsDir {
 							method = "..."
 						}
-						
+
 						// Multi-column leader style
 						left := fmt.Sprintf(" %-2s %s%-15s", opt.Display, annotation, method)
 						right := marginaliaStyle.Render(opt.Description + statusStr)
-						
+
 						// Calculate padding
 						pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
-						if pad < 0 { pad = 0 }
+						if pad < 0 {
+							pad = 0
+						}
 						line = left + strings.Repeat(" ", pad) + right
 					} else {
 						// standard command style
 						left := " " + label
 						right := marginaliaStyle.Render(opt.Description + statusStr)
-						
+
 						pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
-						if pad < 0 { pad = 0 }
+						if pad < 0 {
+							pad = 0
+						}
 						line = left + strings.Repeat(" ", pad) + right
 					}
 

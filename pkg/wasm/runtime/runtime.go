@@ -48,7 +48,7 @@ type Instance struct {
 	metadata     api.PluginMetadata
 
 	startedCh chan struct{}
-	
+
 	// pending responses: msgID -> channel
 	pmu     sync.Mutex
 	pending map[string]chan api.Message
@@ -128,7 +128,7 @@ func NewRuntime(
 // instantiateHostModule creates the host module with WIT functions.
 func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, error) {
 	builder := r.runtime.NewHostModuleBuilder("alloy")
-	
+
 	builder.NewFunctionBuilder().WithFunc(r.internalInit).Export("init")
 	builder.NewFunctionBuilder().WithFunc(r.internalHandleMessage).Export("handle-message")
 	builder.NewFunctionBuilder().WithFunc(r.internalLog).Export("log")
@@ -141,14 +141,14 @@ func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, 
 	builder.NewFunctionBuilder().WithFunc(r.internalStarted).Export("started")
 	builder.NewFunctionBuilder().WithFunc(r.internalGetNextMessage).Export("get-next-message")
 	builder.NewFunctionBuilder().WithFunc(r.internalSendResponse).Export("send-response")
-	
+
 	// Complex data types (save/load state) - currently placeholders
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
 		mod.Memory().WriteUint32Le(resPtr+4, 0)
 	}).Export("save-state")
-	
-	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, len uint32) {}) .Export("load-state")
+
+	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, ptr, len uint32) {}).Export("load-state")
 
 	return builder.Instantiate(ctx)
 }
@@ -207,9 +207,9 @@ func (r *Runtime) internalKVGet(ctx context.Context, mod wazeroapi.Module, keyPt
 	}
 
 	mod.Memory().Write(uint32(res[0]), value)
-	mod.Memory().WriteUint32Le(resultPtr, 1)                      // is_some = true
-	mod.Memory().WriteUint32Le(resultPtr+4, uint32(res[0]))       // ptr
-	mod.Memory().WriteUint32Le(resultPtr+8, uint32(len(value)))    // len
+	mod.Memory().WriteUint32Le(resultPtr, 1)                    // is_some = true
+	mod.Memory().WriteUint32Le(resultPtr+4, uint32(res[0]))     // ptr
+	mod.Memory().WriteUint32Le(resultPtr+8, uint32(len(value))) // len
 }
 
 func (r *Runtime) internalKVDelete(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen uint32) uint32 {
@@ -222,7 +222,9 @@ func (r *Runtime) internalKVDelete(ctx context.Context, mod wazeroapi.Module, ke
 
 func (r *Runtime) internalKVList(ctx context.Context, mod wazeroapi.Module, prefixPtr, prefixLen, resultPtr uint32) {
 	prefixData, _ := mod.Memory().Read(prefixPtr, prefixLen)
-	keys, err := r.kv.List(mod.Name(), string(prefixData))
+
+	prefix := string(prefixData)
+	keys, err := r.kv.List(mod.Name(), prefix)
 	if err != nil {
 		mod.Memory().WriteUint32Le(resultPtr, 0)
 		mod.Memory().WriteUint32Le(resultPtr+4, 0)
@@ -233,8 +235,8 @@ func (r *Runtime) internalKVList(ctx context.Context, mod wazeroapi.Module, pref
 	if alloc == nil {
 		return
 	}
-	
-	stringStructs := make([]byte, len(keys)*8) 
+
+	stringStructs := make([]byte, len(keys)*8)
 	for i, key := range keys {
 		sRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(key)))
 		if len(sRes) > 0 {
@@ -243,7 +245,7 @@ func (r *Runtime) internalKVList(ctx context.Context, mod wazeroapi.Module, pref
 			i32le.PutUint32(stringStructs[i*8+4:], uint32(len(key)))
 		}
 	}
-	
+
 	lRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(stringStructs)))
 	if len(lRes) > 0 {
 		mod.Memory().Write(uint32(lRes[0]), stringStructs)
@@ -382,7 +384,7 @@ func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Modu
 	r.mu.RLock()
 	instance, ok := r.plugins[pluginID]
 	r.mu.RUnlock()
-	
+
 	if !ok {
 		mod.Memory().WriteUint32Le(resultPtr, 0)
 		return
@@ -392,7 +394,7 @@ func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Modu
 	case msg := <-instance.msgChan:
 		r.logger.Debug("wasm plugin pulled message", "id", pluginID, "msgID", msg.ID)
 		mod.Memory().WriteUint32Le(resultPtr, 1) // is_some = true
-		r.writeMessage(ctx, mod, resultPtr+8, msg) 
+		r.writeMessage(ctx, mod, resultPtr+8, msg)
 	case <-time.After(100 * time.Millisecond):
 		// No message after wait, return None
 		mod.Memory().WriteUint32Le(resultPtr, 0) // is_some = false
@@ -409,7 +411,7 @@ func (r *Runtime) internalSendResponse(
 ) {
 	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
 	apiMsg.Type = api.TypeResponse
-	
+
 	r.mu.RLock()
 	instance, ok := r.plugins[mod.Name()]
 	r.mu.RUnlock()
@@ -426,7 +428,7 @@ func (r *Runtime) internalSendResponse(
 			}
 			return
 		}
-		
+
 		// check for suffix match (remove -resp)
 		reqID := strings.TrimSuffix(apiMsg.ID, "-resp")
 		if ch, ok := instance.pending[reqID]; ok {
@@ -488,7 +490,7 @@ func (r *Runtime) LoadPlugin(
 			instCancel()
 			return
 		}
-		
+
 		r.logger.Debug("instantiating wasm module", "id", id)
 
 		config := wazero.NewModuleConfig().
@@ -503,7 +505,7 @@ func (r *Runtime) LoadPlugin(
 			instCancel()
 			return
 		}
-		
+
 		r.mu.Lock()
 		instance.mod = mod
 		r.mu.Unlock()
@@ -574,7 +576,7 @@ func (r *Runtime) RouteMessage(ctx context.Context, pluginID string, msg api.Mes
 	if !ok {
 		return errors.New("plugin not found")
 	}
-	
+
 	// Pre-register response channel if it's a request
 	if msg.Type == api.TypeRequest {
 		respCh := make(chan api.Message, 1)
@@ -604,7 +606,7 @@ func (r *Runtime) GetResponse(ctx context.Context, pluginID string, requestID st
 	instance.pmu.Lock()
 	respCh, ok := instance.pending[requestID]
 	instance.pmu.Unlock()
-	
+
 	if !ok {
 		// FALLBACK: If it wasn't pre-registered (unlikely now), create it.
 		respCh = make(chan api.Message, 1)

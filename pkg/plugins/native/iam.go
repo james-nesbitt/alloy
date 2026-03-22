@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -41,11 +42,41 @@ func (i *IdentityManager) ID() string { return "iam" }
 func (i *IdentityManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "authorize", Description: "Check routing permissions"},
+		{Method: "check", Description: "Check if an actor is authorized for an action"},
 	}
 }
 
 func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	switch msg.Method {
+	case "check":
+		var req struct {
+			Actor  string `json:"actor"`
+			Target string `json:"target"`
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return api.Message{}, err
+		}
+
+		// Simplified native check: does the actor have permissions for this target?
+		i.mu.RLock()
+		targetPolicies, hasPolicies := i.policies[req.Actor]
+		allowed := false
+		if !hasPolicies {
+			allowed = true // Default allow for native simple IAM
+		} else if targetPolicies["*"] || targetPolicies[req.Target] {
+			allowed = true
+		}
+		i.mu.RUnlock()
+
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  i.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(fmt.Sprintf(`{"allowed":%v}`, allowed)),
+		}, nil
+
 	case "allow":
 		var req struct {
 			Sender string `json:"sender"`

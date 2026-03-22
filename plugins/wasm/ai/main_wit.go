@@ -418,7 +418,11 @@ func performLLMQuery(cfg ProviderConfig, prompt string) (string, error) {
 	// Query the provider
 	switch cfg.Type {
 	case ProviderMock:
-		return "Mock AI response to: " + prompt, nil
+		response := "Mock AI response to: " + prompt
+		if projectContext != "" {
+			response = fmt.Sprintf("Mock AI response with project context [%s] to: %s", projectContext, prompt)
+		}
+		return response, nil
 	case ProviderOllama:
 		return queryOllama(cfg, fullPrompt)
 	case ProviderOpenAI:

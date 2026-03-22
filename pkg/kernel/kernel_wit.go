@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -78,9 +79,35 @@ func NewWITKernel(
 	kernel.commands = native.NewCommandManager(logger)
 	kernel.RegisterPlugin(kernel.commands)
 
+	// Back-fill existing registrations into the command manager
+	for _, md := range kernel.metadata {
+		reg := struct {
+			ID           string           `json:"id"`
+			Type         string           `json:"type"`
+			Status       string           `json:"status"`
+			Capabilities []api.Capability `json:"capabilities"`
+		}{
+			ID:           md.ID,
+			Type:         "plugin",
+			Status:       "active",
+			Capabilities: md.Capabilities,
+		}
+		payload, _ := json.Marshal(reg)
+		kernel.commands.HandleMessage(context.Background(), api.Message{
+			ID:      "backfill-" + md.ID,
+			Sender:  "kernel",
+			Target:  "command-manager",
+			Method:  "register",
+			Payload: payload,
+		})
+	}
+
 	// Initialize and register security interceptor
 	iamInterceptor := NewIAMInterceptor(kernel)
 	kernel.RegisterInterceptor(iamInterceptor)
+
+	// Register WASM manager as a plugin so it can be called by others (e.g. for loading/hot-reload)
+	kernel.RegisterPlugin(&wasmManagerPlugin{kernel: kernel})
 
 	// Start the monitor
 	kernel.wasmManager.StartMonitor(context.Background(), 30*time.Second)
@@ -322,6 +349,15 @@ func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 	id := plugin.ID()
 
 	k.mu.Lock()
+	if existing, ok := k.plugins[id]; ok && existing != nil {
+		// For internal core plugins, we avoid re-registering to preserve state/subscriptions
+		if id == "events" || id == "command-manager" || id == "wasm-manager" {
+			k.mu.Unlock()
+			k.logger.Debug("skipping re-registration of internal core plugin", "id", id)
+			return
+		}
+	}
+
 	k.plugins[id] = plugin
 	k.metadata[id] = api.PluginMetadata{
 		ID:           id,
@@ -471,6 +507,83 @@ func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (
 
 func (p *witPluginWrapper) Shutdown(ctx context.Context) error {
 	return p.manager.UnloadPlugin(ctx, p.id)
+}
+
+// wasmManagerPlugin wraps the WASM manager as a native kernel plugin.
+type wasmManagerPlugin struct {
+	kernel *WITKernel
+}
+
+func (w *wasmManagerPlugin) ID() string { return "wasm-manager" }
+func (w *wasmManagerPlugin) Capabilities() []api.Capability {
+	return []api.Capability{
+		{Method: "load", Description: "Load a WASM plugin"},
+		{Method: "unload", Description: "Unload a WASM plugin"},
+		{Method: "watch", Description: "Watch a WASM plugin for hot-reload"},
+	}
+}
+
+func (w *wasmManagerPlugin) Shutdown(ctx context.Context) error { return nil }
+
+func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	switch msg.Method {
+	case "load":
+		var req struct {
+			ID           string           `json:"id"`
+			Path         string           `json:"path"`
+			Capabilities []api.Capability `json:"capabilities"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return api.Message{}, err
+		}
+
+		wasmBytes, err := os.ReadFile(req.Path)
+		if err != nil {
+			return api.Message{}, err
+		}
+
+		if err := w.kernel.RegisterWASMPlugin(req.ID, wasmBytes, req.Capabilities); err != nil {
+			return api.Message{}, err
+		}
+
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"loaded"}`),
+		}, nil
+
+	case "unload":
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return api.Message{}, err
+		}
+		if err := w.kernel.wasmManager.UnloadPlugin(ctx, req.ID); err != nil {
+			return api.Message{}, err
+		}
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"unloaded"}`),
+		}, nil
+
+	case "watch":
+		// This is a placeholder for actual hot-reload logic
+		// In a real implementation, we would start a file watcher
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"watching"}`),
+		}, nil
+	}
+	return api.Message{}, fmt.Errorf("unknown method: %s", msg.Method)
 }
 
 func (k *WITKernel) handleInternalMessage(ctx context.Context, msg api.Message) {

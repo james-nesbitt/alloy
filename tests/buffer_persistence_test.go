@@ -66,13 +66,13 @@ func TestBufferPersistence(t *testing.T) {
 	// Wait a moment for KV operations to complete (async in kernel)
 	time.Sleep(200 * time.Millisecond)
 
-	// 3. Delete from memory
+	// 3. Delete from memory (unload)
 	delReq, _ := json.Marshal(map[string]any{"id": bufID})
 	sendMsg(t, conn, api.Message{
 		ID:      "del-req",
 		Sender:  "user",
 		Target:  "buffer",
-		Method:  "delete",
+		Method:  "unload",
 		Payload: delReq,
 	})
 	awaitResponse(t, collector, "del-req-resp")

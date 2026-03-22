@@ -38,7 +38,7 @@ func main() {
 
 	// Parse command line flags
 	dataDir := flag.String("data-dir", "./data", "Directory for plugin data")
-	listenAddr := flag.String("listen", "unix://" + filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Address to listen on (unix:// or tcp://)")
+	listenAddr := flag.String("listen", "unix://"+filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Address to listen on (unix:// or tcp://)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)

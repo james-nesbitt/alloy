@@ -42,16 +42,16 @@ func TestIAMEnforcement(t *testing.T) {
 	// 1. First, set an identity that has NO permissions
 	// (Note: We use the 'admin' bypass or assume the current connection is 'user')
 	// By default 'user' becomes 'guest' role which I gave many permissions to.
-	
+
 	// Let's create a new role 'restricted' with NO permissions.
 	setPolicyReq, _ := json.Marshal(map[string]any{
 		"policy": map[string]any{
-			"role": "restricted",
+			"role":        "restricted",
 			"permissions": []string{},
 		},
 	})
-	
-	// We need to be authorized to SET a policy. 
+
+	// We need to be authorized to SET a policy.
 	// Currently 'user' (guest) has "iam:*" (I added it to the guest list in my last edit).
 	sendMsg(t, conn, api.Message{
 		ID:      "set-policy",
