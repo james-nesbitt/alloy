@@ -15,6 +15,7 @@ ETC_DIR      := DIST_ROOT + "/etc/alloy"
 WASM_BUILD   := PLUGIN_DIR
 BIN_BUILD    := BIN_DIR
 GEN_DIR      := BUILD_DIR + "/gen"
+INTERNAL_BIN := BUILD_DIR + "/tmp/bin"
 BINDINGS_DIR := GEN_DIR + "/bindings"
 PLUGINS_SRC  := PROJECT_ROOT + "/plugins/wasm"
 
@@ -37,7 +38,6 @@ flatpak: all
 # Remove build artifacts and temporary files
 clean:
     rm -rf {{BUILD_DIR}}
-    rm -rf .tmp-bin
     @echo "Cleanup complete."
 
 # --- PROJECT SETUP & CODE GENERATION ---

@@ -22,7 +22,7 @@ sed -i 's|^go .*|go 1.25.8|' go.mod
 go mod tidy || true
 
 # Use the real wasm-opt we just downloaded (if present)
-REAL_WASMOPT="$PROJECT_ROOT/.tmp-bin/wasm-opt"
+REAL_WASMOPT="$PROJECT_ROOT/build/tmp/bin/wasm-opt"
 if [ -f "$REAL_WASMOPT" ]; then
     export WASMOPT="$REAL_WASMOPT"
     OPT_FLAG="-opt=s" # Real optimizer can handle it!

@@ -93,6 +93,6 @@ Due to the compilation overhead of large WASM modules, tests involving plugins s
 ## 5. Troubleshooting WASM Builds
 
 If TinyGo fails to build because of a missing `wasm-opt`:
-1. Alloy provides a mechanism to download `binaryen` into `.tmp-bin` automatically if needed.
-2. The `scripts/build-plugin.sh` looks for `./.tmp-bin/wasm-opt` and uses it for final optimization passes.
+1. Alloy provides a mechanism to download `binaryen` into `./build/tmp/bin` automatically if needed.
+2. The `scripts/build-plugin.sh` looks for `./build/tmp/bin/wasm-opt` and uses it for final optimization passes.
 3. If you still encounter issues, ensure `WASMOPT` is correctly set in your environment or follow the instructions in `scripts/build-plugin.sh`.
