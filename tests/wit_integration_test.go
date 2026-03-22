@@ -117,7 +117,7 @@ func TestWITIntegration(t *testing.T) {
 	}
 
 	// Test 4: Get response from the plugin
-	resp, err := manager.GetResponse(context.Background(), "health-plugin")
+	resp, err := manager.GetResponse(context.Background(), "health-plugin", "test-1")
 	if err != nil {
 		t.Fatal(err)
 	}

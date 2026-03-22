@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -66,6 +67,9 @@ func (mc *MessageCollector) run() {
 			}
 			continue
 		}
+		if msg.ID != "" {
+			fmt.Printf(">> Collector received message: ID=%s, Method=%s, Target=%s\n", msg.ID, msg.Method, msg.Target)
+		}
 		mc.mu.Lock()
 		mc.messages = append(mc.messages, msg)
 		mc.mu.Unlock()
@@ -118,17 +122,20 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 		"--provision", provisionPath,
 	})
 
-	// Wait for socket
+	// Wait for socket with exponential backoff and net.Dial readiness check
+	var conn net.Conn
+	var err error
 	for i := 0; i < 20; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
+		conn, err = net.Dial("unix", socketPath)
+		if err == nil {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		t.Logf("Attempt %d: failed to dial %s: %v", i, socketPath, err)
+		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
 	}
 
-	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
-		t.Fatalf("failed to connect to core: %v", err)
+		t.Fatalf("failed to connect to core after retries: %v", err)
 	}
 
 	return cmd, conn, NewMessageCollector(json.NewDecoder(conn)), homeDir

@@ -89,6 +89,7 @@ func TestWITRuntimeIntegration(t *testing.T) {
 		Sender:  "test-client",
 		Target:  pluginID,
 		Payload: json.RawMessage(`{}`),
+		Type:    api.TypeRequest,
 	}
 
 	err = runtime.RouteMessage(context.Background(), pluginID, testMsg)
@@ -100,7 +101,7 @@ func TestWITRuntimeIntegration(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Test 2: Get a response from the plugin
-	resp, err := runtime.GetResponse(context.Background(), pluginID)
+	resp, err := runtime.GetResponse(context.Background(), pluginID, "test-1")
 	if err != nil {
 		t.Fatal(err)
 	}

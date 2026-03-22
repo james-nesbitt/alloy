@@ -217,6 +217,7 @@ func TestRuntimeMessageRouting(t *testing.T) {
 		Sender:  "test-client",
 		Target:  pluginID,
 		Payload: json.RawMessage(`{}`),
+		Type:    api.TypeRequest,
 	}
 
 	err = rt.RouteMessage(context.Background(), pluginID, testMsg)
@@ -225,7 +226,7 @@ func TestRuntimeMessageRouting(t *testing.T) {
 	}
 
 	// Test 2: Get response from plugin
-	resp, err := rt.GetResponse(context.Background(), pluginID)
+	resp, err := rt.GetResponse(context.Background(), pluginID, "test-1")
 	if err != nil {
 		t.Fatal(err)
 	}

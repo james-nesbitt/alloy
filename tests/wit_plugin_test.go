@@ -188,7 +188,7 @@ func testHealthPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "health")
+	resp, err := manager.GetResponse(context.Background(), "health", "test-health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func testBufferPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "buffer")
+	resp, err := manager.GetResponse(context.Background(), "buffer", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func testChatPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "chat")
+	resp, err := manager.GetResponse(context.Background(), "chat", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func testAIPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "ai")
+	resp, err := manager.GetResponse(context.Background(), "ai", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func testProjectPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "project")
+	resp, err := manager.GetResponse(context.Background(), "project", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func testIAMPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "iam")
+	resp, err := manager.GetResponse(context.Background(), "iam", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func testSecretsPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "secrets")
+	resp, err := manager.GetResponse(context.Background(), "secrets", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func testTasksPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	resp, err := manager.GetResponse(context.Background(), "tasks")
+	resp, err := manager.GetResponse(context.Background(), "tasks", testMsg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

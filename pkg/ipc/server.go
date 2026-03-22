@@ -222,6 +222,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 	for {
 		select {
 		case msg := <-sendCh:
+			s.logger.Debug("sending message to client", "client_id", clientID, "msgID", msg.ID)
 			if err := c.enc.Encode(msg); err != nil {
 				s.logger.Error("encode error", "client_id", clientID, "error", err)
 				return

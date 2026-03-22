@@ -60,5 +60,6 @@ This document defines how AI agents, like yourselves, should interact with the A
         - Always run `just test` (or `go test ./...`) before committing.
         - **New and changed tests must be verified to pass.**
         - Ensure a minimum of 85% unit test coverage for new code in `pkg/`.
+    - **Diagnostic Efficiency**: Use small, focused test harnesses (standalone `.go` scripts or targeted `go test -run`) when diagnosing or fixing specific issues. Avoid full project test runs during active debugging; reserve full suite validation for merge readiness reviews.
 4.  **Verify Assumptions**: If you aren't sure where a piece of logic should reside, ask for clarification.
 5.  **Iterative Development**: Start with small, verifiable pieces (e.g., the IPC message definitions) before building larger systems.

@@ -200,6 +200,7 @@ func TestManagerMessageRouting(t *testing.T) {
 		Sender:  "test-client",
 		Target:  pluginID,
 		Payload: []byte(`{}`),
+		Type:    api.TypeRequest,
 	}
 
 	err = manager.RouteMessage(context.Background(), pluginID, testMsg)
@@ -208,7 +209,7 @@ func TestManagerMessageRouting(t *testing.T) {
 	}
 
 	// Test 2: Get response from plugin
-	resp, err := manager.GetResponse(context.Background(), pluginID)
+	resp, err := manager.GetResponse(context.Background(), pluginID, "test-1")
 	if err != nil {
 		t.Fatal(err)
 	}

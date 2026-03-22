@@ -50,6 +50,7 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 		e.mu.Lock()
 		e.subscribers[req.Topic] = append(e.subscribers[req.Topic], msg.Sender)
 		e.mu.Unlock()
+		e.logger.Debug("plugin subscribed to topic", "plugin", msg.Sender, "topic", req.Topic)
 		return api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,
@@ -70,6 +71,8 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 		e.mu.RLock()
 		subs := e.subscribers[req.Topic]
 		e.mu.RUnlock()
+
+		e.logger.Info("publishing event", "topic", req.Topic, "subscribers", len(subs), "sender", msg.Sender)
 
 		if e.route != nil {
 			for _, sub := range subs {

@@ -106,6 +106,17 @@ func main() {
 		logger.Warn("running in INSECURE mode")
 	}
 
+	// Create and start IPC server BEFORE loading plugins so tests can connect while loading
+	server := ipc.NewServer(logger, k, tlsConfig)
+
+	go func() {
+		logger.Info("starting IPC server", "addr", *listenAddr)
+		if err := server.ListenAndServe(*listenAddr); err != nil {
+			logger.Error("IPC server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
 	// Resolve provisioning file
 	currentProvisionFile := *provisionFile
 	if currentProvisionFile == "" {
@@ -145,17 +156,6 @@ func main() {
 	// Create health monitor
 	go healthMonitor(k, logger)
 
-	// Create and start IPC server
-	server := ipc.NewServer(logger, k, tlsConfig)
-
-	go func() {
-		logger.Info("starting IPC server", "addr", *listenAddr)
-		if err := server.ListenAndServe(*listenAddr); err != nil {
-			logger.Error("IPC server failed", "error", err)
-			os.Exit(1)
-		}
-	}()
-
 	logger.Info("Alloy Core started", "data_dir", *dataDir)
 
 	// Wait for shutdown signal
@@ -174,10 +174,11 @@ type ProvisionManifest struct {
 }
 
 type ProvisionPlugin struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Path     string `json:"path"`
-	LoadTime string `json:"load_time"`
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Path         string           `json:"path"`
+	LoadTime     string           `json:"load_time"`
+	Capabilities []api.Capability `json:"capabilities"`
 }
 
 // loadProvisionedPlugins loads plugins from a provisioning file.
@@ -193,7 +194,8 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 		return fmt.Errorf("failed to parse provision file: %w", err)
 	}
 
-	for _, p := range manifest.Plugins {
+	for i, p := range manifest.Plugins {
+		logger.Debug("processing provisioned plugin", "index", i, "id", p.ID, "type", p.Type)
 		if p.Type == "native" {
 			// Register native plugin from the registry
 			constructor, ok := native.Registry[p.ID]
@@ -222,23 +224,30 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 			continue
 		}
 
-		// Resolve the plugin path
+		// Resolve the plugin path (warn but don't fail for lazy)
 		wasmPath := resolvePluginPath(provisionFile, p.Path)
 		if wasmPath == "" {
-			logger.Error("could not resolve plugin WASM path", "id", p.ID, "requested", p.Path)
-			continue
+			if p.LoadTime != "lazy" {
+				logger.Error("could not resolve plugin WASM path", "id", p.ID, "requested", p.Path)
+				continue
+			}
+			// Use the requested path as is for lazy loading
+			wasmPath = p.Path
+			logger.Warn("could not resolve lazy plugin WASM path, using as is", "id", p.ID, "requested", p.Path)
 		}
 
 		if p.LoadTime == "lazy" {
 			// Register a lazy loader for this plugin
 			k.RegisterPluginLoader(p.ID, &wasmLoader{
-				k:        k,
-				pluginID: p.ID,
-				path:     wasmPath,
-				logger:   logger,
+				k:            k,
+				pluginID:     p.ID,
+				path:         wasmPath,
+				logger:       logger,
+				capabilities: p.Capabilities,
 			}, api.PluginMetadata{
-				ID:       p.ID,
-				LoadTime: api.LoadTimeLazy,
+				ID:           p.ID,
+				LoadTime:     api.LoadTimeLazy,
+				Capabilities: p.Capabilities,
 			})
 			logger.Info("registered lazy-loaded plugin", "id", p.ID, "path", wasmPath)
 		} else {
@@ -249,7 +258,7 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 				continue
 			}
 
-			if err := k.RegisterWASMPlugin(p.ID, wasmBytes, nil); err != nil {
+			if err := k.RegisterWASMPlugin(p.ID, wasmBytes, p.Capabilities); err != nil {
 				logger.Error("failed to register boot-loaded plugin", "id", p.ID, "error", err)
 				continue
 			}
@@ -305,10 +314,11 @@ func resolvePluginPath(manifestPath, pluginPath string) string {
 
 // wasmLoader implements the api.PluginLoader interface for lazy-loading WASM plugins.
 type wasmLoader struct {
-	k        *kernel.WITKernel
-	pluginID string
-	path     string
-	logger   *slog.Logger
+	k            *kernel.WITKernel
+	pluginID     string
+	path         string
+	logger       *slog.Logger
+	capabilities []api.Capability
 }
 
 func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, error) {
@@ -319,7 +329,7 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 		return nil, fmt.Errorf("failed to read lazy-loaded WASM: %w", err)
 	}
 
-	if err := l.k.RegisterWASMPlugin(id, wasmBytes, nil); err != nil {
+	if err := l.k.RegisterWASMPlugin(id, wasmBytes, l.capabilities); err != nil {
 		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
 	}
 

@@ -19,7 +19,7 @@ func main() {
 
 		payload, _ := json.Marshal(status)
 		return &guest.Message{
-			ID:      msg.ID + "-response",
+			ID:      msg.ID + "-resp",
 			Method:  msg.Method,
 			Payload: payload,
 			Target:  msg.Sender,

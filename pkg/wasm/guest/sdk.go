@@ -76,7 +76,6 @@ func NewPlugin(id string) *Plugin {
 
 // WithMetadata sets metadata for the plugin.
 func (p *Plugin) WithMetadata(name, description, version, author string) *Plugin {
-	// For now, we don't do much with this in the guest, but it could be added to AlloyInit if needed.
 	return p
 }
 
@@ -218,16 +217,11 @@ func (p *Plugin) messageLoop() {
 		}
 
 		if resp != nil {
-			target := guest.Some(resp.Target)
-			if resp.Target == "" {
-				target = guest.Some(msg.Sender)
-			}
-			
 			guest.AlloySendResponse(guest.AlloyMessage{
 				Id:      resp.ID,
 				Method:  resp.Method,
 				Sender:  p.id,
-				Target:  target,
+				Target:  guest.Some(msg.Sender),
 				Payload: resp.Payload,
 			})
 		}
@@ -254,7 +248,7 @@ func (p *Plugin) handleCommand(msg Message) *Message {
 
 	payload, _ := json.Marshal(result)
 	return &Message{
-		ID:      msg.ID + "-reply",
+		ID:      msg.ID + "-resp",
 		Method:  msg.Method,
 		Payload: payload,
 	}
@@ -286,15 +280,11 @@ func (p *Plugin) Call(msg guest.AlloyMessage) guest.AlloyMessage {
 // Reply creates a response message for the given request.
 func (p *Plugin) Reply(req guest.AlloyMessage, payload any) guest.AlloyMessage {
 	data, _ := json.Marshal(payload)
-	target := req.Target
-	if target.IsNone() {
-		target = guest.Some(req.Sender)
-	}
 	return guest.AlloyMessage{
-		Id:      req.Id + "-reply",
+		Id:      req.Id + "-resp",
 		Method:  req.Method,
 		Sender:  p.id,
-		Target:  target,
+		Target:  guest.Some(req.Sender),
 		Payload: data,
 	}
 }
@@ -303,15 +293,11 @@ func (p *Plugin) Reply(req guest.AlloyMessage, payload any) guest.AlloyMessage {
 func (p *Plugin) ErrorReply(req guest.AlloyMessage, errMsg string) guest.AlloyMessage {
 	result := CommandResult{Success: false, Error: errMsg}
 	data, _ := json.Marshal(result)
-	target := req.Target
-	if target.IsNone() {
-		target = guest.Some(req.Sender)
-	}
 	return guest.AlloyMessage{
-		Id:      req.Id + "-reply",
+		Id:      req.Id + "-resp",
 		Method:  req.Method,
 		Sender:  p.id,
-		Target:  target,
+		Target:  guest.Some(req.Sender),
 		Payload: data,
 	}
 }
@@ -320,7 +306,7 @@ func (p *Plugin) ErrorReply(req guest.AlloyMessage, errMsg string) guest.AlloyMe
 func (p *Plugin) SDKReply(req Message, method string, payload any) *Message {
 	data, _ := json.Marshal(payload)
 	return &Message{
-		ID:      req.ID + "-reply",
+		ID:      req.ID + "-resp",
 		Method:  method,
 		Target:  req.Sender,
 		Payload: data,
@@ -332,7 +318,7 @@ func (p *Plugin) ReplyError(req Message, errMsg string) *Message {
 	result := CommandResult{Success: false, Error: errMsg}
 	data, _ := json.Marshal(result)
 	return &Message{
-		ID:      req.ID + "-reply",
+		ID:      req.ID + "-resp",
 		Method:  req.Method,
 		Target:  req.Sender,
 		Payload: data,

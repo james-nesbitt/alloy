@@ -81,7 +81,7 @@ func (s *KVStore[T]) Set(key string, value T) error {
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = NewPlugin("project-manager").
+	plugin = NewPlugin("project").
 		WithMetadata(
 			"Project Manager", 
 			"Manages projects and their associated resources",
@@ -91,7 +91,7 @@ func main() {
 		WithTags("project", "management", "organization").
 		WithCapability("create", "Create a new project").
 		WithCapability("list", "List all projects").
-		WithCapability("active", "Get current active project").
+		WithCapability("get_active", "Get current active project").
 		WithCapability("add:buffer", "Add a buffer to a project").
 		WithCapability("add:channel", "Add a chat channel to a project").
 		WithCapability("open", "Open a project").
@@ -99,7 +99,7 @@ func main() {
 
 	// Set up message handlers
 	plugin.Handle("create", handleCreate)
-	plugin.Handle("active", handleActive)
+	plugin.Handle("get_active", handleActive)
 	plugin.Handle("list", handleList)
 	plugin.Handle("add:buffer", handleAddBuffer)
 	plugin.Handle("add:channel", handleAddChannel)
@@ -292,23 +292,17 @@ func saveProjects() {
 	plugin.KVSet("shared:active-project", nil)
 }
 
-// notifyProjectOpened notifies about a project being opened.
+// notifyProjectOpened notifies about a project being opened via events service.
 func notifyProjectOpened(proj *Project) {
-	// Create event payload
-	eventPayload, err := json.Marshal(map[string]interface{}{
-		"event":   "project:opened",
-		"project": proj,
+	evtPayload, _ := json.Marshal(map[string]interface{}{
+		"topic": "project:opened",
+		"data":  proj,
 	})
-	if err != nil {
-		plugin.Log("error", "Failed to marshal project opened event: "+err.Error())
-		return
-	}
 
-	// Route the event
 	plugin.RouteMessage(AlloyMessage{
-		Id:      "project-opened-" + fmt.Sprint(time.Now().UnixNano()),
-		Method:  "event",
-		Sender:  "project-manager",
-		Payload: eventPayload,
+		Method:  "publish",
+		Sender:  "project",
+		Target:  Some("events"),
+		Payload: evtPayload,
 	})
 }

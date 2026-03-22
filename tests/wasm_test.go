@@ -20,8 +20,6 @@ func TestWasmLoadMock(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "command-manager", "type": "native", "load_time": "boot"},
-			{"id": "events", "type": "native", "load_time": "boot"},
 			{"id": "mock", "type": "wasm", "path": mockPath, "load_time": "boot"},
 		},
 	}
@@ -38,10 +36,7 @@ func TestWasmLoadBulk(t *testing.T) {
 	buildDir := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins")
 
 	plugins := []string{"ai", "secrets", "health", "chat", "buffer"}
-	wasmPlugins := []map[string]any{
-		{"id": "command-manager", "type": "native", "load_time": "boot"},
-		{"id": "events", "type": "native", "load_time": "boot"},
-	}
+	wasmPlugins := []map[string]any{}
 	expectedIDs := []string{}
 
 	for _, p := range plugins {
@@ -81,8 +76,6 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 	// This proves that we can register it WITHOUT checking the file system yet.
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "command-manager", "type": "native", "load_time": "boot"},
-			{"id": "events", "type": "native", "load_time": "boot"},
 			{
 				"id":        "missing-plugin",
 				"type":      "wasm",
@@ -144,6 +137,7 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 	t.Log("Attempting to call lazy-load for missing binary...")
 	sendMsg(t, conn, api.Message{
 		ID:     "call-1",
+		Type:   api.TypeRequest,
 		Sender: "user",
 		Target: "missing-plugin",
 		Method: "phantom-call",
@@ -173,8 +167,6 @@ func TestWasmFunctionalSuite(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "command-manager", "type": "native", "load_time": "boot"},
-			{"id": "events", "type": "native", "load_time": "boot"},
 			{"id": "kv", "type": "native", "load_time": "boot"},
 			{
 				"id":           "chat",
@@ -187,7 +179,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 				"id":           "ai",
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "ai.wasm"),
-				"load_time":    "lazy",
+				"load_time":    "boot",
 				"capabilities": []map[string]string{{"method": "query"}},
 			},
 			{
@@ -229,6 +221,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	// 1. Verify Health (Loading it for the first time via request)
 	sendMsg(t, conn, api.Message{
 		ID:     "health-1",
+		Type:   api.TypeRequest,
 		Sender: "user",
 		Target: "health",
 		Method: "status",
@@ -275,15 +268,8 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	awaitResponse(t, collector, "buf-wasm-1")
 
 	// 4. Verify Chat and AI Agent (Subscription and Reaction)
-	// First, subscribe AI agent and user to chat events
+	// First, subscribe user to chat events (AI agent does it itself on start)
 	subReq, _ := json.Marshal(map[string]string{"topic": "chat:message"})
-	sendMsg(t, conn, api.Message{
-		ID:      "sub-ai",
-		Sender:  "ai",
-		Target:  "events",
-		Method:  "subscribe",
-		Payload: subReq,
-	})
 	sendMsg(t, conn, api.Message{
 		ID:      "sub-user",
 		Sender:  "user",
@@ -291,7 +277,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		Method:  "subscribe",
 		Payload: subReq,
 	})
-	time.Sleep(1 * time.Second) // Wait longer for subs to process in WASM
+	time.Sleep(2 * time.Second) // Wait longer for subs to process in WASM
 
 	chatReq, _ := json.Marshal(map[string]string{
 		"channel": "ai-test",

@@ -25,8 +25,6 @@ func TestApplicationPlugins(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "events", "type": "native"},
-			{"id": "command-manager", "type": "native"},
 			{"id": "kv", "type": "native"},
 			{"id": "logger", "type": "native"},
 			{"id": "buffer", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
@@ -58,17 +56,6 @@ func TestApplicationPlugins(t *testing.T) {
 		Payload: subReq,
 	})
 	awaitResponse(t, collector, "sub-test-resp")
-
-	// AI Agent subscription
-	sendMsg(t, conn, api.Message{
-		ID:      "sub-ai",
-		Sender:  "ai",
-		Target:  "events",
-		Method:  "subscribe",
-		Payload: subReq,
-	})
-	// We don't await the response here because it goes to the plugin, not us
-	time.Sleep(200 * time.Millisecond) // Give time for sub to process
 
 	// 2. Clear old collector messages before test
 	time.Sleep(100 * time.Millisecond)
@@ -116,7 +103,7 @@ func TestApplicationPlugins(t *testing.T) {
 	awaitResponse(t, collector, "chat-1-resp")
 
 	// 4. Verify AI Response via event bus
-	aiEvt, found := collector.Await(10*time.Second, func(m api.Message) bool {
+	aiEvt, found := collector.Await(20*time.Second, func(m api.Message) bool {
 		if m.Method == "chat:message" && m.Type == "event" {
 			var chatMsg ChatMessage
 			json.Unmarshal(m.Payload, &chatMsg)

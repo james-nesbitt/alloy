@@ -121,8 +121,8 @@ func (m *Manager) RouteMessage(ctx context.Context, pluginID string, msg api.Mes
 }
 
 // GetResponse gets a response from a plugin.
-func (m *Manager) GetResponse(ctx context.Context, pluginID string) (api.Message, error) {
-	return m.runtime.GetResponse(ctx, pluginID)
+func (m *Manager) GetResponse(ctx context.Context, pluginID string, requestID string) (api.Message, error) {
+	return m.runtime.GetResponse(ctx, pluginID, requestID)
 }
 
 // GetPluginCapabilities gets the capabilities of a plugin.

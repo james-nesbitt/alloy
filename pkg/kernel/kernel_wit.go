@@ -86,11 +86,15 @@ func NewWITKernel(
 
 // routeMessage routes messages to the appropriate destination.
 func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
-	k.mu.RLock()
-	defer k.mu.RUnlock()
+	k.logger.Debug("kernel routing message", "id", msg.ID, "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
 
 	// Apply interceptors
-	for _, interceptor := range k.interceptors {
+	k.mu.RLock()
+	interceptors := make([]api.Interceptor, len(k.interceptors))
+	copy(interceptors, k.interceptors)
+	k.mu.RUnlock()
+
+	for _, interceptor := range interceptors {
 		var cont bool
 		var err error
 		msg, cont, err = interceptor.PreRoute(ctx, msg)
@@ -105,11 +109,20 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 
 	// Route to frontends if this is a broadcast or event
 	if msg.Target == "" || msg.Target == "*" {
-		for connID, ch := range k.frontends {
+		k.mu.RLock()
+		frontends := make(map[string]chan<- api.Message, len(k.frontends))
+		for id, ch := range k.frontends {
+			frontends[id] = ch
+		}
+		k.mu.RUnlock()
+
+		for connID, ch := range frontends {
 			select {
 			case ch <- msg:
 			case <-ctx.Done():
+				return
 			case <-k.stopCh:
+				return
 			default:
 				k.logger.Warn("frontend channel full", "connID", connID)
 			}
@@ -123,30 +136,79 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 		return
 	}
 
-	if ch, ok := k.frontends[msg.Target]; ok {
+	k.logger.Debug("routing to specific target", "target", msg.Target, "msgID", msg.ID)
+
+	k.mu.RLock()
+	ch, isFrontend := k.frontends[msg.Target]
+	plugin, isPlugin := k.plugins[msg.Target]
+	_, isLazy := k.metadata[msg.Target]
+	k.mu.RUnlock()
+
+	if isFrontend {
 		select {
 		case ch <- msg:
 		default:
 			k.logger.Warn("frontend channel full", "target", msg.Target)
 		}
-	} else if plugin, ok := k.plugins[msg.Target]; ok {
-		// Asynchronous routing: we use a background task to handle it via HandleMessage
+		return
+	}
+
+	if isPlugin {
+		// Asynchronous routing
 		go func() {
+			k.logger.Debug("background handling message for plugin", "id", msg.Target)
 			resp, err := plugin.HandleMessage(ctx, msg)
-			if err == nil && resp.ID != "" && resp.Target != "" {
+			k.logger.Debug("plugin handle returned", "id", msg.Target, "respID", resp.ID)
+			if err != nil {
+				k.logger.Error("plugin handle failed", "id", msg.Target, "error", err)
+				return
+			}
+			if resp.ID != "" && resp.Target != "" {
 				k.RouteMessage(ctx, resp)
 			}
 		}()
-	} else if _, ok := k.metadata[msg.Target]; ok {
+		return
+	}
+
+	if isLazy {
 		// Target is a lazy-loaded plugin
+		k.logger.Debug("triggering lazy-load for plugin", "id", msg.Target)
 		if err := k.lazyLoadPlugin(ctx, msg.Target); err == nil {
-			if plugin, ok := k.plugins[msg.Target]; ok {
-				go func() { _, _ = plugin.HandleMessage(ctx, msg) }()
+			k.mu.RLock()
+			plugin, ok := k.plugins[msg.Target]
+			k.mu.RUnlock()
+			if ok {
+				go func() {
+					k.logger.Debug("background handling message for lazy-loaded plugin", "id", msg.Target)
+					resp, err := plugin.HandleMessage(ctx, msg)
+					if err != nil {
+						k.logger.Error("lazy-loaded plugin handle failed", "id", msg.Target, "error", err)
+						return
+					}
+					if resp.ID != "" && resp.Target != "" {
+						k.RouteMessage(ctx, resp)
+					}
+				}()
+			}
+		} else {
+			k.logger.Error("lazy-load failed", "id", msg.Target, "error", err)
+			// Return error response if this is a request
+			if msg.Type == api.TypeRequest || msg.Type == "" {
+				resp := api.Message{
+					ID:        msg.ID + "-resp",
+					Type:      api.TypeResponse,
+					Sender:    "system",
+					Target:    msg.Sender,
+					Payload:   []byte(fmt.Sprintf(`{"error":"failed to load plugin: %s"}`, err.Error())),
+					Timestamp: time.Now().Unix(),
+				}
+				k.RouteMessage(ctx, resp)
 			}
 		}
-	} else {
-		k.logger.Warn("message target not found", "target", msg.Target)
+		return
 	}
+
+	k.logger.Warn("message target not found", "target", msg.Target)
 }
 
 // handleMessageSync handles a synchronous message call.
@@ -225,9 +287,30 @@ func (k *WITKernel) cleanupLoading(id string, ch chan struct{}) {
 // RegisterPluginLoader registers a loader for a plugin.
 func (k *WITKernel) RegisterPluginLoader(pluginID string, loader api.PluginLoader, metadata api.PluginMetadata) {
 	k.mu.Lock()
-	defer k.mu.Unlock()
 	k.loaders[pluginID] = loader
 	k.metadata[pluginID] = metadata
+	k.mu.Unlock()
+
+	// Broadcast registration for lazy loader
+	reg := struct {
+		ID           string           `json:"id"`
+		Type         string           `json:"type"`
+		Capabilities []api.Capability `json:"capabilities"`
+	}{
+		ID:           pluginID,
+		Type:         "plugin",
+		Capabilities: metadata.Capabilities,
+	}
+	payload, _ := json.Marshal(reg)
+	go k.RouteMessage(context.Background(), api.Message{
+		ID:        "reg-evt-lazy-" + pluginID,
+		Type:      api.TypeEvent,
+		Sender:    "kernel",
+		Target:    "events",
+		Method:    "publish",
+		Payload:   []byte(fmt.Sprintf(`{"topic":"component:registered","data":%s}`, string(payload))),
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 // RegisterPlugin registers an already instantiated plugin.
@@ -276,10 +359,6 @@ func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 
 // RegisterWASMPlugin registers a WASM plugin with the kernel.
 func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
-	if err := k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, caps); err != nil {
-		return err
-	}
-
 	plugin := &witPluginWrapper{
 		id:      pluginID,
 		manager: k.wasmManager,
@@ -287,6 +366,10 @@ func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps [
 	}
 
 	k.RegisterPlugin(plugin)
+
+	if err := k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, caps); err != nil {
+		return err
+	}
 
 	// Explicitly set metadata to boot load time
 	k.mu.Lock()
@@ -374,7 +457,8 @@ func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (
 		if err != nil {
 			return api.Message{}, err
 		}
-		return p.manager.GetResponse(ctx, p.id)
+		resp, err := p.manager.GetResponse(ctx, p.id, msg.ID)
+		return resp, err
 	}
 	// For events, just route and return empty
 	err := p.manager.RouteMessage(ctx, p.id, msg)

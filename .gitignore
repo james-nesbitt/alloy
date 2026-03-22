@@ -11,6 +11,8 @@ plugins-bin/
 
 # Logs and test artifacts
 *.log
+*.test
+data/
 coverage.out
 coverdata/
 race_report.txt
@@ -19,6 +21,8 @@ smoke_test_output.log
 
 # Go environment
 vendor/
+go.work
+go.work.sum
 
 # IDEs
 .vscode/

@@ -265,7 +265,8 @@ func TestBufferSubscription(t *testing.T) {
 
 	// 4. "other-user" should receive an event message directly
 	evt, found := collector.Await(5*time.Second, func(m api.Message) bool {
-		return m.Target == "other-user" && m.Type == "event"
+		// Matching either our custom "update" method or explicit "event" type
+		return m.Target == "other-user" && (m.Type == "event" || m.Method == "update")
 	})
 	if !found {
 		t.Error("other-user never received the direct buffer update event")

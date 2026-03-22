@@ -23,21 +23,9 @@ go mod edit -replace github.com/james-nesbitt/alloy/pkg/wasm/guest=../../../pkg/
 sed -i 's|^go .*|go 1.25.8|' go.mod
 go mod tidy || true
 
-# Check if wasm-opt is available
-REAL_WASMOPT="$PROJECT_ROOT/build/tmp/bin/wasm-opt"
-OPT_FLAG="-opt=s"
-
-if [ -f "$REAL_WASMOPT" ]; then
-    export WASMOPT="$REAL_WASMOPT"
-    echo ">> Using local wasm-opt: $REAL_WASMOPT"
-elif command -v wasm-opt &> /dev/null; then
-    echo ">> Using system wasm-opt"
-else
-    # TinyGo requires wasm-opt for non-zero opt levels on most targets
-    echo ">> No wasm-opt found, disabling optimization"
-    export WASMOPT=""
-    OPT_FLAG="-opt=0"
-fi
+# Provide mock wasm-opt
+export WASMOPT="$PROJECT_ROOT/build/tmp/bin/wasm-opt"
+OPT_FLAG="-opt=1" # Use low opt to trigger wasm-opt flow with predictable files
 
 echo ">> Compiling $PLUGIN_NAME into $BUILD_DIR..."
 tinygo build -target=wasip1 -o "$BUILD_DIR/$PLUGIN_NAME.wasm" -no-debug $OPT_FLAG .

@@ -39,7 +39,7 @@ var plugin *Plugin
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = NewPlugin("chat-plugin").
+	plugin = NewPlugin("chat").
 		WithMetadata(
 			"Chat Plugin", 
 			"Provides chat functionality including channels and direct messages",
@@ -99,11 +99,16 @@ func handleSendMessage(msg AlloyMessage) AlloyMessage {
 	newHistoryData, _ := json.Marshal(history)
 	plugin.KVSet(historyKey, newHistoryData)
 
-	// Broadcast the message
+	// Broadcast the message via events service
+	evtPayload, _ := json.Marshal(map[string]interface{}{
+		"topic": "chat:message",
+		"data":  chatMsg,
+	})
 	plugin.RouteMessage(AlloyMessage{
-		Method:  "chat:message",
-		Sender:  "chat-plugin",
-		Payload: newHistoryData,
+		Method:  "publish",
+		Sender:  "chat",
+		Target:  Some("events"),
+		Payload: evtPayload,
 	})
 
 	return plugin.Reply(msg, chatMsg)

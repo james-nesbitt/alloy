@@ -124,6 +124,7 @@ func main() {
 	plugin.Handle("provider:set", handleProviderSet)
 	plugin.Handle("query", handleQuery)
 	plugin.Handle("summarize", handleSummarize)
+	plugin.Handle("chat:message", handleChatMessageEvent)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -132,9 +133,8 @@ func main() {
 		_, err := configStore.Get("current")
 		if err != nil {
 			defaultConfig := ProviderConfig{
-				Type:  ProviderOllama,
-				URL:   "http://127.0.0.1:11434",
-				Model: "llama3",
+				Type:  ProviderMock,
+				Model: "mock-model",
 			}
 			_ = configStore.Set("current", defaultConfig)
 		}
@@ -144,11 +144,12 @@ func main() {
 	// Set up event handling
 	plugin.OnStart(func() {
 		// Subscribe to chat events
+		subPayload, _ := json.Marshal(map[string]string{"topic": "chat:message"})
 		plugin.RouteMessage(AlloyMessage{
-			Method: "subscribe",
-			Sender: "ai",
-			Target: Some("events"),
-			Payload: json.RawMessage(`{"event":"chat:message"}`),
+			Method:  "subscribe",
+			Sender:  "ai",
+			Target:  Some("events"),
+			Payload: subPayload,
 		})
 	})
 
@@ -555,32 +556,20 @@ type ProjectInfo struct {
 	Description string `json:"description"`
 }
 
-// handleEvent handles incoming events.
-func handleEvent(msg AlloyMessage) {
-	// This would be called when an event is received
-	if msg.Method == "event" && len(msg.Payload) > 0 {
-		var event struct {
-			Event   string          `json:"event"`
-			Payload json.RawMessage `json:"payload"`
-		}
-		if err := json.Unmarshal(msg.Payload, &event); err == nil {
-			if event.Event == "chat:message" {
-				handleChatMessage(event.Payload)
-			}
-		}
-	}
-}
-
-// handleChatMessage handles chat messages.
-func handleChatMessage(payload json.RawMessage) {
+// handleChatMessageEvent handles chat message events delivered by the events service.
+func handleChatMessageEvent(msg AlloyMessage) AlloyMessage {
+	plugin.Log("info", fmt.Sprintf("AI received event: %s", msg.Method))
 	var chatMsg ChatMessage
-	if err := json.Unmarshal(payload, &chatMsg); err != nil {
-		return
+	if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
+		plugin.Log("error", "failed to unmarshal chat message: "+err.Error())
+		return AlloyMessage{}
 	}
+
+	plugin.Log("info", fmt.Sprintf("AI message from %s: %s", chatMsg.Sender, chatMsg.Content))
 
 	// Skip messages from ourselves or the chat plugin
 	if chatMsg.Sender == "ai" || chatMsg.Sender == "chat" {
-		return
+		return AlloyMessage{}
 	}
 
 	// Check if the message is an AI command
@@ -594,6 +583,7 @@ func handleChatMessage(payload json.RawMessage) {
 			sendChatResponse(chatMsg.Channel, response)
 		}
 	}
+	return AlloyMessage{}
 }
 
 // sendChatResponse sends a response to a chat channel.

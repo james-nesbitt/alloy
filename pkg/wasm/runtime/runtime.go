@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,10 +43,15 @@ type Instance struct {
 	mod          wazeroapi.Module
 	logger       *slog.Logger
 	msgChan      chan api.Message
-	respChan     chan api.Message
 	capabilities []api.Capability
 	status       Status
 	metadata     api.PluginMetadata
+
+	startedCh chan struct{}
+	
+	// pending responses: msgID -> channel
+	pmu     sync.Mutex
+	pending map[string]chan api.Message
 }
 
 // Metadata returns the plugin's metadata.
@@ -56,7 +62,10 @@ func (i *Instance) Metadata() api.PluginMetadata {
 // Close closes the plugin instance.
 func (i *Instance) Close(ctx context.Context) error {
 	i.cancel()
-	return i.mod.Close(ctx)
+	if i.mod != nil {
+		return i.mod.Close(ctx)
+	}
+	return nil
 }
 
 // Status represents the plugin's execution status.
@@ -79,7 +88,7 @@ func NewRuntime(
 	call func(ctx context.Context, msg api.Message) (api.Message, error),
 ) (*Runtime, error) {
 	r := wazero.NewRuntime(ctx)
-	logger.Info("creating new WIT-based runtime (v2.6-stable)")
+	logger.Info("creating new WIT-based runtime (v2.9-async-compile)")
 
 	rt := &Runtime{
 		runtime:  r,
@@ -151,6 +160,16 @@ func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr,
 
 func (r *Runtime) internalStarted(ctx context.Context, mod wazeroapi.Module) {
 	r.logger.Info("wasm plugin ready", "plugin", mod.Name())
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+	if ok && instance.startedCh != nil {
+		select {
+		case <-instance.startedCh:
+		default:
+			close(instance.startedCh)
+		}
+	}
 }
 
 func (r *Runtime) internalLog(ctx context.Context, mod wazeroapi.Module, levelPtr, levelLen, msgPtr, msgLen uint32) {
@@ -316,7 +335,7 @@ func (r *Runtime) internalHandleMessage(
 	timestamp int64, resultPtr uint32,
 ) {
 	msg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
-	r.writeMessage(ctx, mod, resultPtr, api.Message{ID: msg.ID + "-error", Method: "unimplemented"})
+	r.writeMessage(ctx, mod, resultPtr, api.Message{ID: msg.ID + "-resp", Method: "unimplemented"})
 }
 
 func (r *Runtime) internalRouteMessage(
@@ -339,7 +358,7 @@ func (r *Runtime) internalCall(
 	resp, err := r.callFn(ctx, apiMsg)
 	if err != nil {
 		resp = api.Message{
-			ID:      apiMsg.ID + "-error",
+			ID:      apiMsg.ID + "-resp",
 			Method:  apiMsg.Method,
 			Sender:  "kernel",
 			Payload: []byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
@@ -349,8 +368,9 @@ func (r *Runtime) internalCall(
 }
 
 func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
+	pluginID := mod.Name()
 	r.mu.RLock()
-	instance, ok := r.plugins[mod.Name()]
+	instance, ok := r.plugins[pluginID]
 	r.mu.RUnlock()
 	
 	if !ok {
@@ -360,10 +380,14 @@ func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Modu
 
 	select {
 	case msg := <-instance.msgChan:
+		r.logger.Debug("wasm plugin pulled message", "id", pluginID, "msgID", msg.ID)
 		mod.Memory().WriteUint32Le(resultPtr, 1) // is_some = true
 		r.writeMessage(ctx, mod, resultPtr+8, msg) 
-	default:
+	case <-time.After(100 * time.Millisecond):
+		// No message after wait, return None
 		mod.Memory().WriteUint32Le(resultPtr, 0) // is_some = false
+	case <-ctx.Done():
+		mod.Memory().WriteUint32Le(resultPtr, 0)
 	}
 }
 
@@ -374,14 +398,36 @@ func (r *Runtime) internalSendResponse(
 	timestamp int64,
 ) {
 	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
+	
 	r.mu.RLock()
 	instance, ok := r.plugins[mod.Name()]
 	r.mu.RUnlock()
+
 	if ok {
-		select {
-		case instance.respChan <- apiMsg:
-		default:
+		instance.pmu.Lock()
+		defer instance.pmu.Unlock()
+
+		// Try to find a waiter for this response
+		if ch, ok := instance.pending[apiMsg.ID]; ok {
+			select {
+			case ch <- apiMsg:
+			default:
+			}
+			return
 		}
+		
+		// check for suffix match (remove -resp)
+		reqID := strings.TrimSuffix(apiMsg.ID, "-resp")
+		if ch, ok := instance.pending[reqID]; ok {
+			select {
+			case ch <- apiMsg:
+			default:
+			}
+			return
+		}
+
+		// Fallback: route through normal kernel loop
+		go r.routerFn(ctx, apiMsg)
 	}
 }
 
@@ -397,43 +443,69 @@ func (r *Runtime) LoadPlugin(
 		return nil, fmt.Errorf("failed to create plugin storage dir: %w", err)
 	}
 
-	config := wazero.NewModuleConfig().
-		WithName(id).
-		WithStdout(newLoggerWriter(r.logger, id, "stdout")).
-		WithStderr(newLoggerWriter(r.logger, id, "stderr")).
-		WithFS(os.DirFS(pluginDir))
-
-	compiled, err := r.runtime.CompileModule(ctx, wasmBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile module %s: %w", id, err)
-	}
-
 	instCtx, instCancel := context.WithCancel(context.Background())
-	mod, err := r.runtime.InstantiateModule(instCtx, compiled, config)
-	if err != nil {
-		instCancel()
-		return nil, fmt.Errorf("failed to instantiate module %s: %w", id, err)
-	}
+	startedCh := make(chan struct{})
 
 	instance := &Instance{
 		id:           id,
 		ctx:          instCtx,
 		cancel:       instCancel,
-		mod:          mod,
 		logger:       r.logger,
 		msgChan:      make(chan api.Message, 1024),
-		respChan:     make(chan api.Message, 1024),
 		capabilities: caps,
 		status:       StatusRunning,
 		metadata: api.PluginMetadata{
 			ID:           id,
 			Capabilities: caps,
 		},
+		startedCh: startedCh,
+		pending:   make(map[string]chan api.Message),
 	}
 
 	r.mu.Lock()
 	r.plugins[id] = instance
 	r.mu.Unlock()
+
+	r.logger.Debug("created new plugin instance", "id", id, "ptr", fmt.Sprintf("%p", instance))
+
+	// Compilation and Instantion happen in background to avoid blocking other plugins or host boot
+	go func() {
+		r.logger.Debug("compiling wasm module", "id", id, "bytes", len(wasmBytes))
+		compiled, err := r.runtime.CompileModule(instCtx, wasmBytes)
+		if err != nil {
+			r.logger.Error("failed to compile module", "id", id, "error", err)
+			instCancel()
+			return
+		}
+		
+		r.logger.Debug("instantiating wasm module", "id", id)
+
+		config := wazero.NewModuleConfig().
+			WithName(id).
+			WithStdout(newLoggerWriter(r.logger, id, "stdout")).
+			WithStderr(newLoggerWriter(r.logger, id, "stderr")).
+			WithFS(os.DirFS(pluginDir))
+
+		mod, err := r.runtime.InstantiateModule(instCtx, compiled, config)
+		if err != nil {
+			r.logger.Error("failed to instantiate module", "id", id, "error", err)
+			instCancel()
+			return
+		}
+		
+		r.mu.Lock()
+		instance.mod = mod
+		r.mu.Unlock()
+	}()
+
+	// Wait for the plugin to signal it's ready (via internalStarted)
+	// We wait up to 10 seconds for initial progress, but don't block boot loop forever
+	select {
+	case <-startedCh:
+		r.logger.Info("plugin initialization signal received", "id", id)
+	case <-time.After(10 * time.Second):
+		r.logger.Warn("plugin initialization timed out, continuing anyway", "id", id)
+	}
 
 	// Initial Load: check if we have metadata in store
 	go func() {
@@ -458,7 +530,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 	for _, instance := range r.plugins {
 		instance.cancel()
-		_ = instance.mod.Close(ctx)
+		if instance.mod != nil {
+			_ = instance.mod.Close(ctx)
+		}
 	}
 
 	return r.runtime.Close(ctx)
@@ -474,7 +548,10 @@ func (r *Runtime) UnloadPlugin(ctx context.Context, id string) error {
 
 	if ok {
 		instance.cancel()
-		return instance.mod.Close(ctx)
+		if instance.mod != nil {
+			return instance.mod.Close(ctx)
+		}
+		return nil
 	}
 	return nil
 }
@@ -486,6 +563,15 @@ func (r *Runtime) RouteMessage(ctx context.Context, pluginID string, msg api.Mes
 	if !ok {
 		return errors.New("plugin not found")
 	}
+	
+	// Pre-register response channel if it's a request
+	if msg.Type == api.TypeRequest {
+		respCh := make(chan api.Message, 1)
+		instance.pmu.Lock()
+		instance.pending[msg.ID] = respCh
+		instance.pmu.Unlock()
+	}
+
 	select {
 	case instance.msgChan <- msg:
 		return nil
@@ -496,19 +582,38 @@ func (r *Runtime) RouteMessage(ctx context.Context, pluginID string, msg api.Mes
 	}
 }
 
-func (r *Runtime) GetResponse(ctx context.Context, pluginID string) (api.Message, error) {
+func (r *Runtime) GetResponse(ctx context.Context, pluginID string, requestID string) (api.Message, error) {
 	r.mu.RLock()
 	instance, ok := r.plugins[pluginID]
 	r.mu.RUnlock()
 	if !ok {
 		return api.Message{}, errors.New("plugin not found")
 	}
+
+	instance.pmu.Lock()
+	respCh, ok := instance.pending[requestID]
+	instance.pmu.Unlock()
+	
+	if !ok {
+		// FALLBACK: If it wasn't pre-registered (unlikely now), create it.
+		respCh = make(chan api.Message, 1)
+		instance.pmu.Lock()
+		instance.pending[requestID] = respCh
+		instance.pmu.Unlock()
+	}
+
+	defer func() {
+		instance.pmu.Lock()
+		delete(instance.pending, requestID)
+		instance.pmu.Unlock()
+	}()
+
 	select {
-	case resp := <-instance.respChan:
+	case resp := <-respCh:
 		return resp, nil
 	case <-ctx.Done():
 		return api.Message{}, ctx.Err()
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		return api.Message{}, errors.New("timeout waiting for WASM response")
 	}
 }
