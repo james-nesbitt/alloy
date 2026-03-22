@@ -130,22 +130,62 @@ func SortItems(items []SearchItem) {
 	})
 }
 
-// FuzzyMatch performs a simple case-insensitive fuzzy check.
-func FuzzyMatch(target, input string) bool {
+// FuzzyScore calculates a numeric match quality (higher is better).
+func FuzzyScore(target, input string) int {
 	if input == "" {
-		return true
+		return 100 // Base score for no input
 	}
-	target = strings.ToLower(target)
-	input = strings.ToLower(input)
+	targetLower := strings.ToLower(target)
+	inputLower := strings.ToLower(input)
 
+	// 1. Exact match bonus
+	if targetLower == inputLower {
+		return 1000
+	}
+
+	// 2. Prefix match bonus
+	if strings.HasPrefix(targetLower, inputLower) {
+		return 500 + (len(input) * 10)
+	}
+
+	// 3. Subsequence match
+	score := 0
 	inputIdx := 0
-	for targetIdx := 0; targetIdx < len(target); targetIdx++ {
-		if target[targetIdx] == input[inputIdx] {
+	lastMatchIdx := -1
+	consecutiveBonus := 0
+
+	for targetIdx := 0; targetIdx < len(targetLower); targetIdx++ {
+		if targetLower[targetIdx] == inputLower[inputIdx] {
+			// Basic match point
+			score += 10
+
+			// Bonus for consecutive characters
+			if lastMatchIdx != -1 && targetIdx == lastMatchIdx+1 {
+				consecutiveBonus += 5
+				score += consecutiveBonus
+			} else {
+				consecutiveBonus = 0
+			}
+
+			// Bonus for match at word boundary (space, hyphen, underscore)
+			if targetIdx == 0 || targetLower[targetIdx-1] == ' ' || targetLower[targetIdx-1] == '-' || targetLower[targetIdx-1] == '_' || targetLower[targetIdx-1] == ':' {
+				score += 50
+			}
+
+			lastMatchIdx = targetIdx
 			inputIdx++
 		}
-		if inputIdx == len(input) {
-			return true
+		if inputIdx == len(inputLower) {
+			// Found all characters. Penalize for total length gap (prefer shorter matches)
+			score -= (len(target) - len(input))
+			return score
 		}
 	}
-	return false
+
+	return -1 // No match
+}
+
+// FuzzyMatch is kept for backward compatibility but calls FuzzyScore.
+func FuzzyMatch(target, input string) bool {
+	return FuzzyScore(target, input) > 0
 }

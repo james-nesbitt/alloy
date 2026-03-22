@@ -769,6 +769,7 @@ type CommandOption struct {
 	Method      string
 	Status      string
 	Frequency   int
+	Score       int
 }
 
 func (m model) filteredCommands() []CommandOption {
@@ -777,11 +778,13 @@ func (m model) filteredCommands() []CommandOption {
 	if m.mode == ModeCommand && m.selectType == SelectProject {
 		input := m.commandInput.Value()
 		for _, p := range m.projects {
-			if frontend.FuzzyMatch(p.Name, input) {
+			score := frontend.FuzzyScore(p.Name, input)
+			if score > 0 {
 				results = append(results, CommandOption{
 					Raw:         p.ID,
 					Display:     p.Name,
 					Description: p.Description,
+					Score:       score,
 				})
 			}
 		}
@@ -798,7 +801,8 @@ func (m model) filteredCommands() []CommandOption {
 		// Flatten the entire tree and fuzzy find
 		flattened := m.commandTree.Flatten("")
 		for _, item := range flattened {
-			if frontend.FuzzyMatch(item.FullTitle, input) {
+			score := frontend.FuzzyScore(item.FullTitle, input)
+			if score > 0 {
 				status := "running"
 				if s, ok := m.statuses[item.Target]; ok {
 					status = s
@@ -810,6 +814,7 @@ func (m model) filteredCommands() []CommandOption {
 					Description: item.Description,
 					Status:      status,
 					Frequency:   m.frequency[item.Target+" "+item.Method],
+					Score:       score,
 				})
 			}
 		}
@@ -826,11 +831,9 @@ func (m model) filteredCommands() []CommandOption {
 				}
 			}
 
-			// 2. Exact prefix match bonus
-			prefI := strings.HasPrefix(results[i].Display, input)
-			prefJ := strings.HasPrefix(results[j].Display, input)
-			if prefI != prefJ {
-				return prefI
+			// 2. Fuzzy Score (Prefix match + score)
+			if results[i].Score != results[j].Score {
+				return results[i].Score > results[j].Score
 			}
 
 			// 3. Recency (last used in session)
@@ -861,7 +864,11 @@ func (m model) filteredCommands() []CommandOption {
 			for _, k := range keys {
 				child := node.Children[k]
 				// Match against key or method name
-				if frontend.FuzzyMatch(k, input) || frontend.FuzzyMatch(child.Method, input) {
+				scoreK := frontend.FuzzyScore(k, input)
+				scoreM := frontend.FuzzyScore(child.Method, input)
+				score := max(scoreK, scoreM)
+
+				if score > 0 {
 					status := "running"
 					if s, ok := m.statuses[child.Target]; ok {
 						status = s
@@ -876,6 +883,7 @@ func (m model) filteredCommands() []CommandOption {
 						Method:      child.Method,
 						Status:      status,
 						Frequency:   m.frequency[child.Target+" "+child.Method],
+						Score:       score,
 					})
 				}
 			}
@@ -890,6 +898,11 @@ func (m model) filteredCommands() []CommandOption {
 						return true
 					}
 				}
+				
+				if results[i].Score != results[j].Score {
+					return results[i].Score > results[j].Score
+				}
+
 				ri := m.recency[results[i].Raw]
 				rj := m.recency[results[j].Raw]
 				if ri != rj {
@@ -976,6 +989,13 @@ func min(a, b int) int {
 	return b
 }
 
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (m model) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
@@ -1043,19 +1063,49 @@ func (m model) View() string {
 		} else {
 			filtered := m.filteredCommands()
 			if len(filtered) > 0 {
-				// Live Preview Panel
+				// Live Preview Panel 
 				selected := filtered[m.selectedCmdIdx]
-				previewStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("7")).Padding(0, 1).Width(m.width)
-				previewView := previewStyle.Render(fmt.Sprintf("\n PREVIEW: %s\n Description: %s\n", selected.Display, selected.Description))
-				view = lipgloss.JoinVertical(lipgloss.Left, view, previewView)
+				
+				previewStyle := lipgloss.NewStyle().
+					Background(lipgloss.Color("0")).
+					Foreground(lipgloss.Color("7")).
+					Border(lipgloss.RoundedBorder()).
+					BorderForeground(lipgloss.Color("62")).
+					Padding(0, 1).
+					Width(m.width - 2)
+
+				// Construct detailed preview
+				statusLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("● ONLINE")
+				if s, ok := m.statuses[strings.Split(selected.Raw, " ")[0]]; ok && s == "crashed" {
+					statusLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✘ CRASHED")
+				}
+				
+				previewContent := fmt.Sprintf(
+					"%s  %s\n\n%s\n\n%s",
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(selected.Display),
+					statusLabel,
+					lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(selected.Description),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Usage: " + selected.Raw),
+				)
+
+				view = lipgloss.JoinVertical(lipgloss.Left, view, previewStyle.Render(previewContent))
 
 				listStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
 				selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
+				marginaliaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Italic(true)
 
 				var rows []string
+				lastTarget := ""
 				for i, opt := range filtered {
-					label := opt.Display
+					// Grouping
+					target := strings.Split(opt.Raw, " ")[0]
+					if !m.isLeader && target != lastTarget {
+						groupHeader := lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Bold(true).Render(" ── " + strings.ToUpper(target) + " ")
+						rows = append(rows, groupHeader)
+						lastTarget = target
+					}
 
+					label := opt.Display
 					statusStr := ""
 					switch opt.Status {
 					case "crashed":
@@ -1066,10 +1116,9 @@ func (m model) View() string {
 						statusStr = " (LOADING...)"
 					case "registered":
 						statusStr = " (LAZY)"
-					case "active":
-						statusStr = "" // Active is normal, omit for brevity
 					}
 
+					var line string
 					if m.isLeader {
 						annotation := ""
 						if opt.Annotation != "" {
@@ -1079,14 +1128,27 @@ func (m model) View() string {
 						if opt.IsDir {
 							method = "..."
 						}
-						label = fmt.Sprintf("%-2s  %s%-15s%s", opt.Display, annotation, method, statusStr)
+						
+						// Multi-column leader style
+						left := fmt.Sprintf(" %-2s %s%-15s", opt.Display, annotation, method)
+						right := marginaliaStyle.Render(opt.Description + statusStr)
+						
+						// Calculate padding
+						pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
+						if pad < 0 { pad = 0 }
+						line = left + strings.Repeat(" ", pad) + right
 					} else {
-						label = fmt.Sprintf("%-20s%s", opt.Display, statusStr)
+						// standard command style
+						left := " " + label
+						right := marginaliaStyle.Render(opt.Description + statusStr)
+						
+						pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
+						if pad < 0 { pad = 0 }
+						line = left + strings.Repeat(" ", pad) + right
 					}
 
-					line := fmt.Sprintf(" %-20s %s", label, opt.Description)
 					if i == m.selectedCmdIdx {
-						rows = append(rows, selectedStyle.Render(line))
+						rows = append(rows, selectedStyle.Width(m.width).Render(line))
 					} else {
 						switch opt.Status {
 						case "crashed", "error":
