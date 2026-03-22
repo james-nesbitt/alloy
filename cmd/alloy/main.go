@@ -16,6 +16,8 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 )
 
+var defaultInsecure = os.Getenv("ALLOY_INSECURE") == "true"
+
 func getAlloyRuntimeDir() string {
 	if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
 		return filepath.Join(run, "alloy")
@@ -69,6 +71,7 @@ func usage() {
 	fmt.Println("  --socket ADDR                 Connect to existing core at ADDR")
 	fmt.Println("  --dedicated                   Launch a dedicated core instance for this frontend")
 	fmt.Println("  --network                     When using --dedicated, use a TCP network socket instead of Unix")
+	fmt.Println("  --insecure                    Disable mTLS for this session")
 	os.Exit(1)
 }
 
@@ -125,6 +128,7 @@ func launchCore(args []string) {
 	dataDir := fs.String("data-dir", "./data", "Data directory")
 	provision := fs.String("provision", "", "Provisioning file")
 	debug := fs.Bool("debug", false, "Enable debug logging")
+	_ = fs.Bool("insecure", defaultInsecure, "Disable mTLS")
 	fs.Parse(args)
 
 	bin, err := findBinary("alloy-core")
@@ -139,6 +143,9 @@ func launchCore(args []string) {
 	if *debug {
 		cmdArgs = append(cmdArgs, "--debug")
 	}
+	// Note: core doesn't currently use --insecure flag itself, it uses the nil tls config 
+	// unlesscerts are loaded, but we should probably add it later.
+	// For now, the core is always plain if we don't load certs.
 
 	cmd := exec.Command(bin, cmdArgs...)
 	cmd.Stdout = os.Stdout
@@ -169,6 +176,7 @@ func launchFrontend(name string, args []string) {
 	socket := fs.String("socket", "", "Connect to existing socket")
 	dedicated := fs.Bool("dedicated", false, "Launch dedicated core")
 	network := fs.Bool("network", false, "Use network socket for dedicated core")
+	insecure := fs.Bool("insecure", defaultInsecure, "Disable mTLS")
 	fs.Parse(args)
 
 	bin, err := findBinary(name)
@@ -179,8 +187,13 @@ func launchFrontend(name string, args []string) {
 	targetSocket := *socket
 	var coreCmd *exec.Cmd
 
+	forceInsecure := *insecure
+	if *dedicated {
+		forceInsecure = true
+	}
+
 	if *dedicated || targetSocket == "" {
-		// Launch a dedicated core
+		// Launch a dedicated core (Dedicated cores are always insecure by default for now)
 		coreBin, err := findBinary("alloy-core")
 		if err != nil {
 			log.Fatalf("Fatal: alloy-core binary not found for dedicated mode. %v", err)
@@ -196,6 +209,7 @@ func launchFrontend(name string, args []string) {
 		targetSocket = addr
 
 		coreCmd = exec.Command(coreBin, "--listen", addr)
+		// Propagate logs to stderr only so we don't mess up TUI/GUI output
 		coreCmd.Stderr = os.Stderr
 
 		fmt.Printf(">> Starting dedicated core on %s...\n", addr)
@@ -211,6 +225,13 @@ func launchFrontend(name string, args []string) {
 	}
 
 	feArgs := []string{"--socket", targetSocket}
+	if forceInsecure {
+		feArgs = append(feArgs, "--insecure")
+	}
+
+	// Any remaining arguments after -- are passed to the frontend
+	feArgs = append(feArgs, fs.Args()...)
+
 	cmd := exec.Command(bin, feArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
