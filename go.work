@@ -2,5 +2,14 @@ go 1.25.8
 
 use (
 	.
-	./pkg/wasm2/bindings/guest
+	./pkg/wasm/bindings/guest
+	./pkg/wasm/guest
+	./plugins/wasm/ai
+	./plugins/wasm/buffer
+	./plugins/wasm/chat
+	./plugins/wasm/health
+	./plugins/wasm/iam
+	./plugins/wasm/project
+	./plugins/wasm/secrets
+	./plugins/wasm/tasks
 )

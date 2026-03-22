@@ -3,8 +3,8 @@
 package main
 
 import (
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
 	"encoding/json"
-	. "github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest"
 )
 
 func main() {

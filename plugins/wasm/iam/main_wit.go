@@ -3,11 +3,12 @@
 package main
 
 import (
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	"./wit"
 )
 
 // Policy represents an access control policy.
@@ -126,12 +127,12 @@ func handleCheck(msg AlloyMessage) AlloyMessage {
 	var req AuthorizationRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		plugin.Log("warn", "Invalid authorization request: "+err.Error())
-		return Reply(msg, AuthorizationResponse{Allowed: false})
+		return plugin.Reply(msg, AuthorizationResponse{Allowed: false})
 	}
 
 	// Systems and internal kernel calls are self-authorized
 	if req.Actor == "kernel" || req.Actor == "system" {
-		return Reply(msg, AuthorizationResponse{Allowed: true})
+		return plugin.Reply(msg, AuthorizationResponse{Allowed: true})
 	}
 
 	// Get the actor's role
@@ -145,7 +146,7 @@ func handleCheck(msg AlloyMessage) AlloyMessage {
 	policy, err := policies.Get(role)
 	if err != nil {
 		plugin.Log("warn", "No policy found for role: "+role)
-		return Reply(msg, AuthorizationResponse{Allowed: false})
+		return plugin.Reply(msg, AuthorizationResponse{Allowed: false})
 	}
 
 	// Check if the action is allowed
@@ -162,40 +163,40 @@ func handleCheck(msg AlloyMessage) AlloyMessage {
 	plugin.Log("debug", fmt.Sprintf("Authorization check: actor=%s, role=%s, action=%s, allowed=%v", 
 		req.Actor, role, action, allowed))
 
-	return Reply(msg, AuthorizationResponse{Allowed: allowed})
+	return plugin.Reply(msg, AuthorizationResponse{Allowed: allowed})
 }
 
 // handlePolicySet handles setting policies.
 func handlePolicySet(msg AlloyMessage) AlloyMessage {
 	var req PolicySetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_policy: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_policy: "+err.Error())
 	}
 
 	// Save the policy
 	if err := policies.Set(req.Policy.Role, req.Policy); err != nil {
-		return ErrorReply(msg, "failed_to_save_policy: "+err.Error())
+		return plugin.ErrorReply(msg, "failed_to_save_policy: "+err.Error())
 	}
 
 	plugin.Log("info", fmt.Sprintf("Set policy for role: %s (%d permissions)", 
 		req.Policy.Role, len(req.Policy.Permissions)))
 
-	return Reply(msg, map[string]string{"status": "ok"})
+	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }
 
 // handleIdentitySet handles setting identities.
 func handleIdentitySet(msg AlloyMessage) AlloyMessage {
 	var req IdentitySetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_identity: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_identity: "+err.Error())
 	}
 
 	// Save the identity
 	if err := identities.Set(req.Actor, req.Role); err != nil {
-		return ErrorReply(msg, "failed_to_save_identity: "+err.Error())
+		return plugin.ErrorReply(msg, "failed_to_save_identity: "+err.Error())
 	}
 
 	plugin.Log("info", fmt.Sprintf("Set role %s for actor: %s", req.Role, req.Actor))
 
-	return Reply(msg, map[string]string{"status": "ok"})
+	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }

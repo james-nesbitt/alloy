@@ -3,11 +3,12 @@
 package main
 
 import (
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"./wit"
 )
 
 // ChatMessage represents a message in a channel.
@@ -76,12 +77,12 @@ func main() {
 func handleSendMessage(msg AlloyMessage) AlloyMessage {
 	var chatMsg ChatMessage
 	if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
-		return ErrorReply(msg, "failed_to_unmarshal_chat_message")
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_chat_message")
 	}
 
 	chatMsg.Sender = msg.Sender
 	chatMsg.Timestamp = time.Now().Unix()
-	chatMsg.ID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	chatMsg.Id = fmt.Sprintf("msg-%d", time.Now().UnixNano())
 
 	// Persist history
 	historyKey := "history:" + chatMsg.Channel
@@ -104,18 +105,18 @@ func handleSendMessage(msg AlloyMessage) AlloyMessage {
 		Payload: newHistoryData,
 	})
 
-	return Reply(msg, chatMsg)
+	return plugin.Reply(msg, chatMsg)
 }
 
 // handleDirectSend handles sending a direct message.
 func handleDirectSend(msg AlloyMessage) AlloyMessage {
 	var dm DirectMessage
 	if err := json.Unmarshal(msg.Payload, &dm); err != nil {
-		return ErrorReply(msg, "failed_to_unmarshal_dm_message")
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_dm_message")
 	}
 	dm.From = msg.Sender
 	dm.Timestamp = time.Now().Unix()
-	dm.ID = fmt.Sprintf("dm-%d", time.Now().UnixNano())
+	dm.Id = fmt.Sprintf("dm-%d", time.Now().UnixNano())
 
 	// Create a key for the message pair
 	pairKey := "dm:" + dm.From + ":" + dm.To
@@ -143,14 +144,14 @@ func handleDirectSend(msg AlloyMessage) AlloyMessage {
 		Payload: newHistoryData,
 	})
 
-	return Reply(msg, dm)
+	return plugin.Reply(msg, dm)
 }
 
 // handlePresenceUpdate handles updating user presence.
 func handlePresenceUpdate(msg AlloyMessage) AlloyMessage {
 	var presence Presence
 	if err := json.Unmarshal(msg.Payload, &presence); err != nil {
-		return ErrorReply(msg, "failed_to_unmarshal_presence")
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_presence")
 	}
 	presence.User = msg.Sender
 	presence.Timestamp = time.Now().Unix()
@@ -185,7 +186,7 @@ func handlePresenceUpdate(msg AlloyMessage) AlloyMessage {
 		Payload: msg.Payload,
 	})
 
-	return Reply(msg, map[string]string{"status": "updated"})
+	return plugin.Reply(msg, map[string]string{"status": "updated"})
 }
 
 // handlePresenceList handles listing online users.
@@ -210,7 +211,7 @@ func handlePresenceList(msg AlloyMessage) AlloyMessage {
 	updatedData, _ := json.Marshal(presenceList)
 	plugin.KVSet("chat:presence", updatedData)
 
-	return Reply(msg, presenceList)
+	return plugin.Reply(msg, presenceList)
 }
 
 // handleDirectHistory handles getting direct message history.
@@ -219,7 +220,7 @@ func handleDirectHistory(msg AlloyMessage) AlloyMessage {
 		To string `json:"to"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "failed_to_unmarshal_request")
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
 	// Create a key for the message pair
@@ -235,7 +236,7 @@ func handleDirectHistory(msg AlloyMessage) AlloyMessage {
 		_ = json.Unmarshal(historyData, &history)
 	}
 
-	return Reply(msg, history)
+	return plugin.Reply(msg, history)
 }
 
 // handleHistory handles getting channel history.
@@ -244,7 +245,7 @@ func handleHistory(msg AlloyMessage) AlloyMessage {
 		Channel string `json:"channel"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "failed_to_unmarshal_request")
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
 	// Get history
@@ -254,5 +255,5 @@ func handleHistory(msg AlloyMessage) AlloyMessage {
 		_ = json.Unmarshal(historyData, &history)
 	}
 
-	return Reply(msg, history)
+	return plugin.Reply(msg, history)
 }

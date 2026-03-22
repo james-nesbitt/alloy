@@ -3,11 +3,12 @@
 package main
 
 import (
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"./wit"
 )
 
 // Project represents a project in the system.
@@ -35,7 +36,7 @@ type ProjectAddResourceRequest struct {
 
 // ProjectOpenRequest represents a request to open a project.
 type ProjectOpenRequest struct {
-	ID string `json:"id"`
+	Id string `json:"id"`
 }
 
 var (
@@ -127,12 +128,12 @@ func main() {
 func handleCreate(msg AlloyMessage) AlloyMessage {
 	var req ProjectCreateRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	id := fmt.Sprintf("proj-%d", time.Now().UnixNano())
 	proj := &Project{
-		ID:          id,
+		Id:          id,
 		Name:        req.Name,
 		Description: req.Description,
 	}
@@ -141,9 +142,9 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 	// Save projects to persistent storage
 	saveProjects()
 
-	plugin.Log("info", fmt.Sprintf("Created project: %s (%s)", proj.Name, proj.ID))
+	plugin.Log("info", fmt.Sprintf("Created project: %s (%s)", proj.Name, proj.Id))
 
-	return Reply(msg, proj)
+	return plugin.Reply(msg, proj)
 }
 
 // handleActive handles requests for the active project.
@@ -157,10 +158,10 @@ func handleActive(msg AlloyMessage) AlloyMessage {
 	}
 
 	if active == nil {
-		return ErrorReply(msg, "no_active_project")
+		return plugin.ErrorReply(msg, "no_active_project")
 	}
 
-	return Reply(msg, active)
+	return plugin.Reply(msg, active)
 }
 
 // handleList handles requests to list all projects.
@@ -170,7 +171,7 @@ func handleList(msg AlloyMessage) AlloyMessage {
 		list = append(list, proj)
 	}
 
-	return Reply(msg, map[string]interface{}{
+	return plugin.Reply(msg, map[string]interface{}{
 		"projects": list,
 	})
 }
@@ -179,7 +180,7 @@ func handleList(msg AlloyMessage) AlloyMessage {
 func handleAddBuffer(msg AlloyMessage) AlloyMessage {
 	var req ProjectAddResourceRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	targetID := req.ProjectID
@@ -187,15 +188,15 @@ func handleAddBuffer(msg AlloyMessage) AlloyMessage {
 		// Find active project if none specified
 		for _, proj := range projects {
 			if proj.Active {
-				targetID = proj.ID
+				targetID = proj.Id
 				break
 			}
 		}
 	}
 
 	proj, ok := projects[targetID]
-	if !ok {
-		return ErrorReply(msg, "project_not_found")
+	if resp.Id == "" {
+		return plugin.ErrorReply(msg, "project_not_found")
 	}
 
 	proj.Buffers = append(proj.Buffers, req.ResourceID)
@@ -203,14 +204,14 @@ func handleAddBuffer(msg AlloyMessage) AlloyMessage {
 
 	plugin.Log("info", fmt.Sprintf("Added buffer %s to project %s", req.ResourceID, proj.Name))
 
-	return Reply(msg, map[string]string{"status": "ok"})
+	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }
 
 // handleAddChannel handles requests to add a channel to a project.
 func handleAddChannel(msg AlloyMessage) AlloyMessage {
 	var req ProjectAddResourceRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	targetID := req.ProjectID
@@ -218,15 +219,15 @@ func handleAddChannel(msg AlloyMessage) AlloyMessage {
 		// Find active project if none specified
 		for _, proj := range projects {
 			if proj.Active {
-				targetID = proj.ID
+				targetID = proj.Id
 				break
 			}
 		}
 	}
 
 	proj, ok := projects[targetID]
-	if !ok {
-		return ErrorReply(msg, "project_not_found")
+	if resp.Id == "" {
+		return plugin.ErrorReply(msg, "project_not_found")
 	}
 
 	proj.Channels = append(proj.Channels, req.ResourceID)
@@ -234,19 +235,19 @@ func handleAddChannel(msg AlloyMessage) AlloyMessage {
 
 	plugin.Log("info", fmt.Sprintf("Added channel %s to project %s", req.ResourceID, proj.Name))
 
-	return Reply(msg, map[string]string{"status": "ok"})
+	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }
 
 // handleOpen handles requests to open a project.
 func handleOpen(msg AlloyMessage) AlloyMessage {
 	var req ProjectOpenRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
-	proj, ok := projects[req.ID]
-	if !ok {
-		return ErrorReply(msg, "project_not_found")
+	proj, ok := projects[req.Id]
+	if resp.Id == "" {
+		return plugin.ErrorReply(msg, "project_not_found")
 	}
 
 	// Deactivate all projects
@@ -261,15 +262,15 @@ func handleOpen(msg AlloyMessage) AlloyMessage {
 	// Notify about the project opening
 	notifyProjectOpened(proj)
 
-	plugin.Log("info", fmt.Sprintf("Opened project: %s (%s)", proj.Name, proj.ID))
+	plugin.Log("info", fmt.Sprintf("Opened project: %s (%s)", proj.Name, proj.Id))
 
-	return Reply(msg, proj)
+	return plugin.Reply(msg, proj)
 }
 
 // handleSave handles requests to save projects.
 func handleSave(msg AlloyMessage) AlloyMessage {
 	saveProjects()
-	return Reply(msg, map[string]string{"status": "saved"})
+	return plugin.Reply(msg, map[string]string{"status": "saved"})
 }
 
 // saveProjects saves all projects to persistent storage.
@@ -306,7 +307,7 @@ func notifyProjectOpened(proj *Project) {
 
 	// Route the event
 	plugin.RouteMessage(AlloyMessage{
-		ID:      "project-opened-" + fmt.Sprint(time.Now().UnixNano()),
+		Id:      "project-opened-" + fmt.Sprint(time.Now().UnixNano()),
 		Method:  "event",
 		Sender:  "project-manager",
 		Payload: eventPayload,

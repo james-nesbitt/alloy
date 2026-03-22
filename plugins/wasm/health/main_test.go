@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jnesbitt/alloy-go/pkg/wasm/sdk-go"
+	"github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 )
 
 func TestHealthPlugin(t *testing.T) {

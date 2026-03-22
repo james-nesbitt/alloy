@@ -1,4 +1,4 @@
-module github.com/jnesbitt/alloy-go/plugins/wasm/health
+module github.com/jnesbitt/alloy-go/plugins/wasm/ai-agent
 
 go 1.25.8
 

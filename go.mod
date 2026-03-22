@@ -7,7 +7,8 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest v0.0.0-00010101000000-000000000000
+	github.com/jnesbitt/alloy-go/pkg/wasm/guest v0.0.0-00010101000000-000000000000
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78d1310b2
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -69,4 +70,6 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest => ../bindings/guest
+replace github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest => ./pkg/wasm/bindings/guest
+
+replace github.com/jnesbitt/alloy-go/pkg/wasm/guest => ./pkg/wasm/guest

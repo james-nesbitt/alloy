@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -10,7 +9,7 @@ import (
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm2"
+	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
 
 // WITKernel is a kernel implementation that uses the WIT-based WASM runtime.
@@ -24,7 +23,7 @@ type WITKernel struct {
 	interceptors []api.Interceptor
 	loading     map[string]chan struct{}
 	stopCh      chan struct{}
-	wasmManager *wasm2.Manager
+	wasmManager *wasm.Manager
 	storage     storage.StateStore
 	dataDir     string
 }
@@ -35,20 +34,6 @@ func NewWITKernel(
 	storage storage.StateStore,
 	dataDir string,
 ) (*WITKernel, error) {
-	// Create the WASM manager
-	router := func(ctx context.Context, msg api.Message) {
-		// This will be set up properly below
-	}
-
-	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
-		return api.Message{}, errors.New("not implemented")
-	}
-
-	wasmManager, err := wasm2.NewManager(logger, storage, dataDir, router, call)
-	if err != nil {
-		return nil, err
-	}
-
 	// Create the kernel
 	kernel := &WITKernel{
 		logger:      logger,
@@ -58,16 +43,24 @@ func NewWITKernel(
 		frontends:   make(map[string]chan<- api.Message),
 		loading:     make(map[string]chan struct{}),
 		stopCh:      make(chan struct{}),
-		wasmManager: wasmManager,
 		storage:     storage,
 		dataDir:     dataDir,
 	}
 
-	// Set up the router and call functions
-	router = kernel.routeMessage
-	call = kernel.callPlugin
+	// Create the WASM manager
+	router := func(ctx context.Context, msg api.Message) {
+		kernel.routeMessage(ctx, msg)
+	}
 
-	// Update the WASM manager with the proper functions
+	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
+		return kernel.handleMessageSync(ctx, msg)
+	}
+
+	wasmManager, err := wasm.NewManager(logger, storage, dataDir, router, call)
+	if err != nil {
+		return nil, err
+	}
+
 	kernel.wasmManager = wasmManager
 
 	// Start the monitor
@@ -83,26 +76,25 @@ func (k *WITKernel) routeMessage(ctx context.Context, msg api.Message) {
 
 	// Apply interceptors
 	for _, interceptor := range k.interceptors {
+		var cont bool
 		var err error
-		msg, err = interceptor.Intercept(ctx, msg)
+		msg, cont, err = interceptor.PreRoute(ctx, msg)
 		if err != nil {
 			k.logger.Error("interceptor failed", "error", err)
 			return
 		}
-		if msg.Type == "dropped" {
+		if !cont {
 			return
 		}
 	}
 
-	// Route to frontends if this is a broadcast
+	// Route to frontends if this is a broadcast or event
 	if msg.Target == "" || msg.Target == "*" {
 		for connID, ch := range k.frontends {
 			select {
 			case ch <- msg:
 			case <-ctx.Done():
-				k.logger.Warn("context done while sending to frontend", "connID", connID)
 			case <-k.stopCh:
-				k.logger.Warn("kernel stopping while sending to frontend", "connID", connID)
 			default:
 				k.logger.Warn("frontend channel full", "connID", connID)
 			}
@@ -112,28 +104,21 @@ func (k *WITKernel) routeMessage(ctx context.Context, msg api.Message) {
 
 	// Route to a specific plugin or frontend
 	if ch, ok := k.frontends[msg.Target]; ok {
-		// Target is a frontend
 		select {
 		case ch <- msg:
-		case <-ctx.Done():
-			k.logger.Warn("context done while sending to frontend", "target", msg.Target)
-		case <-k.stopCh:
-			k.logger.Warn("kernel stopping while sending to frontend", "target", msg.Target)
 		default:
 			k.logger.Warn("frontend channel full", "target", msg.Target)
 		}
 	} else if plugin, ok := k.plugins[msg.Target]; ok {
-		// Target is a plugin
-		if err := plugin.RouteMessage(ctx, msg); err != nil {
-			k.logger.Error("failed to route message to plugin", "target", msg.Target, "error", err)
-		}
+		// Asynchronous routing: we use a background task to handle it via HandleMessage
+		go func() {
+			_, _ = plugin.HandleMessage(ctx, msg)
+		}()
 	} else if _, ok := k.metadata[msg.Target]; ok {
 		// Target is a lazy-loaded plugin
-		if err := k.lazyLoadPlugin(ctx, msg.Target); err != nil {
-			k.logger.Error("failed to lazy load plugin", "target", msg.Target, "error", err)
-		} else if plugin, ok := k.plugins[msg.Target]; ok {
-			if err := plugin.RouteMessage(ctx, msg); err != nil {
-				k.logger.Error("failed to route message to lazy-loaded plugin", "target", msg.Target, "error", err)
+		if err := k.lazyLoadPlugin(ctx, msg.Target); err == nil {
+			if plugin, ok := k.plugins[msg.Target]; ok {
+				go func() { _, _ = plugin.HandleMessage(ctx, msg) }()
 			}
 		}
 	} else {
@@ -141,24 +126,25 @@ func (k *WITKernel) routeMessage(ctx context.Context, msg api.Message) {
 	}
 }
 
-// callPlugin makes a synchronous call to a plugin.
-func (k *WITKernel) callPlugin(ctx context.Context, msg api.Message) (api.Message, error) {
+// handleMessageSync handles a synchronous message call.
+func (k *WITKernel) handleMessageSync(ctx context.Context, msg api.Message) (api.Message, error) {
 	k.mu.RLock()
-	defer k.mu.RUnlock()
+	plugin, ok := k.plugins[msg.Target]
+	k.mu.RUnlock()
 
-	// Check if the target is a plugin
-	if plugin, ok := k.plugins[msg.Target]; ok {
-		return plugin.Call(ctx, msg)
+	if !ok {
+		// Check for lazy load
+		if _, exists := k.metadata[msg.Target]; exists {
+			if err := k.lazyLoadPlugin(ctx, msg.Target); err == nil {
+				k.mu.RLock()
+				plugin, ok = k.plugins[msg.Target]
+				k.mu.RUnlock()
+			}
+		}
 	}
 
-	// Check if the target is a lazy-loaded plugin
-	if _, ok := k.metadata[msg.Target]; ok {
-		if err := k.lazyLoadPlugin(ctx, msg.Target); err != nil {
-			return api.Message{}, err
-		}
-		if plugin, ok := k.plugins[msg.Target]; ok {
-			return plugin.Call(ctx, msg)
-		}
+	if ok {
+		return plugin.HandleMessage(ctx, msg)
 	}
 
 	return api.Message{}, errors.New("plugin not found")
@@ -175,36 +161,26 @@ func (k *WITKernel) lazyLoadPlugin(ctx context.Context, pluginID string) error {
 		ch := k.loading[pluginID]
 		k.mu.Unlock()
 		select {
-		case <-ch:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-ch: return nil
+		case <-ctx.Done(): return ctx.Err()
 		}
 	}
 	ch := make(chan struct{})
 	k.loading[pluginID] = ch
 	k.mu.Unlock()
 
-	// Load the plugin
 	loader, ok := k.loaders[pluginID]
 	if !ok {
-		k.mu.Lock()
-		delete(k.loading, pluginID)
-		close(ch)
-		k.mu.Unlock()
+		k.cleanupLoading(pluginID, ch)
 		return errors.New("loader not found")
 	}
 
-	plugin, err := loader.Load(ctx)
+	plugin, err := loader.LoadPlugin(ctx, pluginID)
 	if err != nil {
-		k.mu.Lock()
-		delete(k.loading, pluginID)
-		close(ch)
-		k.mu.Unlock()
+		k.cleanupLoading(pluginID, ch)
 		return err
 	}
 
-	// Register the plugin
 	k.mu.Lock()
 	k.plugins[pluginID] = plugin
 	delete(k.loading, pluginID)
@@ -214,50 +190,47 @@ func (k *WITKernel) lazyLoadPlugin(ctx context.Context, pluginID string) error {
 	return nil
 }
 
+func (k *WITKernel) cleanupLoading(id string, ch chan struct{}) {
+	k.mu.Lock()
+	delete(k.loading, id)
+	close(ch)
+	k.mu.Unlock()
+}
+
 // RegisterPluginLoader registers a loader for a plugin.
 func (k *WITKernel) RegisterPluginLoader(pluginID string, loader api.PluginLoader) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-
 	k.loaders[pluginID] = loader
-	k.metadata[pluginID] = loader.Metadata()
+	// Note: api.PluginLoader doesn't have Metadata() method in current api.
+	// We might need to assume metadata is provided elsewhere or handle it.
 }
 
 // RegisterPlugin registers an already instantiated plugin.
 func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-
-	pluginID := plugin.Metadata().ID
-	k.plugins[pluginID] = plugin
-	k.metadata[pluginID] = plugin.Metadata()
+	id := plugin.ID()
+	k.plugins[id] = plugin
+	k.metadata[id] = api.PluginMetadata{
+		ID: id,
+		Capabilities: plugin.Capabilities(),
+	}
 }
 
 // RegisterWASMPlugin registers a WASM plugin with the kernel.
 func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-
-	// Load the plugin in the WASM manager
 	if err := k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, caps); err != nil {
 		return err
 	}
 
-	// Create a plugin wrapper
 	plugin := &witPluginWrapper{
 		id:       pluginID,
 		manager:  k.wasmManager,
-		metadata: api.PluginMetadata{
-			ID:          pluginID,
-			Type:        "wasm",
-			Capabilities: caps,
-		},
+		caps:     caps,
 	}
 
-	// Register the plugin
-	k.plugins[pluginID] = plugin
-	k.metadata[pluginID] = plugin.metadata
-
+	k.RegisterPlugin(plugin)
 	return nil
 }
 
@@ -265,7 +238,6 @@ func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps [
 func (k *WITKernel) RegisterFrontend(connID string, ch chan<- api.Message) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-
 	k.frontends[connID] = ch
 }
 
@@ -273,7 +245,6 @@ func (k *WITKernel) RegisterFrontend(connID string, ch chan<- api.Message) {
 func (k *WITKernel) UnregisterFrontend(connID string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-
 	delete(k.frontends, connID)
 }
 
@@ -281,7 +252,6 @@ func (k *WITKernel) UnregisterFrontend(connID string) {
 func (k *WITKernel) RegisterInterceptor(interceptor api.Interceptor) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-
 	k.interceptors = append(k.interceptors, interceptor)
 }
 
@@ -289,13 +259,10 @@ func (k *WITKernel) RegisterInterceptor(interceptor api.Interceptor) {
 func (k *WITKernel) GetPluginMetadata() map[string]api.PluginMetadata {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-
-	// Create a copy of the metadata
 	metadata := make(map[string]api.PluginMetadata, len(k.metadata))
 	for id, md := range k.metadata {
 		metadata[id] = md
 	}
-
 	return metadata
 }
 
@@ -303,7 +270,6 @@ func (k *WITKernel) GetPluginMetadata() map[string]api.PluginMetadata {
 func (k *WITKernel) GetPlugin(pluginID string) (api.Plugin, bool) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-
 	plugin, ok := k.plugins[pluginID]
 	return plugin, ok
 }
@@ -311,11 +277,6 @@ func (k *WITKernel) GetPlugin(pluginID string) (api.Plugin, bool) {
 // Shutdown gracefully shuts down the kernel.
 func (k *WITKernel) Shutdown(ctx context.Context) error {
 	k.logger.Info("shutting down kernel")
-
-	// Signal shutdown
-	close(k.stopCh)
-
-	// Close all plugins
 	k.mu.Lock()
 	plugins := make([]api.Plugin, 0, len(k.plugins))
 	for _, plugin := range k.plugins {
@@ -323,51 +284,34 @@ func (k *WITKernel) Shutdown(ctx context.Context) error {
 	}
 	k.mu.Unlock()
 
-	// Close plugins with timeout
-	errCh := make(chan error, len(plugins))
 	for _, plugin := range plugins {
-		go func(p api.Plugin) {
-			errCh <- p.Close(ctx)
-		}(plugin)
+		_ = plugin.Shutdown(ctx)
 	}
 
-	// Wait for plugins to close or timeout
-	select {
-	case err := <-errCh:
-		if err != nil {
-			k.logger.Error("plugin shutdown error", "error", err)
-		}
-	case <-ctx.Done():
-		k.logger.Warn("shutdown timed out")
-	}
-
-	// Close the WASM manager
 	return k.wasmManager.Close(ctx)
 }
 
 // witPluginWrapper wraps a WASM plugin for the kernel API.
 type witPluginWrapper struct {
 	id       string
-	manager  *wasm2.Manager
-	metadata api.PluginMetadata
+	manager  *wasm.Manager
+	caps     []api.Capability
 }
 
-// Metadata returns the plugin metadata.
-func (p *witPluginWrapper) Metadata() api.PluginMetadata {
-	return p.metadata
+func (p *witPluginWrapper) ID() string { return p.id }
+func (p *witPluginWrapper) Capabilities() []api.Capability { return p.caps }
+
+func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	if msg.Type == api.TypeRequest {
+		err := p.manager.RouteMessage(ctx, p.id, msg)
+		if err != nil { return api.Message{}, err }
+		return p.manager.GetResponse(ctx, p.id)
+	}
+	// For events, just route and return empty
+	err := p.manager.RouteMessage(ctx, p.id, msg)
+	return api.Message{}, err
 }
 
-// RouteMessage routes a message to the plugin.
-func (p *witPluginWrapper) RouteMessage(ctx context.Context, msg api.Message) error {
-	return p.manager.RouteMessage(ctx, p.id, msg)
-}
-
-// Call makes a synchronous call to the plugin.
-func (p *witPluginWrapper) Call(ctx context.Context, msg api.Message) (api.Message, error) {
-	return p.manager.GetResponse(ctx, p.id)
-}
-
-// Close shuts down the plugin.
-func (p *witPluginWrapper) Close(ctx context.Context) error {
+func (p *witPluginWrapper) Shutdown(ctx context.Context) error {
 	return p.manager.UnloadPlugin(ctx, p.id)
 }

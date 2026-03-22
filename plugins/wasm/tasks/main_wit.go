@@ -3,11 +3,12 @@
 package main
 
 import (
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"./wit"
 )
 
 // Task represents a task in the system.
@@ -75,13 +76,13 @@ func main() {
 func handleCreate(msg AlloyMessage) AlloyMessage {
 	var req TaskCreateRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	// Create the task
 	taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
 	task := Task{
-		ID:          taskID,
+		Id:          taskID,
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      "pending",
@@ -92,7 +93,7 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 
 	plugin.Log("info", "Created task: "+task.Title)
 
-	return Reply(msg, TaskCreateResponse{
+	return plugin.Reply(msg, TaskCreateResponse{
 		Status: "created",
 		Task:   task,
 	})
@@ -106,7 +107,7 @@ func handleList(msg AlloyMessage) AlloyMessage {
 		taskList = append(taskList, task)
 	}
 
-	return Reply(msg, TaskListResponse{
+	return plugin.Reply(msg, TaskListResponse{
 		Tasks: taskList,
 	})
 }

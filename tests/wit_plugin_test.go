@@ -11,7 +11,7 @@ import (
 
 	"github.com/jnesbitt/alloy-go/api"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/wasm2"
+	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
 
 func TestWITPlugins(t *testing.T) {

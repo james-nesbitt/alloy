@@ -5,7 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest"
+	"github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
 )
 
 func main() {

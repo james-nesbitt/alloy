@@ -1,3 +1,1 @@
-module github.com/jnesbitt/alloy-go/pkg/wasm/bindings/host
-
-go 1.25
+module github.com/jnesbitt/alloy-go/pkg/wasm/bindings/host\n\ngo 1.25

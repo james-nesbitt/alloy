@@ -3,9 +3,10 @@
 package main
 
 import (
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
+	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 	"encoding/json"
 
-	"./wit"
 )
 
 // SecretStoreRequest represents a request to store a secret.
@@ -16,7 +17,7 @@ type SecretStoreRequest struct {
 
 // SecretGetRequest represents a request to get a secret.
 type SecretGetRequest struct {
-	ID string `json:"id"`
+	Id string `json:"id"`
 }
 
 // SecretStoreResponse represents a response to storing a secret.
@@ -64,35 +65,35 @@ func main() {
 func handleStoreSecret(msg AlloyMessage) AlloyMessage {
 	var req SecretStoreRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	// Store the secret
-	secretKey := "secret:" + req.ID
+	secretKey := "secret:" + req.Id
 	if !plugin.KVSet(secretKey, []byte(req.Value)) {
-		return ErrorReply(msg, "failed_to_store_secret")
+		return plugin.ErrorReply(msg, "failed_to_store_secret")
 	}
 
-	plugin.Log("info", "Stored secret: "+req.ID)
+	plugin.Log("info", "Stored secret: "+req.Id)
 
-	return Reply(msg, SecretStoreResponse{Status: "stored"})
+	return plugin.Reply(msg, SecretStoreResponse{Status: "stored"})
 }
 
 // handleGetSecret handles retrieving a secret.
 func handleGetSecret(msg AlloyMessage) AlloyMessage {
 	var req SecretGetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ErrorReply(msg, "invalid_request: "+err.Error())
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
 	// Get the secret
-	secretKey := "secret:" + req.ID
+	secretKey := "secret:" + req.Id
 	secretValue, ok := plugin.KVGet(secretKey)
 	if !ok || secretValue == nil {
-		return ErrorReply(msg, "secret_not_found")
+		return plugin.ErrorReply(msg, "secret_not_found")
 	}
 
-	plugin.Log("debug", "Retrieved secret: "+req.ID)
+	plugin.Log("debug", "Retrieved secret: "+req.Id)
 
-	return Reply(msg, SecretGetResponse{Value: string(secretValue)})
+	return plugin.Reply(msg, SecretGetResponse{Value: string(secretValue)})
 }

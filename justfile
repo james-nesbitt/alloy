@@ -1,110 +1,120 @@
-# Alloy WIT Build System
+# Alloy - Standard Project Build System
+set shell := ["bash", "-c"]
 
-# Set shell
-SHELL := "bash"
+# Project Configuration
+PROJECT_ROOT := invocation_directory()
+BUILD_DIR    := PROJECT_ROOT + "/build"
+WASM_BUILD   := BUILD_DIR + "/wasm"
+BIN_BUILD    := BUILD_DIR + "/bin"
+PLUGINS_SRC  := PROJECT_ROOT + "/plugins/wasm"
 
-# Default target
+# Default action
 default: help
 
-# Show help
+# Show help for available tasks
 help:
-	@echo "Alloy WIT Build System"
-	@echo ""
-	@echo "Targets:"
-	@echo "  generate-wit-bindings - Generate WIT bindings"
-	@echo "  build-wasm          - Build all WASM plugins"
-	@echo "  build-plugin PLUGIN - Build specific plugin"
-	@echo "  build-core-wit      - Build WIT-based core backend"
-	@echo "  build-gui-tui       - Build TUI interface"
-	@echo "  build-gui-web       - Build Web interface"
-	@echo "  build-gui-all       - Build all GUIs"
-	@echo "  build               - Build everything"
-	@echo "  test-wit            - Run WIT tests"
-	@echo "  test                - Run all tests"
-	@echo "  clean               - Clean build artifacts"
-	@echo "  fmt                 - Format code"
+    @just --list
 
-# Generate WIT bindings
-generate-wit-bindings:
-	@echo "Generating WIT bindings..."
-	@mkdir -p pkg/wasm2/bindings/host/wit-rust pkg/wasm2/bindings/guest
-	@wit-bindgen rust --out-dir pkg/wasm2/bindings/host/wit-rust wit/alloy.wit
-	@wit-bindgen tiny-go --out-dir pkg/wasm2/bindings/guest wit/alloy.wit
-	@echo 'module github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/host\n\ngo 1.25' > pkg/wasm2/bindings/host/go.mod
-	@echo 'module github.com/jnesbitt/alloy-go/pkg/wasm2/bindings/guest\n\ngo 1.25' > pkg/wasm2/bindings/guest/go.mod
-	@echo "WIT bindings generated successfully!"
+# --- CLEANUP ---
 
-# Build all WASM plugins
-build-wasm: generate-wit-bindings
-	@echo "Building WASM plugins..."
-	@mkdir -p build/wasm
-	@for plugin in ai buffer chat health iam project secrets tasks; do \
-		just build-plugin "$$plugin"; \
-	done
-	@echo "WASM plugins built successfully!"
+# Remove build artifacts and temporary files
+clean:
+    rm -rf {{BUILD_DIR}}
+    rm -rf .tmp-bin
+    find . -name "wit" -type d -path "*/plugins/wasm/*" -exec rm -rf {} +
+    @echo "Cleanup complete."
 
-# Build specific plugin
-build-plugin plugin_name:
-	@echo "Building plugin: {{plugin_name}}"
-	@mkdir -p build/wasm
-	@if [ -f "plugins/wasm/{{plugin_name}}/main_wit.go" ]; then \
-		cd "plugins/wasm/{{plugin_name}}" && GOOS=wasip1 GOARCH=wasm tinygo build -no-debug -target=wasi -o "../../../build/wasm/{{plugin_name}}.wasm" main_wit.go; \
-	else \
-		cd "plugins/wasm/{{plugin_name}}" && GOOS=wasip1 GOARCH=wasm tinygo build -no-debug -target=wasi -o "../../../build/wasm/{{plugin_name}}.wasm" .; \
-	fi
-	@echo "Built: build/wasm/{{plugin_name}}.wasm"
+# --- PROJECT SETUP & CODE GENERATION ---
 
-# Build WIT-based core backend
-build-core-wit:
-	@echo "Building WIT-based core backend..."
-	@mkdir -p build
-	@go build -o build/core-wit ./cmd/alloy-core-wit
-	@echo "Built: build/core-wit"
+# Generate WIT bindings for both Go (guest) and Rust (host)
+generate:
+    @echo ">> Generating WIT bindings..."
+    mkdir -p pkg/wasm/bindings/host/wit-rust pkg/wasm/bindings/guest
+    wit-bindgen rust --out-dir pkg/wasm/bindings/host/wit-rust wit/alloy.wit
+    wit-bindgen tiny-go --out-dir pkg/wasm/bindings/guest wit/alloy.wit
+    # Initialize the guest bindings go.mod
+    @if [ ! -f pkg/wasm/bindings/guest/go.mod ]; then \
+        cd pkg/wasm/bindings/guest && go mod init github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest && cd -; \
+    fi
+    @echo ">> WIT bindings generated."
 
-# Build TUI interface
-build-gui-tui:
-	@echo "Building TUI interface..."
-	@mkdir -p build
-	@go build -o build/alloy-tui ./cmd/alloy-tui
-	@echo "Built: build/alloy-tui"
+# Fix and standardize all project modules (replace directives, workspace)
+setup-dev:
+    @chmod +x scripts/fix-project-modules.sh
+    @./scripts/fix-project-modules.sh
 
-# Build Web interface
-build-gui-web:
-	@echo "Building Web interface..."
-	@mkdir -p build
-	@go build -o build/alloy-web ./cmd/alloy-web
-	@echo "Built: build/alloy-web"
+# --- BINARY BUILDS ---
 
-# Build all GUIs
-build-gui-all: build-gui-tui build-gui-web
-	@echo "All GUIs built successfully!"
+# Build Alloy Core 
+build-core:
+    @echo ">> Building Alloy Core..."
+    mkdir -p {{BIN_BUILD}}
+    go build -o {{BIN_BUILD}}/alloy-core ./cmd/alloy-core
+
+# Build Alloy TUI
+build-tui:
+    @echo ">> Building TUI Frontend..."
+    mkdir -p {{BIN_BUILD}}
+    go build -o {{BIN_BUILD}}/alloy-tui ./cmd/alloy-tui
+
+# Build Alloy GUI (Native)
+build-gui:
+    @echo ">> Building Gio GUI..."
+    mkdir -p {{BIN_BUILD}}
+    go build -tags gui -o {{BIN_BUILD}}/alloy-gui ./cmd/alloy-gui-gio
+
+# Build Alloy CLI
+build-cli:
+    @echo ">> Building Alloy CLI Tool..."
+    mkdir -p {{BIN_BUILD}}
+    go build -o {{BIN_BUILD}}/alloy-cli ./cmd/alloy-cli
+
+# Build all binaries
+build-binaries: build-core build-tui build-gui build-cli
+
+# --- WASM PLUGIN BUILDS ---
+
+# Build a single WASM plugin (e.g. just build-plugin health)
+build-plugin name: generate
+    @echo ">> Building WASM plugin: {{name}}..."
+    mkdir -p {{WASM_BUILD}}
+    @chmod +x scripts/build-plugin.sh
+    @./scripts/build-plugin.sh {{name}}
+
+# Build all WIT-based WASM plugins
+build-wasm: generate
+    @echo ">> Building all WASM plugins..."
+    mkdir -p {{WASM_BUILD}}
+    @./scripts/build-wasm-all.sh
+    @echo ">> WASM plugins built successfully."
 
 # Build everything
-build: build-wasm build-core-wit build-gui-all
-	@echo "Build completed!"
+all: build-wasm build-binaries
 
-# Run WIT tests
-test-wit:
-	@echo "Running WIT tests..."
-	@cd pkg/wasm2/runtime && go test -v
-	@cd pkg/wasm2 && go test -v
-	@cd pkg/kernel && go test -v -run "TestWIT.*"
-	@echo "WIT tests completed!"
+# --- EXECUTION ---
 
-# Run all tests
-test: test-wit
-	@echo "All tests completed!"
+# Run Alloy Core
+run-core *args: build-core
+    {{BIN_BUILD}}/alloy-core --debug {{args}}
 
-# Clean build artifacts
-clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf build/
-	@rm -rf .tmp-bin/
-	@echo "Clean completed!"
+# Run TUI Frontend
+run-tui *args: build-tui
+    {{BIN_BUILD}}/alloy-tui {{args}}
 
-# Format code
-fmt:
-	@echo "Formatting code..."
-	@go fmt ./...
-	@goimports -w .
-	@echo "Code formatting completed!"
+# Run Native GUI
+run-gui *args: build-gui
+    {{BIN_BUILD}}/alloy-gui {{args}}
+
+# --- TESTING ---
+
+# Run comprehensive test suite
+test:
+    @echo ">> Running unit tests..."
+    go test -v ./pkg/...
+    @echo ">> Running integration tests..."
+    go test -v ./tests/...
+
+# Run WASM specific tests
+test-wasm:
+    @echo ">> Running WASM/WIT implementation tests..."
+    go test -v -run "TestWIT" ./pkg/wasm/... ./pkg/kernel/...

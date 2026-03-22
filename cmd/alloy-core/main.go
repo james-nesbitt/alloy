@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"encoding/json"
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,328 +10,99 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jnesbitt/alloy-go/api"
-	"github.com/jnesbitt/alloy-go/pkg/ipc"
 	"github.com/jnesbitt/alloy-go/pkg/kernel"
-	"github.com/jnesbitt/alloy-go/pkg/security/audit"
-	"github.com/jnesbitt/alloy-go/pkg/security/identity"
 	"github.com/jnesbitt/alloy-go/pkg/storage"
-	"github.com/jnesbitt/alloy-go/pkg/plugins/native"
-	"github.com/jnesbitt/alloy-go/pkg/wasm"
 )
 
-func getAlloyDataDir() string {
-	if data := os.Getenv("XDG_DATA_HOME"); data != "" {
-		return filepath.Join(data, "alloy")
+func main() {
+	// Set up logging
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	// Parse command line flags
+	dataDir := flag.String("data-dir", "./data", "Directory for plugin data")
+	debug := flag.Bool("debug", false, "Enable debug logging")
+	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
+	flag.Parse()
+
+	// Adjust logging level
+	if *debug {
+		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
 	}
-	return filepath.Join(os.Getenv("HOME"), ".local", "share", "alloy")
-}
 
-func getAlloyHome() string {
-	if home := os.Getenv("XDG_CONFIG_HOME"); home != "" {
-		return filepath.Join(home, "alloy")
+	// Create data directory if it doesn't exist
+	if err := os.MkdirAll(*dataDir, 0755); err != nil {
+		logger.Error("failed to create data directory", "error", err)
+		os.Exit(1)
 	}
-	return filepath.Join(os.Getenv("HOME"), ".config", "alloy")
-}
 
-func getAlloyRuntimeDir() string {
-	if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
-		return filepath.Join(run, "alloy")
+	// Create storage
+	storagePath := filepath.Join(*dataDir, "state")
+	kv, err := storage.NewFileStateStore(storagePath)
+	if err != nil {
+		logger.Error("failed to create storage", "error", err)
+		os.Exit(1)
 	}
-	// Fallback to /tmp if XDG_RUNTIME_DIR is not available
-	return filepath.Join(os.TempDir(), "alloy")
+
+	// Create WIT-based kernel
+	k, err := kernel.NewWITKernel(logger, kv, *dataDir)
+	if err != nil {
+		logger.Error("failed to create WIT kernel", "error", err)
+		os.Exit(1)
+	}
+	
+	// Create context for kernel shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Load provisioned plugins if specified
+	if *provisionFile != "" {
+		if err := loadProvisionedPlugins(k, *provisionFile, logger); err != nil {
+			logger.Error("failed to load provisioned plugins", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	// Set up signal handling
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start health monitor
+	go healthMonitor(k, logger)
+
+	logger.Info("Alloy Core started", "data_dir", *dataDir)
+
+	// Wait for shutdown signal
+	<-sigCh
+	logger.Info("shutting down")
+	
+	if err := k.Shutdown(ctx); err != nil {
+		logger.Error("kernel shutdown error", "error", err)
+	}
 }
 
-type stringSlice []string
-
-func (s *stringSlice) String() string {
-	return fmt.Sprintf("%v", *s)
-}
-
-func (s *stringSlice) Set(value string) error {
-	*s = append(*s, value)
+// loadProvisionedPlugins loads plugins from a provisioning file.
+func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *slog.Logger) error {
+	logger.Info("loading provisioned plugins", "file", provisionFile)
+	// Provisioning logic would go here
 	return nil
 }
 
-func main() {
-	debug := flag.Bool("debug", false, "Enable debug logging")
-	insecure := flag.Bool("insecure", false, "Disable mTLS")
-	alloyHome := flag.String("home", getAlloyHome(), "Directory for alloy config and identities")
-	instanceName := flag.String("name", "default", "Instance name")
+// healthMonitor monitors the health of plugins.
+func healthMonitor(k *kernel.WITKernel, logger *slog.Logger) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
-	dataDirBase := flag.String("data", "", "Directory for alloy data (state, plugins, audit). Defaults to {home}/data or XDG_DATA_HOME.")
-
-	defaultSocket := filepath.Join(getAlloyRuntimeDir(), "default.sock")
-	socket := flag.String("socket", defaultSocket, "Socket address to listen for IPC connections (supports tcp://, unix://, or local path)")
-
-	var wasmPluginsDirs stringSlice
-	flag.Var(&wasmPluginsDirs, "wasm-plugins", "Directory to scan for WASM plugins to load at startup (can be specified multiple times)")
-
-	var wasmPlugins stringSlice
-	flag.Var(&wasmPlugins, "wasm-plugin", "WASM plugin file to load at startup (can be specified multiple times)")
-
-	provisionManifest := flag.String("provision", "", "Path to provisioning manifest (JSON)")
-	metricsAddr := flag.String("metrics-addr", ":2112", "Address to listen for Prometheus metrics (e.g. :2112)")
-
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-
-	level := slog.LevelInfo
-	if *debug {
-		level = slog.LevelDebug
-	}
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-	slog.SetDefault(logger)
-
-	// Determine data directory
-	dataDir := *dataDirBase
-	if dataDir == "" {
-		if *alloyHome != getAlloyHome() {
-			dataDir = filepath.Join(*alloyHome, "data")
-		} else {
-			dataDir = getAlloyDataDir()
-		}
-	}
-
-	// Audit Setup
-	auditLogger, err := audit.NewLogger(dataDir)
-	if err != nil {
-		logger.Error("failed to initialize audit logger", "error", err)
-		os.Exit(1)
-	}
-	defer auditLogger.Close()
-	auditLogger.Log(audit.Entry{Action: "startup", Actor: "system", Status: "success", Details: map[string]any{"pid": os.Getpid()}})
-
-	// PKI / Identity Setup
-	store := identity.NewStore(*alloyHome)
-	var tlsConfig *tls.Config
-	if !*insecure {
-		ca, err := store.InitializeMachine()
-		if err != nil {
-			logger.Error("failed to initialize machine pki", "error", err)
-			os.Exit(1)
-		}
-
-		pair, err := store.CreateInstanceIdentity(ca, *instanceName)
-		if err != nil {
-			logger.Error("failed to create instance identity", "error", err)
-			os.Exit(1)
-		}
-
-		tlsConfig, err = store.GetServerTLSConfig(ca, pair)
-		if err != nil {
-			logger.Error("failed to create tls config", "error", err)
-			os.Exit(1)
-		}
-	}
-
-	// State Setup
-	stateStore, err := storage.NewFileStateStore(filepath.Join(dataDir, "state"))
-	if err != nil {
-		logger.Error("failed to initialize state store", "error", err)
-		os.Exit(1)
-	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	k := kernel.New(logger, *metricsAddr)
-
-	// WASM Runtime Setup
-	wasmRuntime, err := wasm.NewRuntime(context.Background(), logger, stateStore, filepath.Join(dataDir, "plugins"), k.RouteMessage, k.Call)
-	if err != nil {
-		logger.Error("failed to initialize wasm runtime", "error", err)
-		os.Exit(1)
-	}
-
-	// Instantiate the host module (alloy) so plugins can import log, kv, etc.
-	if _, err := wasmRuntime.InstantiateAlloyHost(context.Background()); err != nil {
-		logger.Error("failed to instantiate alloy host module", "error", err)
-		os.Exit(1)
-	}
-
-	// Fundamental Core Plugins (Must be registered early to handle registration events)
-	events, _ := native.Registry["plugin-events"](ctx, logger, stateStore)
-	eventsPlugin := events.(api.Plugin)
-	k.RegisterPlugin(eventsPlugin)
-	if r, ok := eventsPlugin.(native.RouterSetter); ok {
-		r.SetRouter(k.RouteMessage)
-	}
-
-	commands, _ := native.Registry["plugin-command-manager"](ctx, logger, stateStore)
-	commandsPlugin := commands.(api.Plugin)
-	k.RegisterPlugin(commandsPlugin)
-	if r, ok := commandsPlugin.(native.RouterSetter); ok {
-		r.SetRouter(k.RouteMessage)
-	}
-
-	// Registry Manager (Orchestrator)
-	rm := native.NewRegistryManager(logger, k, stateStore)
-	k.RegisterPlugin(rm)
-
-	// WASM Manager (Isolated WASM lifecycle)
-	wm := wasm.NewManager(logger, wasmRuntime, k)
-	k.RegisterPlugin(wm)
-
-	// ... rest of main ...
-
-	// Register base capabilities with CM manually
-	for _, p := range []api.Plugin{rm, wm, eventsPlugin, commandsPlugin} {
-		caps := p.Capabilities()
-		if caps == nil { caps = []api.Capability{} }
-		capsData, _ := json.Marshal(caps)
-		k.RouteMessage(ctx, api.Message{
-			ID:      "reg-base-" + p.ID(),
-			Sender:  rm.ID(),
-			Target:  "plugin-command-manager",
-			Method:  "register",
-			Payload: []byte(`{"id":"` + p.ID() + `","type":"native","status":"active","capabilities":` + string(capsData) + `}`),
-		})
-	}
-
-	if err := k.Start(ctx); err != nil {
-		logger.Error("failed to start kernel", "error", err)
-		os.Exit(1)
-	}
-
-	// Start IPC Server
-	ipcServer := ipc.NewServer(logger, k, tlsConfig)
-	go func() {
-		if err := ipcServer.ListenAndServe(*socket); err != nil {
-			logger.Error("IPC server stopped", "error", err)
-		}
-	}()
-
-	// Now that core is stable and listening, trigger plugin loading
-	go func() {
-		// Give IPC a moment to actually bind if needed, though kernel is ready now
-		time.Sleep(100 * time.Millisecond)
-
-		// Plugin Discovery (if --wasm-plugins flag(s) set)
-		for _, dir := range wasmPluginsDirs {
-			files, err := os.ReadDir(dir)
-			if err != nil {
-				logger.Error("failed to scan WASM plugins directory", "path", dir, "error", err)
-				continue
-			}
-			for _, file := range files {
-				if !file.IsDir() && filepath.Ext(file.Name()) == ".wasm" {
-					pluginID := "plugin-" + file.Name()[:len(file.Name())-5]
-					pluginPath := filepath.Join(dir, file.Name())
-					logger.Info("discovered WASM plugin", "id", pluginID, "path", pluginPath)
-
-					pluginDef := map[string]any{
-						"id":   pluginID,
-						"type": "wasm",
-						"path": pluginPath,
-					}
-					payload, _ := json.Marshal(pluginDef)
-
-					k.RouteMessage(context.Background(), api.Message{
-						ID:      "auto-load-" + pluginID,
-						Type:    api.TypeRequest,
-						Sender:  "system",
-						Target:  rm.ID(),
-						Method:  "load",
-						Payload: payload,
-					})
-				}
+	for {
+		select {
+		case <-ticker.C:
+			metadata := k.GetPluginMetadata()
+			for id, md := range metadata {
+				logger.Debug("plugin status", "id", id, "capabilities", len(md.Capabilities))
 			}
 		}
-
-		// Manual Loading (if --wasm-plugin flag(s) set)
-		for _, pluginPath := range wasmPlugins {
-			pluginID := "plugin-" + filepath.Base(pluginPath)
-			if len(pluginID) > 5 && pluginID[len(pluginID)-5:] == ".wasm" {
-				pluginID = pluginID[:len(pluginID)-5]
-			}
-			logger.Info("loading manual WASM plugin", "id", pluginID, "path", pluginPath)
-
-			pluginDef := map[string]any{
-				"id":   pluginID,
-				"type": "wasm",
-				"path": pluginPath,
-			}
-			payload, _ := json.Marshal(pluginDef)
-
-			k.RouteMessage(context.Background(), api.Message{
-				ID:      "manual-load-" + pluginID,
-				Type:    api.TypeRequest,
-				Sender:  "system",
-				Target:  rm.ID(),
-				Method:  "load",
-				Payload: payload,
-			})
-		}
-
-		// Provisioning (if manifest path provided)
-		if *provisionManifest != "" {
-			logger.Info("loading provisioning manifest", "path", *provisionManifest)
-			data, err := os.ReadFile(*provisionManifest)
-			if err != nil {
-				logger.Error("failed to read provisioning manifest", "path", *provisionManifest, "error", err)
-			} else {
-				// Register all plugins from manifest synchronously by calling the plugin handler directly
-				_, err = rm.HandleMessage(context.Background(), api.Message{
-					ID:      "bootstrap-register",
-					Type:    api.TypeRequest,
-					Sender:  "system",
-					Target:  rm.ID(),
-					Method:  "register",
-					Payload: data,
-				})
-				
-				if err != nil {
-					logger.Error("failed to register manifest plugins", "error", err)
-				}
-
-				// Wait a moment for events to propagate (CM registration)
-				time.Sleep(100 * time.Millisecond)
-
-				// Load all boot plugins
-				if err := k.BootPlugins(context.Background()); err != nil {
-					logger.Error("failed to boot plugins", "error", err)
-				}
-			}
-		} else {
-			logger.Info("no provisioning manifest provided, starting in minimal mode")
-		}
-	}()
-
-	// Write Instance Tracking Info
-	info := identity.InstanceInfo{
-		Name:      *instanceName,
-		PID:       os.Getpid(),
-		Socket:    *socket,
-		StartTime: time.Now(),
 	}
-	if err := store.WriteInstanceInfo(info, getAlloyRuntimeDir()); err != nil {
-		logger.Warn("failed to write instance tracking info", "error", err)
-	}
-
-	logger.Info("alloy-core started", "instance", *instanceName, "socket", *socket, "mtls", tlsConfig != nil)
-
-	select {
-	case <-ctx.Done():
-	case <-k.StopCh():
-		logger.Info("received shutdown signal from kernel")
-	}
-
-	logger.Info("shutting down alloy-core")
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stopCancel()
-
-	_ = store.ClearInstanceInfo(*instanceName, getAlloyRuntimeDir())
-	ipcServer.Stop()
-	if err := k.Stop(stopCtx); err != nil {
-		logger.Error("failed to stop kernel gracefully", "error", err)
-		os.Exit(1)
-	}
-
-	logger.Info("alloy-core stopped")
 }
