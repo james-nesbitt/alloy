@@ -1,43 +1,52 @@
 {
   "plugins": [
     {
-      "id": "plugin-events",
-      "type": "native",
+      "id": "health",
+      "type": "wasm",
+      "path": "build/wasm/health.wasm",
       "load_time": "boot"
     },
     {
-      "id": "plugin-command-manager",
-      "type": "native",
-      "load_time": "boot"
-    },
-    {
-      "id": "plugin-iam",
-      "type": "native",
-      "load_time": "boot"
-    },
-    {
-      "id": "plugin-kv",
-      "type": "native",
-      "load_time": "boot"
-    },
-    {
-      "id": "plugin-health",
-      "type": "native",
-      "load_time": "boot"
-    },
-    {
-      "id": "plugin-ollama",
-      "type": "native",
-      "load_time": "boot"
-    },
-    {
-      "id": "plugin-chat",
+      "id": "chat",
       "type": "wasm",
       "path": "build/wasm/chat.wasm",
-      "load_time": "lazy",
-      "capabilities": [
-        {"method": "send", "description": "Send a chat message"}
-      ]
+      "load_time": "lazy"
+    },
+    {
+      "id": "buffer",
+      "type": "wasm",
+      "path": "build/wasm/buffer.wasm",
+      "load_time": "boot"
+    },
+    {
+      "id": "ai",
+      "type": "wasm",
+      "path": "build/wasm/ai.wasm",
+      "load_time": "lazy"
+    },
+    {
+      "id": "iam",
+      "type": "wasm",
+      "path": "build/wasm/iam.wasm",
+      "load_time": "boot"
+    },
+    {
+      "id": "project",
+      "type": "wasm",
+      "path": "build/wasm/project.wasm",
+      "load_time": "boot"
+    },
+    {
+      "id": "secrets",
+      "type": "wasm",
+      "path": "build/wasm/secrets.wasm",
+      "load_time": "lazy"
+    },
+    {
+      "id": "tasks",
+      "type": "wasm",
+      "path": "build/wasm/tasks.wasm",
+      "load_time": "lazy"
     }
   ]
 }

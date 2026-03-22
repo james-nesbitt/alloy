@@ -2,7 +2,7 @@
 
 This document outlines the development phases for the Alloy platform, transitioning from the core foundation to the modular plugin ecosystem.
 
-## Phase 1: Core Foundation (Current)
+## Phase 1: Core Foundation (Complete)
 Establish the micro-kernel, secure communication, and basic orchestration.
 
 - [x] **mTLS & PKI Infrastructure**: User-level Root CA and instance leaf certificates.
@@ -27,7 +27,7 @@ Transform the kernel into a true plugin host.
     - [x] Kernel logic to load, initialize, and monitor `.wasm` modules.
 - [x] **Initial Guest SDK**: Go libraries for building Alloy-compatible plugins.
 
-## Phase 3: Core Plugins & Infrastructure Refinement
+## Phase 3: Core Plugins & Infrastructure Refinement (Complete)
 Establishing the "Standard Library", durable plugin state, and kernel "thinning".
 
 - [x] **Plugin State Persistence**:
@@ -36,43 +36,38 @@ Establishing the "Standard Library", durable plugin state, and kernel "thinning"
 - [x] **Core Plugins & Standard Services**:
     - [x] **Infrastructure Plugins**:
         - [x] **Local Storage (`plugin-storage`)**: Virtual Filesystem (WASI) provider.
-        - [x] **Identity & Access (`plugin-iam`)**: Authorization and RBAC.
-        - [x] **Command Manager (`plugin-command-manager`)**: Central registry for executable actions.
-        - [x] **Event Bus (`plugin-events`)**: Advanced Pub/Sub and event filtering.
-    - [x] **Standard Service Helpers**:
-        - [x] **KV Store (`plugin-kv`)**: Simple persistent Key-Value service.
-        - [x] **Cache Manager (`plugin-cache`)**: High-speed transient storage.
-        - [x] **Doc Store (`plugin-doc`)**: Indexed document/search service.
-        - [x] **Secret Manager (`plugin-secrets`)**: Policy-based encrypted storage.
-    - [x] **Operations Core**:
-        - [x] **Health & Monitoring (`plugin-health`)**: Resource tracking and heartbeat.
-        - [x] **Task Runner (`plugin-tasks`)**: Scheduled and background job management.
-        - [x] **Network Manager (`plugin-network`)**: Policy-enforced network/Fetch provider.
+        - [x] **Identity & Access (`iam`)**: Authorization and RBAC.
+        - [x] **Command Manager (`command-manager`)**: Central registry for executable actions.
+        - [x] **Event Bus (`events`)**: Advanced Pub/Sub and event filtering.
 - [x] **Kernel "Thinning" & Decentralization**:
-    - [x] **Decentralized Discovery**: Move `discover` logic from Kernel to `plugin-command-manager`.
-    - [x] **Event-Driven Auditing**: Replace direct `AuditLogger` with `plugin-events` + a Logger plugin.
-    - [x] **Middleware Interceptors**: Add high-performance "Pre-Route" hooks for `plugin-iam` authorization.
+    - [x] **Decentralized Discovery**: Move `discover` logic from Kernel to `command-manager`.
+    - [x] **Event-Driven Auditing**: Replace direct `AuditLogger` with `events` + a Logger plugin.
+    - [x] **Middleware Interceptors**: Add high-performance "Pre-Route" hooks for `iam` authorization.
     - [x] **System Telemetry**: Distributed tracing (OTEL) and audit-linkage.
 - [x] **Resource Lifecycle & Sandboxing**:
     - [x] Resource constraints (Global Memory Limits 500MB, Message Timeouts).
     - [x] Fine-grained WASI capability mapping (Plugin-isolated storage).
 
-## Phase 4: Application Plugins & Frontends
+## Phase 4: Application Plugins & Frontends (In Progress)
 Logic-heavy plugins and the user interface.
 
 - [x] **Alloy TUI**: Terminal-based client (Bubbletea).
     - [x] **Modal Interface**: Normal, Insert, and Command modes.
     - [x] **Leader-Key Support**: `<space>` as a primary command entry point.
-- [x] **Buffer Manager**: Shared state and concurrent editing via `plugin-buffer-manager`.
-- [ ] **Advanced Interface & Discoverability**:
-    - [x] **Hierarchical Command Trees**: Support for nested key sequences (e.g., `<space> b l`) and namespaced plugin commands.
-    - [x] **Command Metadata**: Extend `plugin-command-manager` to store shortcut keys and "Marginalia"-style annotations.
-    - [ ] **Smart Command Bar (Consult/Vertico model)**: Fuzzy-filtering, multi-column results, and live previews.
-    - [x] **Visual Mnemonic Feedback**: "Breadcrumb" display in the minibuffer during multi-key sequences.
-- [ ] **WASM SDK Standard Library**: Formally abstracted plugin development Kit.
-- [ ] **Security Hardening**: RBAC and fine-grained capability routing.
+- [x] **Buffer Manager**: Shared state and concurrent editing via `buffer`.
+- [x] **WIT-Bindgen Migration**:
+    - [x] Migrate all 8 core plugins to the WASM Component Model (WIT).
+    - [x] Standarize compilation with `just` and `tinygo`.
+    - [x] Implement a robust Host/Guest SDK for WIT calls.
 - [x] **Group Chat**: Real-time communication and presence.
 - [x] **AI Agent**: LLM integration and tool-use orchestration.
+- [ ] **Advanced Interface & Discoverability**:
+    - [x] **Hierarchical Command Trees**: Support for nested key sequences (e.g., `<space> b l`) and namespaced plugin commands.
+    - [x] **Command Metadata**: Extend `command-manager` to store shortcut keys and "Marginalia"-style annotations.
+    - [ ] **Smart Command Bar (Consult/Vertico model)**: Fuzzy-filtering, multi-column results, and live previews.
+    - [x] **Visual Mnemonic Feedback**: "Breadcrumb" display in the minibuffer during multi-key sequences.
+- [x] **WASM SDK Standard Library**: Formally abstracted plugin development Kit.
+- [ ] **Security Hardening**: RBAC and fine-grained capability routing.
 
 ## Phase 5: Advanced Refinement & Deployment
 Bringing the system to full maturity.

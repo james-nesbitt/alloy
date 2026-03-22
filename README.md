@@ -1,36 +1,55 @@
 # Alloy
 
-Alloy is a multi-user, micro-kernel styled application platform written in Go. It features a modular backend kernel and relies heavily on WASM plugins for functionality.
+Alloy is a multi-user, micro-kernel styled application platform written in Go. It features a modular backend kernel and utilizes **WIT-based WASM plugins** for its functionality (WebAssembly Component Model).
 
-## Core Concepts
+## 🚀 Quick Start
 
-- **Micro-kernel Architecture**: The core backend is minimal, handling message routing, plugin lifecycle, and security.
-- **WASM Plugins**: Core functionality is extended through WebAssembly (WASM) plugins.
-- **Frontend Agnostic**: A single backend can support multiple simultaneous frontend connections via IPC (Unix sockets or network).
-- **Multi-user**: Designed to handle multiple users and their respective permissions.
+To build the entire project (Core, Plugins, GUIs, CLI):
 
-## Frontends
+```bash
+# 1. Install prerequisites (Go 1.25+, TinyGo 0.33+, wit-bindgen-cli, just)
+# 2. Build everything
+just all
+```
 
-Alloy supports multiple frontend implementations:
-- **TUI**: A terminal-based user interface.
-- **GUI**: A Wayland-compatible graphical user interface.
-- **Web**: A web-based interface (Go backend with JS frontend).
+The resulting binaries will be placed in the `./build/` directory:
+- `./build/bin/alloy-core`: Main backend kernel
+- `./build/bin/alloy-tui`: Terminal user interface
+- `./build/bin/alloy-gui`: Native graphical user interface
+- `./build/wasm/*.wasm`: Compiled application plugins
 
-## Documentation
+## 🛠️ Build and Development
 
-For more information, see the following documents:
+Alloy uses a `justfile` for orchestration. Key commands include:
+
+| Command | Description |
+|---------|-------------|
+| `just all` | Build both the Core and all Plugins |
+| `just build-core` | Build the Go backend binary |
+| `just build-plugins` | Build all WASM-based plugins |
+| `just setup-dev` | Configure Go workspace and replacements |
+| `just test` | Run the complete test suite |
+
+For more detailed information, see [Build and Plugin Guidelines](docs/BUILD_AND_PLUGINS.md).
+
+## 📁 Project Structure
+
+- `cmd/`: Binaries for the backend, CLI, and frontends.
+- `pkg/`: Core libraries, kernel, and **WIT-based WASM runtime**.
+- `plugins/wasm/`: Specialized application logic as WASM plugins.
+- `api/`: Shared IPC message definitions and API types.
+- `wit/`: WebAssembly Interface Type (WIT) definitions.
+- `docs/`: In-depth documentation.
+
+## 📖 Key Documentation
+
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [Build and Plugin Guidelines](docs/BUILD_AND_PLUGINS.md)
 - [Frontend Details](docs/FRONTENDS.md)
 - [Security Framework](docs/SECURITY.md)
 - [Implementation Roadmap](docs/ROADMAP.md)
-- [Plugin Details](docs/PLUGINS_ROADMAP.md)
 - [Coding Guidelines](docs/CODING_GUIDELINES.md)
-- [AI Steering & Guidelines](docs/AI_STEERING.md)
 
-## Project Structure
+## ⚖️ License
 
-- `cmd/`: Binaries for the backend, CLI, and frontends.
-- `pkg/`: Core libraries and logic.
-- `plugins/`: WASM plugin implementations and SDK.
-- `docs/`: Project documentation.
-- `api/`: API and IPC message definitions.
+Alloy is released under the MIT License.

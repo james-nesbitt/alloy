@@ -1,6 +1,0 @@
-#!/bin/bash
-if [[ "$1" == "--version" ]]; then
-  echo "wasm-opt version 110"
-  exit 0
-fi
-exit 0

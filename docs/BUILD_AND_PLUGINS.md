@@ -2,98 +2,97 @@
 
 Alloy is a hybrid system that leverages both Native Go code for infrastructure and WebAssembly (WASM) for application logic. This document outlines how to build the core and its plugins.
 
-## 1. Build Process
+## 1. Prerequisites
+
+Before building Alloy, ensure you have the following tools installed:
+
+1. **Go 1.25+** - [go.dev](https://go.dev/dl/)
+2. **TinyGo 0.33+** - [tinygo.org](https://tinygo.org/getting-started/install/)
+3. **wit-bindgen** - `cargo install wit-bindgen-cli`
+4. **Just** - `cargo install just` (optional, but highly recommended)
+
+## 2. Build Process
 
 Alloy uses a `justfile` (via [just](https://github.com/casey/just)) to manage its build process.
 
-### 1.1 Building the Core
-The Alloy core is built as a standard Go binary:
+### 2.1 Standard Build Targets
+
+| Target | Description | Command |
+|--------|-------------|---------|
+| `all` | Build everything (Core, Plugins, GUIs, CLI) | `just all` |
+| `build-core` | Build the Alloy Core (Backend) | `just build-core` |
+| `build-plugins`| Build all WASM plugins | `just build-plugins` |
+| `build-binaries`| Build all host binaries (Core, TUI, GUI, CLI) | `just build-binaries` |
+| `build-plugin NAME` | Build a single plugin (e.g., `health`) | `just build-plugin health` |
+| `generate` | Regenerate WIT bindings | `just generate` |
+| `setup-dev` | Configure Go work and module replacements | `just setup-dev` |
+
+### 2.2 Output Structure
+
+After building, the `./build/` directory will contain:
+
+```text
+build/
+├── bin/             # Host binaries
+│   ├── alloy-core   # Main backend
+│   ├── alloy-tui    # Terminal interface
+│   ├── alloy-cli    # Command line tool
+│   └── alloy-gui    # Gio-based native GUI
+└── wasm/            # Compiled WASM plugins
+    ├── ai.wasm
+    ├── buffer.wasm
+    ├── chat.wasm
+    ├── health.wasm
+    ├── iam.wasm
+    ├── project.wasm
+    ├── secrets.wasm
+    └── tasks.wasm
+```
+
+## 3. Plugin Strategy
+
+Alloy plugins are built into independent WebAssembly binaries using the `wasip1` target. These are decoupled from the core lifecycle and can be built separately.
+
+### 3.1 The Plugin Manager
+The Alloy core discovers plugins at runtime. When starting the core, it scans specified directories for `.wasm` files.
+
+### 3.2 Loading Plugins
+You can specify plugin directories via command-line flags when running `alloy-core`:
 ```bash
-just build-core
+./build/bin/alloy-core --data-dir ./data --provision provision.json
 ```
 
-### 1.2 Building WASM Plugins
-Alloy plugins are built into independent WebAssembly binaries using the `wasip1` target. These are decoupled from the core lifecycle and can be built separately:
+### 3.3 Asynchronous Loading
+WASM compilation (utilizing the `wazero` runtime) is performed in the background. A plugin becomes available once its code is compiled and it successfully executes its initialization routines via the WIT `alloy-init` function.
+
+## 4. Development & Testing
+
+### 4.1 Development Setup
+If you are developing new plugins or modifying the SDK, run:
 ```bash
-just build-plugins
+just setup-dev
 ```
-This command compiles all plugins found in `plugins/wasm/` and places the resulting `.wasm` files in `build/wasm/`.
+This script automatically regenerates the `go.work` file and configures the necessary `replace` directives in the plugin `go.mod` files to point to your local code instead of GitHub URI references.
 
-### 1.3 Building Everything
-To build both the core and all plugins at once:
+### 4.2 Running Tests
+To run the full test suite, including WIT integration tests:
 ```bash
-just build-all
+just test
 ```
-
-## 2. Plugin Loading and Discovery
-
-The Alloy core does not have plugins "burned-in" or statically linked. Instead, it discovers them at runtime.
-
-### 2.1 The `--wasm-plugins` Flag
-When starting the core, you can specify one or more directories for the core to scan for WASM plugins:
+To run only WASM-specific implementation tests:
 ```bash
-./build/core --wasm-plugins ./build/wasm --wasm-plugins ./my-custom-plugins
-```
-The core will automatically:
-1. Scan these directories for files ending in `.wasm`.
-2. Derive a Plugin ID from the filename (e.g., `chat.wasm` -> `plugin-chat`).
-3. Load the plugin asynchronously using the `RegistryManager`.
-
-### 2.2 Manual Plugin Loading
-You can also load specific WASM plugins using the `--wasm-plugin` flag:
-```bash
-./build/core --wasm-plugin ./build/wasm/chat.wasm
+just test-wasm
 ```
 
-### 2.3 Provisioning Manifest
-For complex setups involving multiple native and WASM plugins with specific constraints, use a provisioning manifest:
-```bash
-./build/core --provision ./tests/wasm_provision.json
-```
-The manifest is a JSON file defining a list of plugins to load.
-
-### 2.4 Asynchronous Loading
-Because WASM compilation (Ahead-of-Time compilation via `wazero`) can be resource-intensive, the core loads plugins in the background. A plugin is not immediately available for message routing; it becomes available once its code is compiled and it successfully executes its initialization routines.
-
-### 2.5 Hot-Reloading
-Alloy supports swapping a WASM plugin's binary at runtime without restarting the kernel or other plugins. This is useful for rapid development and "zero-downtime" updates.
-
-To trigger a reload, send a `reload` message to the `plugin-wasm-manager`:
-```json
-{
-  "target": "plugin-wasm-manager",
-  "method": "reload",
-  "payload": "{\"id\": \"plugin-chat\"}"
-}
-```
-The manager will:
-1.  Read the current version of the `.wasm` file from its original path.
-2.  Instantiate a new WASM module instance.
-3.  Swap the old instance for the new one in the kernel registry.
-4.  Re-register the plugin's capabilities with the `plugin-command-manager`.
-
-## 3. Testing Considerations
-
-When writing tests for Alloy, you must account for the asynchronous nature of WASM plugin initialization.
-
-### 3.1 Compilation Overhead
-WASM plugins in Alloy are relatively large because they include the Go runtime. Compiling these modules into machine code during a test run can take significant time (up to 30 seconds or more per plugin depending on the environment).
-
-### 3.2 The Polling Pattern
-Tests should never use fixed `time.Sleep()` to wait for a plugin. Instead, use the **Discovery Polling Pattern**:
+### 4.3 Testing Constraints
+Due to the compilation overhead of large WASM modules, tests involving plugins should account for significant startup latency. Use the **Discovery Polling Pattern** instead of fixed sleeps:
 1. Connect to the core.
-2. Periodically send a `discover` request to the `plugin-command-manager`.
-3. Check the response to see if the desired plugin ID is listed in the available targets.
-4. Continue with test logic only once the plugin is present.
+2. Periodically check plugin availability via the kernel's metadata registry.
+3. Proceed once the plugin status is marked as `Running`.
 
-Refer to `tests/application_test.go` for an example of this pattern.
+## 5. Troubleshooting WASM Builds
 
-### 3.3 Test Timeouts
-Due to compilation overhead, tests involving WASM plugins should be run with a generous timeout. The default project timeout is set to 30s in the `justfile`, but heavy integration tests may require manual adjustment or polling loops with much longer deadlines.
-
-## 4. Resource Constraints
-
-All WASM plugins are executed within the `wazero` runtime with the following constraints:
-- **Sandbox**: No direct access to host files, network, or environment unless explicitly mapped by the core.
-- **Clock Support**: Plugins are provided with access to system wall time and monotonic time via WASI.
-- **Panic Guards**: The core manages the lifecycle of plugin modules; if a plugin's `_start` goroutine panics, it is caught to prevent the host process from crashing, though the plugin may enter an error state.
+If TinyGo fails to build because of a missing `wasm-opt`:
+1. Alloy provides a mechanism to download `binaryen` into `.tmp-bin` automatically if needed.
+2. The `scripts/build-plugin.sh` looks for `./.tmp-bin/wasm-opt` and uses it for final optimization passes.
+3. If you still encounter issues, ensure `WASMOPT` is correctly set in your environment or follow the instructions in `scripts/build-plugin.sh`.
