@@ -16,7 +16,7 @@ This document provides clear instructions for building the WIT-based Alloy compo
 | Target | Description | Command |
 |--------|-------------|---------|
 | `generate-wit-bindings` | Generate WIT bindings | `just generate-wit-bindings` |
-| `build-wasm` | Build all WASM plugins | `just build-wasm` |
+| `build-plugins` | Build all WASM plugins | `just build-plugins` |
 | `build-core-wit` | Build WIT-based core backend | `just build-core-wit` |
 | `build` | Build everything | `just build` |
 
@@ -25,7 +25,7 @@ This document provides clear instructions for building the WIT-based Alloy compo
 | Target | Description | Command |
 |--------|-------------|---------|
 | `build-plugin PLUGIN` | Build specific plugin | `just build-plugin health` |
-| (all plugins) | Build all plugins | `just build-wasm` |
+| (all plugins) | Build all plugins | `just build-plugins` |
 
 ### GUI Targets
 
@@ -60,7 +60,7 @@ generate-wit-bindings:
 	@wit-bindgen tiny-go --out-dir pkg/wasm2/bindings/guest wit/alloy.wit
 
 # Build all WASM plugins
-build-wasm: generate-wit-bindings
+build-plugins: generate-wit-bindings
 	@echo "Building WASM plugins..."
 	@for plugin in ai buffer chat health iam project secrets tasks; do \
 		just build-plugin "$$plugin"; \
@@ -99,7 +99,7 @@ build-gui-web:
 build-gui-all: build-gui-tui build-gui-web
 
 # Build everything
-build: build-wasm build-core-wit build-gui-all
+build: build-plugins build-core-wit build-gui-all
 
 # Run tests
 test-wit:
@@ -129,7 +129,7 @@ fmt:
 just generate-wit-bindings
 
 # 2. Build all WASM plugins
-just build-wasm
+just build-plugins
 
 # 3. Build core backend
 just build-core-wit

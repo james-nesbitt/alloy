@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
 )
 
 // Project represents a project in the system.
@@ -36,7 +35,7 @@ type ProjectAddResourceRequest struct {
 
 // ProjectOpenRequest represents a request to open a project.
 type ProjectOpenRequest struct {
-	Id string `json:"id"`
+	ID string `json:"id"`
 }
 
 var (
@@ -133,7 +132,7 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 
 	id := fmt.Sprintf("proj-%d", time.Now().UnixNano())
 	proj := &Project{
-		Id:          id,
+		ID:          id,
 		Name:        req.Name,
 		Description: req.Description,
 	}
@@ -142,7 +141,7 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 	// Save projects to persistent storage
 	saveProjects()
 
-	plugin.Log("info", fmt.Sprintf("Created project: %s (%s)", proj.Name, proj.Id))
+	plugin.Log("info", fmt.Sprintf("Created project: %s (%s)", proj.Name, proj.ID))
 
 	return plugin.Reply(msg, proj)
 }
@@ -188,14 +187,14 @@ func handleAddBuffer(msg AlloyMessage) AlloyMessage {
 		// Find active project if none specified
 		for _, proj := range projects {
 			if proj.Active {
-				targetID = proj.Id
+				targetID = proj.ID
 				break
 			}
 		}
 	}
 
 	proj, ok := projects[targetID]
-	if resp.Id == "" {
+	if !ok {
 		return plugin.ErrorReply(msg, "project_not_found")
 	}
 
@@ -219,14 +218,14 @@ func handleAddChannel(msg AlloyMessage) AlloyMessage {
 		// Find active project if none specified
 		for _, proj := range projects {
 			if proj.Active {
-				targetID = proj.Id
+				targetID = proj.ID
 				break
 			}
 		}
 	}
 
 	proj, ok := projects[targetID]
-	if resp.Id == "" {
+	if !ok {
 		return plugin.ErrorReply(msg, "project_not_found")
 	}
 
@@ -245,8 +244,8 @@ func handleOpen(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
 	}
 
-	proj, ok := projects[req.Id]
-	if resp.Id == "" {
+	proj, ok := projects[req.ID]
+	if !ok {
 		return plugin.ErrorReply(msg, "project_not_found")
 	}
 
@@ -262,7 +261,7 @@ func handleOpen(msg AlloyMessage) AlloyMessage {
 	// Notify about the project opening
 	notifyProjectOpened(proj)
 
-	plugin.Log("info", fmt.Sprintf("Opened project: %s (%s)", proj.Name, proj.Id))
+	plugin.Log("info", fmt.Sprintf("Opened project: %s (%s)", proj.Name, proj.ID))
 
 	return plugin.Reply(msg, proj)
 }

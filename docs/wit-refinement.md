@@ -89,11 +89,11 @@ func (p *Plugin) ExecuteCommand(targetPlugin, commandName string, cmd Command) (
 **Justfile Targets**:
 ```makefile
 # Build all WASM plugins with WIT support
-build-wasm:
+build-plugins:
     # Implementation detects and builds WIT versions
 
 # Build specific plugin with WIT support
-build-wasm-plugin plugin_name:
+build-plugins-plugin plugin_name:
     # Implementation builds specified plugin
 ```
 

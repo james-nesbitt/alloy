@@ -6,7 +6,6 @@ import (
 	. "github.com/jnesbitt/alloy-go/pkg/wasm/bindings/guest"
 	. "github.com/jnesbitt/alloy-go/pkg/wasm/guest"
 	"encoding/json"
-
 )
 
 // SecretStoreRequest represents a request to store a secret.
@@ -17,7 +16,7 @@ type SecretStoreRequest struct {
 
 // SecretGetRequest represents a request to get a secret.
 type SecretGetRequest struct {
-	Id string `json:"id"`
+	ID string `json:"id"`
 }
 
 // SecretStoreResponse represents a response to storing a secret.
@@ -69,12 +68,12 @@ func handleStoreSecret(msg AlloyMessage) AlloyMessage {
 	}
 
 	// Store the secret
-	secretKey := "secret:" + req.Id
+	secretKey := "secret:" + req.ID
 	if !plugin.KVSet(secretKey, []byte(req.Value)) {
 		return plugin.ErrorReply(msg, "failed_to_store_secret")
 	}
 
-	plugin.Log("info", "Stored secret: "+req.Id)
+	plugin.Log("info", "Stored secret: "+req.ID)
 
 	return plugin.Reply(msg, SecretStoreResponse{Status: "stored"})
 }
@@ -87,13 +86,13 @@ func handleGetSecret(msg AlloyMessage) AlloyMessage {
 	}
 
 	// Get the secret
-	secretKey := "secret:" + req.Id
+	secretKey := "secret:" + req.ID
 	secretValue, ok := plugin.KVGet(secretKey)
 	if !ok || secretValue == nil {
 		return plugin.ErrorReply(msg, "secret_not_found")
 	}
 
-	plugin.Log("debug", "Retrieved secret: "+req.Id)
+	plugin.Log("debug", "Retrieved secret: "+req.ID)
 
 	return plugin.Reply(msg, SecretGetResponse{Value: string(secretValue)})
 }

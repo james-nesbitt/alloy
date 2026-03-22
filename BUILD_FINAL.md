@@ -58,7 +58,7 @@ GOOS=wasip1 GOARCH=wasm tinygo build -no-debug -target=wasi -o ../../../build/wa
 ### 3. Build All Plugins
 
 ```bash
-just build-wasm
+just build-plugins
 ```
 
 ### 4. Build Core Backend
@@ -83,7 +83,7 @@ generate-wit-bindings:
 	wit-bindgen tiny-go --out-dir pkg/wasm2/bindings/guest wit/alloy.wit
 
 # Build all WASM plugins
-build-wasm: generate-wit-bindings
+build-plugins: generate-wit-bindings
 	for plugin in ai buffer chat health iam project secrets tasks; do \
 		just build-plugin "$$plugin"; \
 	done

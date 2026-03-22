@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
 )
 
 // ChatMessage represents a message in a channel.
@@ -36,9 +35,11 @@ type DirectMessage struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+var plugin *Plugin
+
 func main() {
 	// Create a new WIT-based plugin
-	plugin := NewPlugin("chat-plugin").
+	plugin = NewPlugin("chat-plugin").
 		WithMetadata(
 			"Chat Plugin", 
 			"Provides chat functionality including channels and direct messages",
@@ -82,7 +83,7 @@ func handleSendMessage(msg AlloyMessage) AlloyMessage {
 
 	chatMsg.Sender = msg.Sender
 	chatMsg.Timestamp = time.Now().Unix()
-	chatMsg.Id = fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	chatMsg.ID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
 
 	// Persist history
 	historyKey := "history:" + chatMsg.Channel
@@ -116,7 +117,7 @@ func handleDirectSend(msg AlloyMessage) AlloyMessage {
 	}
 	dm.From = msg.Sender
 	dm.Timestamp = time.Now().Unix()
-	dm.Id = fmt.Sprintf("dm-%d", time.Now().UnixNano())
+	dm.ID = fmt.Sprintf("dm-%d", time.Now().UnixNano())
 
 	// Create a key for the message pair
 	pairKey := "dm:" + dm.From + ":" + dm.To

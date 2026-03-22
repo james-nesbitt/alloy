@@ -42,7 +42,7 @@
 - `docs/plugin-migration.md` - Comprehensive migration documentation
 - `FINAL_SUMMARY.md` - This summary document
 - `scripts/build-wit.sh` - WIT binding generation script
-- `scripts/build-wasm.sh` - WASM plugin build script
+- `scripts/build-plugins.sh` - WASM plugin build script
 - `build-all.sh` - Complete build script
 - `build-plugin.sh` - Single plugin build script
 

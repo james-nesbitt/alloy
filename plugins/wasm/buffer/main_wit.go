@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
 )
 
 // Buffer represents a data buffer.
@@ -99,17 +98,17 @@ func findRootBuffer(id string) (*Buffer, bool) {
 // handleSubscribe handles buffer subscription requests.
 func handleSubscribe(msg AlloyMessage) AlloyMessage {
 	var req struct {
-		Id string `json:"id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	if _, ok := buffers[req.Id]; !ok {
+	if _, ok := buffers[req.ID]; !ok {
 		return plugin.ErrorReply(msg, "buffer_not_found")
 	}
 
-	subscribers[req.Id] = append(subscribers[req.Id], msg.Sender)
+	subscribers[req.ID] = append(subscribers[req.ID], msg.Sender)
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "subscribed",
@@ -134,7 +133,7 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 	nextID++
 
 	b := &Buffer{
-		Id:           id,
+		ID:           id,
 		Name:         req.Name,
 		Type:         req.Type,
 		MimeType:     req.MimeType,
@@ -160,14 +159,14 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 // handleRead handles buffer read requests.
 func handleRead(msg AlloyMessage) AlloyMessage {
 	var req struct {
-		Id string `json:"id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	root, ok := findRootBuffer(req.Id)
-	if resp.Id == "" {
+	root, ok := findRootBuffer(req.ID)
+	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
@@ -179,8 +178,8 @@ func handleRead(msg AlloyMessage) AlloyMessage {
 	}
 
 	return plugin.Reply(msg, readResponse{
-		Id:      req.Id,
-		RootID:  root.Id,
+		ID:      req.ID,
+		RootID:  root.ID,
 		Content: root.Data,
 		Size:    len(root.Data),
 	})
@@ -197,10 +196,10 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	if _, ok := buffers[req.Id]; !ok {
+	root, ok := findRootBuffer(req.ID)
+	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
-	root, _ := findRootBuffer(req.Id)
 
 	if req.Offset != nil && *req.Offset >= 0 {
 		offset := *req.Offset
@@ -217,7 +216,7 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 	}
 
 	root.Timestamp = time.Now().Unix()
-	notifyAll(req.Id, "update")
+	notifyAll(req.ID, "update")
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",
@@ -234,10 +233,10 @@ func handleAppend(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	if _, ok := buffers[req.Id]; !ok {
+	root, ok := findRootBuffer(req.ID)
+	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
-	root, _ := findRootBuffer(req.Id)
 
 	// Stream pruning logic
 	maxHistory := 0
@@ -251,7 +250,7 @@ func handleAppend(msg AlloyMessage) AlloyMessage {
 	}
 
 	root.Timestamp = time.Now().Unix()
-	notifyAll(req.Id, "append")
+	notifyAll(req.ID, "append")
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",
@@ -273,20 +272,20 @@ func handleList(msg AlloyMessage) AlloyMessage {
 // handleDelete handles buffer deletion requests.
 func handleDelete(msg AlloyMessage) AlloyMessage {
 	var req struct {
-		Id string `json:"id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	delete(buffers, req.Id)
+	delete(buffers, req.ID)
 
 	// Also delete from persistent storage
-	plugin.KVDelete(fmt.Sprintf("buffer:%s:meta", req.Id))
-	plugin.KVDelete(fmt.Sprintf("buffer:%s:content", req.Id))
+	plugin.KVDelete(fmt.Sprintf("buffer:%s:meta", req.ID))
+	plugin.KVDelete(fmt.Sprintf("buffer:%s:content", req.ID))
 
 	// Notify subscribers
-	notifyAll(req.Id, "delete")
+	notifyAll(req.ID, "delete")
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "deleted",
@@ -296,19 +295,19 @@ func handleDelete(msg AlloyMessage) AlloyMessage {
 // handleClear handles buffer clear requests.
 func handleClear(msg AlloyMessage) AlloyMessage {
 	var req struct {
-		Id string `json:"id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	root, ok := findRootBuffer(req.Id)
-	if resp.Id == "" {
+	root, ok := findRootBuffer(req.ID)
+	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
 	root.Data = []byte{}
-	notifyAll(req.Id, "clear")
+	notifyAll(req.ID, "clear")
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",
@@ -325,8 +324,8 @@ func handleSetMetadata(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	b, ok := buffers[req.Id]
-	if resp.Id == "" {
+	b, ok := buffers[req.ID]
+	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
@@ -337,7 +336,7 @@ func handleSetMetadata(msg AlloyMessage) AlloyMessage {
 		b.Metadata[k] = v
 	}
 
-	notifyAll(req.Id, "metadata_update")
+	notifyAll(req.ID, "metadata_update")
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",
@@ -347,26 +346,26 @@ func handleSetMetadata(msg AlloyMessage) AlloyMessage {
 // handleSave handles buffer save requests.
 func handleSave(msg AlloyMessage) AlloyMessage {
 	var req struct {
-		Id string `json:"id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	b, ok := buffers[req.Id]
-	if resp.Id == "" {
+	b, ok := buffers[req.ID]
+	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
 	// Persist metadata
-	metaKey := fmt.Sprintf("buffer:%s:meta", b.Id)
+	metaKey := fmt.Sprintf("buffer:%s:meta", b.ID)
 	metaData, _ := json.Marshal(b)
 	plugin.KVSet(metaKey, metaData)
 
 	// Persist content (only for root buffers)
-	root, _ := findRootBuffer(b.Id)
-	if root != nil && root.Id == b.Id {
-		contentKey := fmt.Sprintf("buffer:%s:content", b.Id)
+	root, rootOk := findRootBuffer(b.ID)
+	if rootOk && root.ID == b.ID {
+		contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
 		plugin.KVSet(contentKey, root.Data)
 	}
 
@@ -377,24 +376,24 @@ func handleSave(msg AlloyMessage) AlloyMessage {
 
 // handleLoad handles buffer load requests.
 func handleLoad(msg AlloyMessage) AlloyMessage {
-	keys, _ := plugin.KVList("buffer:")
+	keys := plugin.KVList("buffer:")
 	plugin.Log("info", fmt.Sprintf("Loading: found %d keys", len(keys)))
 
 	loadedCount := 0
 	for _, key := range keys {
 		if strings.HasSuffix(key, ":meta") {
-			val, _ := plugin.KVGet(key)
-			if val != nil {
+			val, ok := plugin.KVGet(key)
+			if ok && val != nil {
 				var b Buffer
 				if err := json.Unmarshal(val, &b); err == nil {
-					buffers[b.Id] = &b
-					plugin.Log("info", "Restored buffer " + b.Id)
+					buffers[b.ID] = &b
+					plugin.Log("info", "Restored buffer " + b.ID)
 					loadedCount++
 					// If root, get content too
 					if b.BaseBufferID == "" {
-						contentKey := fmt.Sprintf("buffer:%s:content", b.Id)
-						content, _ := plugin.KVGet(contentKey)
-						if content != nil {
+						contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
+						content, contentOk := plugin.KVGet(contentKey)
+						if contentOk && content != nil {
 							b.Data = content
 						}
 					}

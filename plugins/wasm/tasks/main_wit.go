@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
 )
 
 // Task represents a task in the system.
@@ -82,7 +81,7 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 	// Create the task
 	taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
 	task := Task{
-		Id:          taskID,
+		ID:          taskID,
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      "pending",

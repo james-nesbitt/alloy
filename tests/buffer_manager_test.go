@@ -16,7 +16,7 @@ func TestBufferManagerOperations(t *testing.T) {
 	bufferWasmPath := filepath.Join(buildDir, "buffer.wasm")
 
 	if _, err := os.Stat(bufferWasmPath); os.IsNotExist(err) {
-		t.Skip("buffer.wasm not found, run 'just build-wasm' first")
+		t.Skip("buffer.wasm not found, run 'just build-plugins' first")
 	}
 
 	manifest := map[string]any{

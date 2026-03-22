@@ -69,7 +69,7 @@ Plugins will use the generated TinyGo bindings, which provide:
 The justfile has been updated with targets for:
 - `install-wit-bindgen`: Install the wit-bindgen tool
 - `generate-wit-bindings`: Generate the bindings from the WIT file
-- `build-wasm-wit`: Future target for building WIT-enabled plugins
+- `build-plugins-wit`: Future target for building WIT-enabled plugins
 
 ## Next Steps
 

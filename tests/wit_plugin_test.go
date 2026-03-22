@@ -63,7 +63,7 @@ func TestWITPlugins(t *testing.T) {
 	defer manager.Close(context.Background())
 
 	// Build all plugins
-	justBuildAll := exec.Command("just", "build-wasm")
+	justBuildAll := exec.Command("just", "build-plugins")
 	if err := justBuildAll.Run(); err != nil {
 		t.Fatal(err)
 	}

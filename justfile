@@ -82,14 +82,14 @@ build-plugin name: generate
     @./scripts/build-plugin.sh {{name}}
 
 # Build all WIT-based WASM plugins
-build-wasm: generate
+build-plugins: generate
     @echo ">> Building all WASM plugins..."
     mkdir -p {{WASM_BUILD}}
     @./scripts/build-wasm-all.sh
     @echo ">> WASM plugins built successfully."
 
 # Build everything
-all: build-wasm build-binaries
+all: build-plugins build-binaries
 
 # --- EXECUTION ---
 

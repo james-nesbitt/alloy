@@ -63,7 +63,7 @@ func TestWITIntegration(t *testing.T) {
 	defer manager.Close(context.Background())
 
 	// Build and load the health plugin
-	justBuildHealth := exec.Command("just", "build-wasm-plugin", "health-wasm")
+	justBuildHealth := exec.Command("just", "build-plugins-plugin", "health-wasm")
 	if err := justBuildHealth.Run(); err != nil {
 		t.Fatal(err)
 	}

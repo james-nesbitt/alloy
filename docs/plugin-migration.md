@@ -153,10 +153,10 @@ The build system has been enhanced to support the migrated plugins:
 
 ```bash
 # Build all WIT plugins
-just build-wasm
+just build-plugins
 
 # Build a specific plugin
-just build-wasm-plugin <plugin-name>
+just build-plugins-plugin <plugin-name>
 
 # Run WIT tests
 just test-wit

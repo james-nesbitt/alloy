@@ -106,7 +106,7 @@ ln -s ../pkg/wasm2/bindings/guest local/wit
 
 3. **Test**:
    - Run `just generate-wit-bindings`
-   - Build plugins with `just build-wasm`
+   - Build plugins with `just build-plugins`
    - Run tests with `just test-wit`
 
 4. **Merge**:
