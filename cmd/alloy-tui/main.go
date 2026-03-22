@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -1135,10 +1136,20 @@ func main() {
 	name := flag.String("name", "alloy-tui", "Name of the TUI component")
 	actor := flag.String("actor", "", "Actor identity (defaults to name)")
 	socket := flag.String("socket", frontend.GetAlloyRuntimeDir()+"/default.sock", "Socket address")
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
 
 	cmdutil.HandleSecurityError(sf.Validate())
+
+	// Set up logging
+	logLevel := slog.LevelInfo
+	if *debug {
+		logLevel = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
 
 	if *actor == "" {
 		*actor = *name
@@ -1152,6 +1163,7 @@ func main() {
 	}
 
 	client.OnMessage(func(msg api.Message) {
+		logger.Debug("received message", "sender", msg.Sender, "method", msg.Method)
 		msgCh <- msg
 	})
 

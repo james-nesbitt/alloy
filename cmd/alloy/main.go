@@ -72,6 +72,7 @@ func usage() {
 	fmt.Println("  --network                     When using --dedicated, use a TCP network socket instead of Unix")
 	fmt.Println("  --insecure                    Disable mTLS and use insecure communication")
 	fmt.Println("  --security-dir PATH           Path to the security/identity directory")
+	fmt.Println("  --debug                       Enable verbose debug logging for all components")
 	os.Exit(1)
 }
 
@@ -181,6 +182,7 @@ func launchFrontend(name string, args []string) {
 	socket := fs.String("socket", "", "Connect to existing socket")
 	dedicated := fs.Bool("dedicated", false, "Launch dedicated core")
 	network := fs.Bool("network", false, "Use network socket for dedicated core")
+	debug := fs.Bool("debug", false, "Enable debug logging")
 	sf := cmdutil.RegisterSecurityFlags(fs)
 	fs.Parse(args)
 
@@ -215,7 +217,12 @@ func launchFrontend(name string, args []string) {
 		}
 		targetSocket = addr
 
-		coreCmd = exec.Command(coreBin, "--listen", addr, "--insecure") // Dedicated is always insecure
+		coreArgs := []string{"--listen", addr, "--insecure"}
+		if *debug {
+			coreArgs = append(coreArgs, "--debug")
+		}
+
+		coreCmd = exec.Command(coreBin, coreArgs...) // Dedicated is always insecure
 		// Propagate logs to stderr only so we don't mess up TUI/GUI output
 		coreCmd.Stderr = os.Stderr
 
@@ -237,6 +244,9 @@ func launchFrontend(name string, args []string) {
 	}
 	if *sf.SecurityDir != "" {
 		feArgs = append(feArgs, "--security-dir", *sf.SecurityDir)
+	}
+	if *debug {
+		feArgs = append(feArgs, "--debug")
 	}
 
 	// Any remaining arguments after -- are passed to the frontend
