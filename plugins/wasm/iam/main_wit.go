@@ -103,37 +103,36 @@ func main() {
 	// Set up initialization
 	plugin.OnInit(func() error {
 		plugin.Log("info", "IAM plugin initializing")
-		// Initialize default admin policy if not exists
-		_, err := policies.Get("admin")
-		if err != nil {
-			defaultPolicy := Policy{
-				Role:        "admin",
-				Permissions: []string{"*"},
-			}
-			_ = policies.Set("admin", defaultPolicy)
-			plugin.Log("info", "Initialized default admin policy")
+		
+		// Initialize default roles and permissions
+		defaultRoles := map[string][]string{
+			"admin": {"*"},
+			"guest": {
+				"health:*",
+				"command-manager:discover",
+				"events:*",
+				"chat:*",
+				"project:*",
+				"ai:*",
+				"iam:check",
+				"secrets:*",
+				"buffer:*",
+				"presence:*",
+			},
 		}
 
-		// Initialize default guest policy for common operations
-		_, err = policies.Get("guest")
-		if err != nil {
-			guestPolicy := Policy{
-				Role: "guest",
-				Permissions: []string{
-					"health:*",
-					"command-manager:discover",
-					"events:*",
-					"chat:*",
-					"project:*",
-					"ai:*",
-					"iam:check",
-					"secrets:*",
-					"buffer:*",
-				},
+		for role, perms := range defaultRoles {
+			_, err := policies.Get(role)
+			if err != nil {
+				defaultPolicy := Policy{
+					Role:        role,
+					Permissions: perms,
+				}
+				_ = policies.Set(role, defaultPolicy)
+				plugin.Log("info", "Initialized default "+role+" policy")
 			}
-			_ = policies.Set("guest", guestPolicy)
-			plugin.Log("info", "Initialized default guest policy")
 		}
+
 		return nil
 	})
 

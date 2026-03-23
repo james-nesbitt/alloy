@@ -72,19 +72,19 @@ Logic-heavy plugins and the user interface.
 ## Phase 5: Team & Project Collaboration (In Progress)
 Focusing Alloy on high-performance team workflows, shared context, and collaborative development.
 
-- [ ] **Data-Driven Dashboard Protocol**: 
-    - [ ] **WIT Dashboard Provider**: Define a standard `get-summary` and `get-actions` interface.
-    - [ ] **Summary Aggregator**: Create a registry for plugins to submit "status cards".
-- [ ] **Unified Project Context**:
-    - [ ] **Global Workspace Registry**: Sync project metadata across plugins (`ai`, `buffer`, `secrets`).
-    - [ ] **Cross-Plugin Context-Passing**: Automatic inclusion of project-relevant files in AI queries.
+- [x] **Data-Driven Dashboard Protocol**: 
+    - [x] **WIT Dashboard Provider**: Define a standard `get-summary` and `get-actions` interface.
+    - [x] **Summary Aggregator**: Create a registry for plugins to submit "status cards".
+- [x] **Unified Project Context**:
+    - [x] **Global Workspace Registry**: Sync project metadata across plugins (`ai`, `buffer`, `secrets`).
+    - [x] **Cross-Plugin Context-Passing**: Automatic inclusion of project-relevant files in AI queries.
 - [ ] **Real-time Team Coordination**:
     - [ ] **Multi-User Presence**: See active team members in the `buffer` and `chat` plugins.
     - [ ] **Conflict Resolution**: Operational Transformation (OT) or CRDT-lite for shared editor buffers.
-    - [ ] **Shared Secret Scoping**: Team-level vs. user-level secret partitioning in the `secrets` plugin.
-- [ ] **Arbitrated UI Layouts**:
-    - [ ] **Multi-Pane TUI Refactor**: Implement the "Split Frame" layout in the terminal frontend.
-    - [ ] **Project Layout Manifest**: Allow projects to define default pane arrangements (e.g., `layout.json`).
+    - [x] **Shared Secret Scoping**: Team-level vs. user-level secret partitioning in the `secrets` plugin.
+- [x] **Arbitrated UI Layouts**:
+    - [x] **Multi-Pane TUI Refactor**: Implement the "Split Frame" layout in the terminal frontend.
+    - [x] **Project Layout Manifest**: Allow projects to define default pane arrangements (e.g., `layout.json`).
 - [ ] **Collaborative Knowledge Graph**:
     - [ ] **Semantic Project Indexing**: Background indexing of documents and code for team-wide search.
 

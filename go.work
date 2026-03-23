@@ -9,6 +9,7 @@ use (
 	./plugins/wasm/chat
 	./plugins/wasm/health
 	./plugins/wasm/iam
+	./plugins/wasm/presence
 	./plugins/wasm/project
 	./plugins/wasm/secrets
 	./plugins/wasm/tasks
