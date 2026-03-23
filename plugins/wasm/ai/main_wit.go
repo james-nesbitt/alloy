@@ -444,7 +444,7 @@ func performLLMQueryWithFallback(prompt string) (string, error) {
 
 // performLLMQuery performs an LLM query using the configured provider.
 func performLLMQuery(cfg ProviderConfig, prompt string) (string, error) {
-	// Get project context
+	// Get project/workspace context
 	projectContext := getProjectContext()
 	fullPrompt := prompt
 	if projectContext != "" {
@@ -456,7 +456,7 @@ func performLLMQuery(cfg ProviderConfig, prompt string) (string, error) {
 	case ProviderMock:
 		response := "Mock AI response to: " + prompt
 		if projectContext != "" {
-			response = fmt.Sprintf("Mock AI response with project context [%s] to: %s", projectContext, prompt)
+			response = fmt.Sprintf("Mock AI response with system context [%s] to: %s", projectContext, prompt)
 		}
 		return response, nil
 	case ProviderOllama:
@@ -556,15 +556,28 @@ func queryAnthropic(cfg ProviderConfig, prompt string) (string, error) {
 	return response.Content[0].Text, nil
 }
 
-// getProjectContext gets the current project context.
+// getProjectContext gets the current project and workspace context.
 func getProjectContext() string {
+	var contextParts []string
+
+	// Get workspace context
+	ws, ok := plugin.GetActiveWorkspace()
+	if ok {
+		contextParts = append(contextParts, fmt.Sprintf("Active Workspace: %s (Location: %s)", ws.Name, ws.Path))
+	}
+
+	// Get project context
 	project, err := getActiveProject()
-	if err != nil {
+	if err == nil {
+		contextParts = append(contextParts, fmt.Sprintf("Current project: '%s' (%s).",
+			project.Name, project.Description))
+	}
+
+	if len(contextParts) == 0 {
 		return ""
 	}
 
-	return fmt.Sprintf("You are currently working on project '%s' (%s).",
-		project.Name, project.Description)
+	return strings.Join(contextParts, "\n")
 }
 
 // getActiveProject gets the active project.
