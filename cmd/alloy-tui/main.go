@@ -715,120 +715,9 @@ func (m model) fetchWorkspaces() tea.Cmd {
 }
 
 func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
-	// First, let the input handle the key unless it's navigation
-	switch msg.Type {
-	case tea.KeyDown, tea.KeyCtrlN, tea.KeyUp, tea.KeyCtrlP, tea.KeyEnter, tea.KeyEsc, tea.KeyCtrlG:
-		// Navigation/Termination handled below
-	default:
-		m.commandInput, ciCmd = m.commandInput.Update(msg)
-		m.selectedCmdIdx = 0
-	}
-
-	filteredCount := len(m.filteredCommands())
-
-	switch msg.Type {
-	case tea.KeyEsc, tea.KeyCtrlG:
-		m.mode = m.lastMainMode
-		if m.mode == ModeCommand {
-			m.mode = ModeNormal
-		} // Failsafe
-		m.commandInput.Blur()
-		m.commandInput.SetValue("")
-		m.breadcrumbs = nil
-		m.selectedCmdIdx = 0
-		return m, nil
-	case tea.KeyDown, tea.KeyCtrlN:
-		if filteredCount > 0 {
-			m.selectedCmdIdx = (m.selectedCmdIdx + 1) % filteredCount
-		}
-		return m, nil
-	case tea.KeyUp, tea.KeyCtrlP:
-		if filteredCount > 0 {
-			m.selectedCmdIdx = (m.selectedCmdIdx - 1 + filteredCount) % filteredCount
-		}
-		return m, nil
-	case tea.KeyEnter:
-		filtered := m.filteredCommands()
-		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
-			opt := filtered[m.selectedCmdIdx]
-			if m.selectType == SelectProject {
-				m.mode = m.lastMainMode
-				if m.mode == ModeCommand {
-					m.mode = ModeNormal
-				} // Failsafe
-				m.commandInput.Blur()
-				m.selectType = SelectNone
-				m.commandInput.SetValue("")
-				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
-			}
-			if m.selectType == SelectWorkspace {
-				m.mode = m.lastMainMode
-				if m.mode == ModeCommand {
-					m.mode = ModeNormal
-				} // Failsafe
-				m.commandInput.Blur()
-				m.selectType = SelectNone
-				m.commandInput.SetValue("")
-				return m.executeCommand(fmt.Sprintf("project set-workspace %s", opt.Raw))
-			}
-			if m.isLeader {
-				if opt.IsDir {
-					m.breadcrumbs = append(m.breadcrumbs, opt.Display)
-					m.selectedCmdIdx = 0
-					m.commandInput.SetValue("")
-					return m, nil
-				} else {
-					// Find the node to execute it properly
-					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
-					if node != nil {
-						m.mode = m.lastMainMode
-						if m.mode == ModeCommand {
-							m.mode = ModeNormal
-						} // Failsafe
-						m.commandInput.Blur()
-						m.commandInput.SetValue("")
-						m.breadcrumbs = nil
-						m.selectedCmdIdx = 0
-						return m.executeCommand(fmt.Sprintf("%s %s", node.Target, node.Method))
-					}
-				}
-			} else {
-				m.mode = m.lastMainMode
-				if m.mode == ModeCommand {
-					m.mode = ModeNormal
-				} // Failsafe
-				m.commandInput.Blur()
-				m.commandInput.SetValue("")
-				m.breadcrumbs = nil
-				m.selectedCmdIdx = 0
-				return m.executeCommand(opt.Raw)
-			}
-		}
-
-		cmd := m.commandInput.Value()
-		m.mode = m.lastMainMode
-		if m.mode == ModeCommand {
-			m.mode = ModeNormal
-		} // Failsafe
-		m.commandInput.Blur()
-		m.commandInput.SetValue("")
-		m.breadcrumbs = nil
-		m.selectedCmdIdx = 0
-		return m.executeCommand(cmd)
-	case tea.KeyBackspace:
-		if m.commandInput.Value() == "" && m.isLeader {
-			if len(m.breadcrumbs) > 0 {
-				m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
-				m.selectedCmdIdx = 0
-				return m, nil
-			} else {
-				m.isLeader = false
-				m.commandInput.SetValue(":")
-				return m, nil
-			}
-		}
-	}
-
+	// 1. Pre-update Check: Drill-down shortcuts for Leader Mode
+	// We check this BEFORE updating the input so that keys like 'p' can be
+	// captured as drill-down actions instead of text input.
 	if m.isLeader && msg.Type == tea.KeyRunes && m.commandInput.Value() == "" {
 		char := string(msg.Runes)
 		if char == ":" {
@@ -858,8 +747,130 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					m.breadcrumbs = append(m.breadcrumbs, char)
 					m.selectedCmdIdx = 0
 					m.commandInput.SetValue("")
+					// Success! Swallowed the key and drilled down.
 					return m, nil
 				}
+			}
+		}
+	}
+
+	// 2. Normal Input Handling
+	// First, let the input handle the key unless it's navigation
+	switch msg.Type {
+	case tea.KeyDown, tea.KeyCtrlN, tea.KeyUp, tea.KeyCtrlP, tea.KeyEnter, tea.KeyEsc, tea.KeyCtrlG:
+		// Navigation/Termination handled below
+	default:
+		m.commandInput, ciCmd = m.commandInput.Update(msg)
+		m.selectedCmdIdx = 0
+	}
+
+	filteredCount := len(m.filteredCommands())
+
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlG:
+		m.mode = m.lastMainMode
+		if m.mode == ModeCommand {
+			m.mode = ModeNormal
+		} // Failsafe
+		m.commandInput.Blur()
+		m.commandInput.SetValue("")
+		m.breadcrumbs = nil
+		m.selectedCmdIdx = 0
+		m.isLeader = false // Ensure leader is reset
+		return m, nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		if filteredCount > 0 {
+			m.selectedCmdIdx = (m.selectedCmdIdx + 1) % filteredCount
+		}
+		return m, nil
+	case tea.KeyUp, tea.KeyCtrlP:
+		if filteredCount > 0 {
+			m.selectedCmdIdx = (m.selectedCmdIdx - 1 + filteredCount) % filteredCount
+		}
+		return m, nil
+	case tea.KeyEnter:
+		filtered := m.filteredCommands()
+		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
+			opt := filtered[m.selectedCmdIdx]
+			if m.selectType == SelectProject {
+				m.mode = m.lastMainMode
+				if m.mode == ModeCommand {
+					m.mode = ModeNormal
+				} // Failsafe
+				m.commandInput.Blur()
+				m.selectType = SelectNone
+				m.commandInput.SetValue("")
+				m.isLeader = false // Reset leader
+				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
+			}
+			if m.selectType == SelectWorkspace {
+				m.mode = m.lastMainMode
+				if m.mode == ModeCommand {
+					m.mode = ModeNormal
+				} // Failsafe
+				m.commandInput.Blur()
+				m.selectType = SelectNone
+				m.commandInput.SetValue("")
+				m.isLeader = false // Reset leader
+				return m.executeCommand(fmt.Sprintf("project set-workspace %s", opt.Raw))
+			}
+			if m.isLeader {
+				if opt.IsDir {
+					m.breadcrumbs = append(m.breadcrumbs, opt.Display)
+					m.selectedCmdIdx = 0
+					m.commandInput.SetValue("")
+					return m, nil
+				} else {
+					// Find the node to execute it properly
+					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
+					if node != nil {
+						m.mode = m.lastMainMode
+						if m.mode == ModeCommand {
+							m.mode = ModeNormal
+						} // Failsafe
+						m.commandInput.Blur()
+						m.commandInput.SetValue("")
+						m.breadcrumbs = nil
+						m.selectedCmdIdx = 0
+						m.isLeader = false // Explicitly reset before executing
+						return m.executeCommand(fmt.Sprintf("%s %s", node.Target, node.Method))
+					}
+				}
+			} else {
+				m.mode = m.lastMainMode
+				if m.mode == ModeCommand {
+					m.mode = ModeNormal
+				} // Failsafe
+				m.commandInput.Blur()
+				m.commandInput.SetValue("")
+				m.breadcrumbs = nil
+				m.selectedCmdIdx = 0
+				m.isLeader = false
+				return m.executeCommand(opt.Raw)
+			}
+		}
+
+		cmd := m.commandInput.Value()
+		m.mode = m.lastMainMode
+		if m.mode == ModeCommand {
+			m.mode = ModeNormal
+		} // Failsafe
+		m.commandInput.Blur()
+		m.commandInput.SetValue("")
+		m.breadcrumbs = nil
+		m.selectedCmdIdx = 0
+		m.isLeader = false
+		return m.executeCommand(cmd)
+	case tea.KeyBackspace:
+		if m.commandInput.Value() == "" && m.isLeader {
+			if len(m.breadcrumbs) > 0 {
+				m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
+				m.selectedCmdIdx = 0
+				return m, nil
+			} else {
+				m.isLeader = false
+				m.commandInput.SetValue(":")
+				return m, nil
 			}
 		}
 	}
@@ -965,6 +976,11 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	if len(parts) == 0 {
 		return m, nil
 	}
+
+	// Reset state for new command
+	m.isLeader = false
+	m.selectType = SelectNone
+	m.breadcrumbs = nil
 
 	verb := parts[0]
 	switch verb {
