@@ -322,9 +322,17 @@ func handleQuery(msg AlloyMessage) AlloyMessage {
 	// Get project context
 	projectContext := getProjectContext()
 
+	// Get knowledge graph context (RAG)
+	knowledgeContext := getKnowledgeContext(req.Prompt)
+
 	// Combine prompt with context
 	fullPrompt := req.Prompt
 	if projectContext != "" {
+		fullPrompt = projectContext + "\n" + fullPrompt
+	}
+	if knowledgeContext != "" {
+		fullPrompt = "Relevant Knowledge Graph Context:\n" + knowledgeContext + "\n\nUser Question: " + req.Prompt
+	} else if projectContext != "" {
 		fullPrompt = projectContext + "\nUser Question: " + req.Prompt
 	}
 
@@ -689,4 +697,55 @@ func handleSummarizeBuffer(msg AlloyMessage) AlloyMessage {
 	}
 
 	return plugin.Reply(msg, AIResponse{Response: response})
+}
+
+// getKnowledgeContext gets relevant context from the index/knowledge-graph.
+func getKnowledgeContext(query string) string {
+	// Create search request
+	searchReq, _ := json.Marshal(map[string]interface{}{
+		"query": query,
+		"limit": 3,
+	})
+
+	// Create call message
+	msg := AlloyMessage{
+		Id:      "ai-search-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "search",
+		Sender:  "ai",
+		Target:  Some("index"),
+		Payload: searchReq,
+	}
+
+	// Call the indexer
+	resp := plugin.Call(msg)
+	if resp.Id == "" {
+		return ""
+	}
+
+	// Parse the response
+	type SearchResult struct {
+		Document struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"document"`
+		Score float64 `json:"score"`
+	}
+
+	var results []SearchResult
+	if err := json.Unmarshal(resp.Payload, &results); err != nil {
+		return ""
+	}
+
+	if len(results) == 0 {
+		return ""
+	}
+
+	var contexts []string
+	for _, res := range results {
+		contexts = append(contexts, fmt.Sprintf("File: %s\nSnippet: %s",
+			res.Document.Path, res.Document.Content))
+	}
+
+	return strings.Join(contexts, "\n---\n")
 }
