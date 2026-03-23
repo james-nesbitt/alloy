@@ -48,11 +48,13 @@ func main() {
 		).
 		WithTags("search", "rag", "knowledge", "indexing").
 		WithCapability("ingest", "Add a document to the index").WithShortcut("i i").
+		WithCapability("ingest-buffer", "Ingest a buffer's content").WithShortcut("i b").
 		WithCapability("search", "Search the knowledge graph").WithShortcut("i s").
 		WithCapability("clear", "Wipe the current index").
 		WithCapability("status", "Get indexer status")
 
 	plugin.Handle("ingest", handleIngest)
+	plugin.Handle("ingest-buffer", handleIngestBuffer)
 	plugin.Handle("search", handleSearch)
 	plugin.Handle("clear", handleClear)
 	plugin.Handle("status", handleStatus)
@@ -97,6 +99,40 @@ func handleIngest(msg AlloyMessage) AlloyMessage {
 	updateStatus()
 
 	plugin.Log("info", fmt.Sprintf("Indexed document: %s (%d bytes)", doc.Path, len(doc.Content)))
+
+	return plugin.Reply(msg, map[string]string{
+		"id":     doc.ID,
+		"status": "indexed",
+	})
+}
+
+func handleIngestBuffer(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_request")
+	}
+
+	// Direct WIT call to buffer manager
+	buf, ok := plugin.ReadBuffer(req.ID)
+	if !ok {
+		return plugin.ErrorReply(msg, "buffer_not_found")
+	}
+
+	doc := Document{
+		ID:        "buf-" + buf.Id,
+		Path:      "buffer://" + buf.Name,
+		Content:   string(buf.Content),
+		Timestamp: time.Now().Unix(),
+		Tags:      []string{"buffer"},
+	}
+	doc.Tags = append(doc.Tags, generateTags(doc.Content)...)
+
+	documents[doc.ID] = doc
+	updateStatus()
+
+	plugin.Log("info", fmt.Sprintf("Indexed buffer: %s (%d bytes)", buf.Id, len(buf.Content)))
 
 	return plugin.Reply(msg, map[string]string{
 		"id":     doc.ID,
