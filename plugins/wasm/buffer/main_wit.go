@@ -20,9 +20,18 @@ type Buffer struct {
 	Source       string                 `json:"source,omitempty"`
 	ReadOnly     bool                   `json:"read_only"`
 	BaseBufferID string                 `json:"base_buffer_id,omitempty"`
+	Version      int                    `json:"version"`
 	Metadata     map[string]interface{} `json:"metadata"`
 	Data         []byte                 `json:"-"`
 	Timestamp    int64                  `json:"timestamp"`
+	UserCursors  map[string]Cursor      `json:"user_cursors,omitempty"`
+}
+
+type Cursor struct {
+	Row      int    `json:"row"`
+	Col      int    `json:"col"`
+	User     string `json:"user"`
+	LastSeen int64  `json:"last_seen"`
 }
 
 var (
@@ -64,10 +73,34 @@ func main() {
 	plugin.Handle("save", handleSave)
 	plugin.Handle("load", handleLoad)
 	plugin.Handle("set_metadata", handleSetMetadata)
+	plugin.Handle("update_cursor", handleUpdateCursor)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Buffer manager initializing")
+		
+		// Periodically clean up stale cursors
+		go func() {
+			for {
+				time.Sleep(30 * time.Second)
+				now := time.Now().Unix()
+				for buffID, b := range buffers {
+					if b.UserCursors != nil {
+						changed := false
+						for userID, cursor := range b.UserCursors {
+							if now-cursor.LastSeen > 300 { // 5-minute timeout
+								delete(b.UserCursors, userID)
+								changed = true
+							}
+						}
+						if changed {
+							notifyAll(buffID, "cursors_updated")
+						}
+					}
+				}
+			}
+		}()
+		
 		return nil
 	})
 
@@ -158,6 +191,41 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 	return plugin.Reply(msg, b)
 }
 
+// handleUpdateCursor updates the cursor position for a user.
+func handleUpdateCursor(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		ID  string `json:"id"`
+		Row int    `json:"row"`
+		Col int    `json:"col"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
+	}
+
+	b, ok := buffers[req.ID]
+	if !ok {
+		return plugin.ErrorReply(msg, "buffer_not_found")
+	}
+
+	if b.UserCursors == nil {
+		b.UserCursors = make(map[string]Cursor)
+	}
+
+	actor := msg.Sender // Defaulting to sender ID for now; in a real scenario, use authenticated actor ID
+	b.UserCursors[actor] = Cursor{
+		Row:      req.Row,
+		Col:      req.Col,
+		User:     actor,
+		LastSeen: time.Now().Unix(),
+	}
+
+	notifyAll(req.ID, "cursor_update")
+
+	return plugin.Reply(msg, map[string]string{
+		"status": "ok",
+	})
+}
+
 // handleRead handles buffer read requests.
 func handleRead(msg AlloyMessage) AlloyMessage {
 	var req struct {
@@ -173,16 +241,20 @@ func handleRead(msg AlloyMessage) AlloyMessage {
 	}
 
 	type readResponse struct {
-		ID      string `json:"id"`
-		RootID  string `json:"root_id"`
-		Content []byte `json:"content"`
-		Size    int    `json:"size"`
+		ID      string            `json:"id"`
+		RootID  string            `json:"root_id"`
+		Content []byte            `json:"content"`
+		Version int               `json:"version"`
+		Cursors map[string]Cursor `json:"cursors,omitempty"`
+		Size    int               `json:"size"`
 	}
 
 	return plugin.Reply(msg, readResponse{
 		ID:      req.ID,
 		RootID:  root.ID,
 		Content: root.Data,
+		Version: root.Version,
+		Cursors: root.UserCursors,
 		Size:    len(root.Data),
 	})
 }
@@ -190,9 +262,11 @@ func handleRead(msg AlloyMessage) AlloyMessage {
 // handleWrite handles buffer write requests.
 func handleWrite(msg AlloyMessage) AlloyMessage {
 	var req struct {
-		ID      string `json:"id"`
-		Content []byte `json:"content"`
-		Offset  *int   `json:"offset"`
+		ID          string `json:"id"`
+		BaseVersion int    `json:"base_version"`
+		Content     []byte `json:"content"`
+		Offset      *int   `json:"offset"`
+		Force       bool   `json:"force"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
@@ -201,6 +275,12 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 	root, ok := findRootBuffer(req.ID)
 	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
+	}
+
+	// Conflict detection
+	if !req.Force && req.BaseVersion != root.Version {
+		plugin.Log("warn", fmt.Sprintf("Conflict: current version %d vs received base_version %d", root.Version, req.BaseVersion))
+		return plugin.ErrorReply(msg, "conflict_detected")
 	}
 
 	if req.Offset != nil && *req.Offset >= 0 {
@@ -217,11 +297,13 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 		root.Data = req.Content
 	}
 
+	root.Version++
 	root.Timestamp = time.Now().Unix()
 	notifyAll(req.ID, "update")
 
-	return plugin.Reply(msg, map[string]string{
-		"status": "ok",
+	return plugin.Reply(msg, map[string]interface{}{
+		"status":  "ok",
+		"version": root.Version,
 	})
 }
 

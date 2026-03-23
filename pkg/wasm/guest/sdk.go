@@ -300,7 +300,7 @@ func (p *Plugin) ErrorReply(req guest.AlloyMessage, errMsg string) guest.AlloyMe
 	return guest.AlloyMessage{
 		Id:      req.Id + "-resp",
 		MsgType: "response",
-		Method:  req.Method,
+		Method:  "error",
 		Sender:  p.id,
 		Target:  guest.Some(req.Sender),
 		Payload: data,
@@ -326,7 +326,7 @@ func (p *Plugin) ReplyError(req Message, errMsg string) *Message {
 	return &Message{
 		ID:      req.ID + "-resp",
 		Type:    "response",
-		Method:  req.Method,
+		Method:  "error",
 		Target:  req.Sender,
 		Payload: data,
 	}
