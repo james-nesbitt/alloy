@@ -249,6 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if t.ID == "events" && !m.subscriptions["chat:message"] {
 				cmds = append(cmds, m.subscribe("chat:message"), m.subscribe("chat:direct"),
 					m.subscribe("chat:presence"), m.subscribe("project:opened"),
+					m.subscribe("workspace:opened"),
 					m.subscribe("plugin:crashed"), m.subscribe("plugin:load_failed"),
 					m.subscribe("buffer:update"), m.subscribe("buffer:cursors_updated"),
 					m.subscribe("dashboard:widget-registered"),
@@ -259,6 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
+				m.subscriptions["workspace:opened"] = true
 				m.subscriptions["component:registered"] = true
 
 				// NEW: Request initial dashboard widgets
@@ -328,6 +330,44 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				}
 				m.Panes = []Pane{{Type: m.Mode, WidthPct: 1.0}}
 				m.FocusIdx = 0
+			}
+		}
+	}
+
+	if msg.Sender == "events" && msg.Method == "workspace:opened" {
+		var event struct {
+			Topic string             `json:"topic"`
+			Data  frontend.Workspace `json:"data"`
+		}
+		if err := json.Unmarshal(msg.Payload, &event); err == nil {
+			// If workspace has a custom layout, apply it
+			if event.Data.Layout != "" {
+				var wCfg api.WorkspaceConfig
+				if err := json.Unmarshal([]byte(event.Data.Layout), &wCfg); err == nil {
+					if len(wCfg.Layout) > 0 {
+						newPanes := []Pane{}
+						for _, lp := range wCfg.Layout {
+							p := Pane{WidthPct: lp.WidthPct}
+							switch lp.Type {
+							case "dashboard":
+								p.Type = ModeDashboard
+							case "chat":
+								p.Type = ModeChat
+							case "editor":
+								p.Type = ModeEdit
+							default:
+								p.Type = ModeNormal
+							}
+							newPanes = append(newPanes, p)
+						}
+						m.Panes = newPanes
+						m.FocusIdx = 0
+						m.Mode = m.Panes[0].Type
+						displayMsg = fmt.Sprintf("[%s] Workspace layout applied: %s", time.Now().Format("15:04:05"), event.Data.Name)
+					}
+				}
+			} else {
+				displayMsg = fmt.Sprintf("[%s] Workspace active: %s", time.Now().Format("15:04:05"), event.Data.Name)
 			}
 		}
 	}

@@ -453,6 +453,31 @@ func handleSetWorkspace(msg AlloyMessage) AlloyMessage {
 		}
 	}
 	plugin.SetActiveWorkspace(id)
+
+	// Notify about workspace change
+	var active *AlloyWorkspace
+	workspaces := plugin.ListWorkspaces()
+	for _, ws := range workspaces {
+		if ws.Id == id {
+			active = &ws
+			break
+		}
+	}
+
+	if active != nil {
+		evtPayload, _ := json.Marshal(map[string]interface{}{
+			"topic": "workspace:opened",
+			"data":  active,
+		})
+		plugin.RouteMessage(AlloyMessage{
+			MsgType: "event",
+			Method:  "publish",
+			Sender:  "project",
+			Target:  Some("events"),
+			Payload: evtPayload,
+		})
+	}
+
 	return plugin.Reply(msg, map[string]string{"status": "ok", "workspace": id})
 }
 

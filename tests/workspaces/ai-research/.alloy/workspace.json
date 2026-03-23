@@ -1,0 +1,13 @@
+{
+  "name": "AI Research Workspace",
+  "id": "ai-research",
+  "path": "/tmp/ai-research",
+  "layout": {
+    "default_mode": "chat",
+    "layout": [
+      { "type": "dashboard", "width_pct": 0.3 },
+      { "type": "chat", "width_pct": 0.3 },
+      { "type": "editor", "width_pct": 0.4 }
+    ]
+  }
+}
