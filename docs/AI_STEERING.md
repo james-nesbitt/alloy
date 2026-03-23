@@ -49,17 +49,34 @@ This document defines how AI agents, like yourselves, should interact with the A
 ### Interaction Workflow
 
 1.  **Read Before Writing**: Always read existing relevant files horizontally to ensure consistent style and approach.
-2.  **Git Flow**:
-    - **Never commit changes directly to the `main` branch.**
-    - All changes must be made on a dedicated feature branch (e.g., `feature/pki-implementation`).
-    - Commit changes incrementally to the feature branch.
-    - Feature branches must be merged to `main` only after explicit review and approval from the user.
-3.  **Validation**:
-    - **Format**: Always run `just fmt` (or `go fmt ./...`) before committing changes to ensure code consistency.
+## 🚨 POSITIVE CONTROL GUIDELINES (MANDATORY) 🚨
+
+These guidelines are **non-negotiable**. Failure to follow these results in repository corruption and loss of project history integrity.
+
+### 1. ABSOLUTELY NO COMMITS OR MERGES TO `main` WITHOUT EXPLICIT PERMISSION
+*   **NEVER** commit directly to the `main` branch.
+*   **NEVER** merge a feature branch into `main` automatically.
+*   **PROCEDURE**: 
+    1.  Work ONLY on `feature/` or `fix/` branches.
+    2.  Once work is complete and tests pass, **STOP**.
+    3.  Present a summary of changes to the user.
+    4.  **ASK**: "Work is complete on branch `feature/xyz`. May I merge this into `main`?"
+    5.  **WAIT** for a "Yes", "Merge it", or similar affirmative response before proceeding with the merge.
+
+### 2. Git Flow & Branching
+- All changes must be made on a dedicated, descriptively named feature branch (e.g., `feature/pki-implementation`).
+- Commit changes incrementally to the feature branch with meaningful commit messages.
+- If you find yourself on `main` by mistake, move your changes to a new branch immediately using `git checkout -b` and `git reset --hard origin/main`.
+
+## Interaction Workflow
+
+1.  **Read Before Writing**: Always read existing relevant files horizontally to ensure consistent style and approach.
+2.  **Validation (Before Asking to Merge)**:
+    - **Format**: Always run `just fmt` (or `go fmt ./...`) before committing changes.
     - **Test**: 
-        - Always run `just test` (or `go test ./...`) before committing.
+        - Always run `just test` (or `go test ./...`) before proposing a merge.
         - **New and changed tests must be verified to pass.**
         - Ensure a minimum of 85% unit test coverage for new code in `pkg/`.
-    - **Diagnostic Efficiency**: Use small, focused test harnesses (standalone `.go` scripts or targeted `go test -run`) when diagnosing or fixing specific issues. Avoid full project test runs during active debugging; reserve full suite validation for merge readiness reviews.
-4.  **Verify Assumptions**: If you aren't sure where a piece of logic should reside, ask for clarification.
-5.  **Iterative Development**: Start with small, verifiable pieces (e.g., the IPC message definitions) before building larger systems.
+    - **Diagnostic Efficiency**: Use small, focused test harnesses during active debugging.
+3.  **Verify Assumptions**: If you aren't sure where a piece of logic should reside, ask for clarification.
+4.  **Iterative Development**: Start with small, verifiable pieces before building larger systems.
