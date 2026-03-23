@@ -85,24 +85,33 @@ type DashboardTile struct {
 	Timestamp int64    `json:"timestamp"`
 }
 
+type Workspace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 type guiState struct {
-	mode           int
-	isLeader       bool
-	breadcrumbs    []string
-	targets        []frontend.Registration
-	commandTree    *frontend.CommandNode
-	recency        map[string]int
-	activeProject  *Project
-	projects       []Project
-	showProjects   bool
-	subscriptions  map[string]bool
-	projectCreate  projectCreateState
-	aiSwitch       aiSwitchState
-	aiQuery        aiQueryState
-	selectedIdx    int
-	filtered       []frontend.SearchItem
-	dashboardTiles map[string]DashboardTile
-	tileOrder      []string
+	mode            int
+	isLeader        bool
+	breadcrumbs     []string
+	targets         []frontend.Registration
+	commandTree     *frontend.CommandNode
+	recency         map[string]int
+	activeProject   *Project
+	activeWorkspace *Workspace
+	projects        []Project
+	workspaces      []Workspace
+	showProjects    bool
+	showWorkspaces  bool
+	subscriptions   map[string]bool
+	projectCreate   projectCreateState
+	aiSwitch        aiSwitchState
+	aiQuery         aiQueryState
+	selectedIdx     int
+	filtered        []frontend.SearchItem
+	dashboardTiles  map[string]DashboardTile
+	tileOrder       []string
 }
 
 func main() {
@@ -141,15 +150,18 @@ func run(w *app.Window, client *frontend.Client) error {
 	var ops op.Ops
 
 	var (
-		input      widget.Editor
-		sendButton widget.Clickable
-		list       widget.List
-		projList   widget.List
-		projClicks []widget.Clickable
-		gui        guiState
+		input        widget.Editor
+		sendButton   widget.Clickable
+		list         widget.List
+		projList     widget.List
+		projClicks   []widget.Clickable
+		wsList       widget.List
+		wsClicks     []widget.Clickable
+		gui          guiState
 	)
 	list.Axis = layout.Vertical
 	projList.Axis = layout.Vertical
+	wsList.Axis = layout.Vertical
 	gui.subscriptions = make(map[string]bool)
 	gui.recency = make(map[string]int)
 	gui.dashboardTiles = make(map[string]DashboardTile)
@@ -191,6 +203,8 @@ func run(w *app.Window, client *frontend.Client) error {
 								subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
 								subReq, _ := json.Marshal(map[string]string{"topic": "project:opened"})
 								_, _ = client.Send(subCtx, "events", "subscribe", subReq)
+								subReq3, _ := json.Marshal(map[string]string{"topic": "workspace:set"})
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq3)
 								subCancel()
 								gui.subscriptions["project:opened"] = true
 							}
@@ -234,6 +248,34 @@ func run(w *app.Window, client *frontend.Client) error {
 									}
 								}
 							}()
+
+							// Fetch workspaces
+							go func() {
+								wCtx, wCancel := context.WithTimeout(context.Background(), time.Second)
+								defer wCancel()
+								wResp, err := client.Send(wCtx, "project", "list-workspaces", nil)
+								if err == nil {
+									var wsList []Workspace
+									if err := json.Unmarshal(wResp.Payload, &wsList); err == nil {
+										gui.workspaces = wsList
+										w.Invalidate()
+									}
+								}
+							}()
+
+							// Fetch active workspace
+							go func() {
+								wCtx, wCancel := context.WithTimeout(context.Background(), time.Second)
+								defer wCancel()
+								wResp, err := client.Send(wCtx, "project", "get-active-workspace", nil)
+								if err == nil && wResp.ID != "" {
+									var ws Workspace
+									if err := json.Unmarshal(wResp.Payload, &ws); err == nil {
+										gui.activeWorkspace = &ws
+										w.Invalidate()
+									}
+								}
+							}()
 						}
 
 						// Heartbeat
@@ -262,11 +304,22 @@ func run(w *app.Window, client *frontend.Client) error {
 	client.OnMessage(func(msg api.Message) {
 		if msg.Sender == "events" {
 			var ev struct {
-				Topic string  `json:"topic"`
-				Data  Project `json:"data"`
+				Topic string          `json:"topic"`
+				Data  json.RawMessage `json:"data"`
 			}
-			if err := json.Unmarshal(msg.Payload, &ev); err == nil && ev.Topic == "project:opened" {
-				gui.activeProject = &ev.Data
+			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+				switch ev.Topic {
+				case "project:opened":
+					var p Project
+					if err := json.Unmarshal(ev.Data, &p); err == nil {
+						gui.activeProject = &p
+					}
+				case "workspace:set":
+					var ws Workspace
+					if err := json.Unmarshal(ev.Data, &ws); err == nil {
+						gui.activeWorkspace = &ws
+					}
+				}
 			}
 		}
 
@@ -455,12 +508,24 @@ func run(w *app.Window, client *frontend.Client) error {
 					projClicks = append(projClicks, widget.Clickable{})
 				}
 			}
+			if len(wsClicks) < len(gui.workspaces) {
+				for i := len(wsClicks); i < len(gui.workspaces); i++ {
+					wsClicks = append(wsClicks, widget.Clickable{})
+				}
+			}
 
 			// Handle project clicks
 			for i, p := range gui.projects {
 				if projClicks[i].Clicked(gtx) {
 					executeCommand(client, &gui, "project open "+p.ID, w)
 					gui.showProjects = false
+				}
+			}
+			// Handle workspace clicks
+			for i, ws := range gui.workspaces {
+				if wsClicks[i].Clicked(gtx) {
+					executeCommand(client, &gui, "project set-workspace "+ws.ID, w)
+					gui.showWorkspaces = false
 				}
 			}
 
@@ -478,6 +543,29 @@ func run(w *app.Window, client *frontend.Client) error {
 												title := material.H4(th, "Alloy Core")
 												title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
 												return title.Layout(gtx)
+											}),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												wsName := "No Workspace"
+												if gui.activeWorkspace != nil {
+													wsName = gui.activeWorkspace.Name
+												}
+												return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+													p := material.Body1(th, "WS: "+wsName)
+													p.Color = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+													return layout.Stack{}.Layout(gtx,
+														layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+															return widget.Border{
+																Color: color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff},
+																Width: unit.Dp(1),
+															}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+																return layout.Dimensions{Size: gtx.Constraints.Min}
+															})
+														}),
+														layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+															return layout.UniformInset(unit.Dp(4)).Layout(gtx, p.Layout)
+														}),
+													)
+												})
 											}),
 											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 												projectName := "No Project"
@@ -531,7 +619,20 @@ func run(w *app.Window, client *frontend.Client) error {
 								return material.List(th, &projList).Layout(gtx, len(gui.projects), func(gtx layout.Context, i int) layout.Dimensions {
 									p := gui.projects[i]
 									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return material.Button(th, &projClicks[i], p.Name).Layout(gtx)
+										return material.Button(th, &projClicks[i], "Project: "+p.Name).Layout(gtx)
+									})
+								})
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !gui.showWorkspaces {
+								return layout.Dimensions{}
+							}
+							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return material.List(th, &wsList).Layout(gtx, len(gui.workspaces), func(gtx layout.Context, i int) layout.Dimensions {
+									ws := gui.workspaces[i]
+									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return material.Button(th, &wsClicks[i], "Workspace: "+ws.Name).Layout(gtx)
 									})
 								})
 							})
@@ -1006,6 +1107,21 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 		// Specialized handlers
 		if target == "project" && method == "open" && payload == "" {
 			gui.showProjects = !gui.showProjects
+			gui.showWorkspaces = false
+			w.Invalidate()
+			return
+		}
+
+		if target == "project" && method == "list-workspaces" && payload == "" {
+			gui.showWorkspaces = !gui.showWorkspaces
+			gui.showProjects = false
+			w.Invalidate()
+			return
+		}
+
+		if (target == "project") && (method == "set-workspace") && payload == "" {
+			gui.showWorkspaces = !gui.showWorkspaces
+			gui.showProjects = false
 			w.Invalidate()
 			return
 		}
