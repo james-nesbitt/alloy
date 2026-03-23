@@ -96,6 +96,14 @@ func (p *Plugin) WithCapability(method, description string) *Plugin {
 	return p
 }
 
+// WithShortcut adds a shortcut to the last added capability.
+func (p *Plugin) WithShortcut(shortcut string) *Plugin {
+	if len(p.capabilities) > 0 {
+		p.capabilities[len(p.capabilities)-1].Shortcut = guest.Some(shortcut)
+	}
+	return p
+}
+
 // RegisterMethod registers a handler for a specific message method.
 func (p *Plugin) RegisterMethod(method string, description string, handler Handler) *Plugin {
 	p.handlers[method] = handler
@@ -351,4 +359,29 @@ func (p *Plugin) KVDelete(key string) bool {
 
 func (p *Plugin) KVList(prefix string) []string {
 	return guest.AlloyKvList(prefix)
+}
+
+// Workspace Utils
+func (p *Plugin) GetActiveWorkspace() (guest.AlloyWorkspace, bool) {
+	res := guest.AlloyGetActiveWorkspace()
+	if res.IsSome() {
+		return res.Unwrap(), true
+	}
+	return guest.AlloyWorkspace{}, false
+}
+
+func (p *Plugin) SetActiveWorkspace(id string) {
+	guest.AlloySetActiveWorkspace(id)
+}
+
+func (p *Plugin) ListWorkspaces() []guest.AlloyWorkspace {
+	return guest.AlloyListWorkspaces()
+}
+
+func (p *Plugin) RegisterWorkspace(ws guest.AlloyWorkspace) {
+	guest.AlloyRegisterWorkspace(ws)
+}
+
+func (p *Plugin) UnregisterWorkspace(id string) {
+	guest.AlloyUnregisterWorkspace(id)
 }

@@ -51,6 +51,7 @@ type model struct {
 
 	activeProject *Project
 	projects      []Project
+	workspaces    []Workspace
 	selectType    int
 
 	// Form state
@@ -72,6 +73,7 @@ type model struct {
 const (
 	SelectNone = iota
 	SelectProject
+	SelectWorkspace
 )
 
 const (
@@ -108,6 +110,12 @@ type Project struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Layout      WorkspaceConfig `json:"layout,omitempty"`
+}
+
+type Workspace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Root string `json:"root"`
 }
 
 type Presence struct {
@@ -388,6 +396,15 @@ func (m *model) processMessage(msg api.Message) tea.Cmd {
 		}
 		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
 			m.projects = resp.Projects
+		}
+	}
+
+	if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-workspaces-resp" {
+		var resp struct {
+			Workspaces []Workspace `json:"workspaces"`
+		}
+		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
+			m.workspaces = resp.Workspaces
 		}
 	}
 
@@ -684,6 +701,19 @@ func (m model) fetchProjects() tea.Cmd {
 	}
 }
 
+func (m model) fetchWorkspaces() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		resp, _ := m.client.Send(ctx, "project", "list-workspaces", nil)
+		if resp.ID != "" {
+			resp.Method = "list-workspaces-resp"
+			return messageMsg(resp)
+		}
+		return nil
+	}
+}
+
 func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	// First, let the input handle the key unless it's navigation
 	switch msg.Type {
@@ -730,6 +760,16 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 				m.selectType = SelectNone
 				m.commandInput.SetValue("")
 				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
+			}
+			if m.selectType == SelectWorkspace {
+				m.mode = m.lastMainMode
+				if m.mode == ModeCommand {
+					m.mode = ModeNormal
+				} // Failsafe
+				m.commandInput.Blur()
+				m.selectType = SelectNone
+				m.commandInput.SetValue("")
+				return m.executeCommand(fmt.Sprintf("project set-workspace %s", opt.Raw))
 			}
 			if m.isLeader {
 				if opt.IsDir {
@@ -963,6 +1003,12 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 				return m, m.fetchProjects()
 			}
 			// if len(parts) > 2, it falls through to the default plugin call
+		} else if len(parts) >= 2 && parts[1] == "list-workspaces" {
+			m.mode = ModeCommand
+			m.selectType = SelectWorkspace
+			m.commandInput.Focus()
+			m.commandInput.SetValue("")
+			return m, m.fetchWorkspaces()
 		} else if len(parts) >= 2 && parts[1] == "create" {
 			if len(parts) == 2 {
 				m.mode = ModeForm
@@ -1061,6 +1107,19 @@ func (m model) filteredCommands() []CommandOption {
 					Raw:         p.ID,
 					Display:     p.Name,
 					Description: p.Description,
+					Score:       score,
+				})
+			}
+		}
+	} else if m.mode == ModeCommand && m.selectType == SelectWorkspace {
+		input := m.commandInput.Value()
+		for _, w := range m.workspaces {
+			score := frontend.FuzzyScore(w.Name, input)
+			if score > 0 {
+				results = append(results, CommandOption{
+					Raw:         w.ID,
+					Display:     w.Name,
+					Description: w.Root,
 					Score:       score,
 				})
 			}

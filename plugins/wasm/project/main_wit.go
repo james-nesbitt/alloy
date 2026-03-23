@@ -137,13 +137,15 @@ func main() {
 		).
 		WithTags("project", "management", "organization").
 		WithCapability("create", "Create a new project").
-		WithCapability("list", "List all projects").
+		WithCapability("list", "List all projects").WithShortcut("p l").
 		WithCapability("get_active", "Get current active project").
 		WithCapability("add:buffer", "Add a buffer to a project").
 		WithCapability("add:channel", "Add a chat channel to a project").
 		WithCapability("import", "Import a workspace from a path").
-		WithCapability("open", "Open a project").
-		WithCapability("save", "Save projects to durable store")
+		WithCapability("open", "Open a project").WithShortcut("p o").
+		WithCapability("save", "Save projects to durable store").
+		WithCapability("list-workspaces", "List all workspaces").WithShortcut("p p").
+		WithCapability("set-workspace", "Switch active workspace")
 
 	// Set up message handlers
 	plugin.Handle("create", handleCreate)
@@ -154,6 +156,8 @@ func main() {
 	plugin.Handle("open", handleOpen)
 	plugin.Handle("save", handleSave)
 	plugin.Handle("import", handleImport)
+	plugin.Handle("list-workspaces", handleListWorkspaces)
+	plugin.Handle("set-workspace", handleSetWorkspace)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -345,6 +349,30 @@ func handleOpen(msg AlloyMessage) AlloyMessage {
 func handleSave(msg AlloyMessage) AlloyMessage {
 	saveProjects()
 	return plugin.Reply(msg, map[string]string{"status": "saved"})
+}
+
+// handleListWorkspaces returns a list of all workspaces from the host registry.
+func handleListWorkspaces(msg AlloyMessage) AlloyMessage {
+	workspaces := plugin.ListWorkspaces()
+	return plugin.Reply(msg, map[string]interface{}{
+		"workspaces": workspaces,
+	})
+}
+
+// handleSetWorkspace switches the active workspace in the host registry.
+func handleSetWorkspace(msg AlloyMessage) AlloyMessage {
+	var id string
+	if err := json.Unmarshal(msg.Payload, &id); err != nil {
+		// Try unmarshalling as a map if it's from the TUI form
+		var req map[string]string
+		if err := json.Unmarshal(msg.Payload, &req); err == nil {
+			id = req["id"]
+		} else {
+			id = string(msg.Payload)
+		}
+	}
+	plugin.SetActiveWorkspace(id)
+	return plugin.Reply(msg, map[string]string{"status": "ok", "workspace": id})
 }
 
 // saveProjects saves all projects to persistent storage.

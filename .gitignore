@@ -2,11 +2,12 @@
 build/
 bin/
 *.wasm
-alloy-core
-alloy
-alloy-tui
-alloy-gui-gio
-alloy-gui-wayland-native
+/alloy-core
+/alloy
+/alloy-tui
+/alloy-gui-gio
+/alloy-gui-wayland-native
+/alloy-core-wit
 plugins-bin/
 
 # Logs and test artifacts
