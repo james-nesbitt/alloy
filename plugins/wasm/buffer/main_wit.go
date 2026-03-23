@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// Operation represents a buffer modification.
+type Operation struct {
+	Version int    `json:"v"`
+	Offset  int    `json:"o"`
+	Length  int    `json:"l"`
+	Type    string `json:"t"` // "insert", "delete", "replace"
+}
+
 // Buffer represents a data buffer.
 type Buffer struct {
 	ID           string                 `json:"id"`
@@ -25,6 +33,7 @@ type Buffer struct {
 	Data         []byte                 `json:"-"`
 	Timestamp    int64                  `json:"timestamp"`
 	UserCursors  map[string]Cursor      `json:"user_cursors,omitempty"`
+	History      []Operation            `json:"-"`
 }
 
 type Cursor struct {
@@ -202,8 +211,10 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 		MimeType:     req.MimeType,
 		BaseBufferID: req.BaseBufferID,
 		Data:         req.Content,
+		Version:      0, // Start from 0
 		Timestamp:    time.Now().Unix(),
 		Metadata:     req.Metadata,
+		History:      make([]Operation, 0),
 	}
 	if b.Metadata == nil {
 		b.Metadata = make(map[string]interface{})
@@ -289,44 +300,135 @@ func handleRead(msg AlloyMessage) AlloyMessage {
 
 // handleWrite handles buffer write requests.
 func handleWrite(msg AlloyMessage) AlloyMessage {
+	plugin.Log("info", "handleWrite received message")
 	var req struct {
 		ID          string `json:"id"`
 		BaseVersion int    `json:"base_version"`
 		Content     []byte `json:"content"`
 		Offset      *int   `json:"offset"`
+		Action      string `json:"action"` // "insert", "delete", "replace" (default "replace")
 		Force       bool   `json:"force"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		plugin.Log("error", "Failed to unmarshal write request: "+err.Error())
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
 	root, ok := findRootBuffer(req.ID)
 	if !ok {
+		plugin.Log("error", "Buffer not found: "+req.ID)
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	// Conflict detection
+	plugin.Log("info", fmt.Sprintf("Write: id=%s action=%s offset=%d", req.ID, req.Action, 0))
+	if req.Offset != nil {
+		plugin.Log("info", fmt.Sprintf("Write: has offset %d", *req.Offset))
+	}
+
+	if req.Action == "" {
+		req.Action = "replace"
+	}
+
+	// Conflict detection & Transformation
+	targetOffset := 0
+	if req.Offset != nil {
+		targetOffset = *req.Offset
+	}
+
 	if !req.Force && req.BaseVersion != root.Version {
-		plugin.Log("warn", fmt.Sprintf("Conflict: current version %d vs received base_version %d", root.Version, req.BaseVersion))
-		return plugin.ErrorReply(msg, "conflict_detected")
+		// Attempt to transform the operation if we have history
+		if req.BaseVersion < root.Version && len(root.History) > 0 {
+			plugin.Log("info", fmt.Sprintf("Transforming write: base=%d current=%d", req.BaseVersion, root.Version))
+			
+			// Find first operation that the user hasn't seen
+			// (Operations with Version >= req.BaseVersion)
+			historyStartIdx := -1
+			for i, op := range root.History {
+				if op.Version >= req.BaseVersion {
+					historyStartIdx = i
+					break
+				}
+			}
+
+			if historyStartIdx != -1 {
+				for i := historyStartIdx; i < len(root.History); i++ {
+					op := root.History[i]
+					if op.Type == "insert" {
+						if op.Offset <= targetOffset {
+							targetOffset += op.Length
+						}
+					} else if op.Type == "delete" {
+						if op.Offset < targetOffset {
+							if op.Offset + op.Length <= targetOffset {
+								targetOffset -= op.Length
+							} else {
+								// Partial overlap - complex resolve: for now, move to start of deletion
+								targetOffset = op.Offset
+							}
+						}
+					}
+				}
+				plugin.Log("debug", fmt.Sprintf("Transformed offset: %d -> %d", *req.Offset, targetOffset))
+			} else {
+				// History lost - fallback to conflict fail
+				plugin.Log("warn", "History too old, cannot transform")
+				return plugin.ErrorReply(msg, "conflict_detected_history_lost")
+			}
+		} else if req.BaseVersion < root.Version {
+			return plugin.ErrorReply(msg, "conflict_detected")
+		}
+	}
+
+	op := Operation{
+		Version: root.Version,
+		Offset:  targetOffset,
+		Length:  len(req.Content),
+		Type:    req.Action,
 	}
 
 	if req.Offset != nil && *req.Offset >= 0 {
-		offset := *req.Offset
-		if offset+len(req.Content) > len(root.Data) {
-			newData := make([]byte, offset+len(req.Content))
-			copy(newData, root.Data)
+		if req.Action == "insert" {
+			// Shift existing data to the right
+			newData := make([]byte, len(root.Data)+len(req.Content))
+			copy(newData, root.Data[:targetOffset])
+			copy(newData[targetOffset:], req.Content)
+			copy(newData[targetOffset+len(req.Content):], root.Data[targetOffset:])
 			root.Data = newData
-		}
-		for i := 0; i < len(req.Content); i++ {
-			root.Data[offset+i] = req.Content[i]
+		} else if req.Action == "delete" {
+			// Remove data
+			if targetOffset+len(req.Content) <= len(root.Data) {
+				newData := make([]byte, len(root.Data)-len(req.Content))
+				copy(newData, root.Data[:targetOffset])
+				copy(newData[targetOffset:], root.Data[targetOffset+len(req.Content):])
+				root.Data = newData
+			}
+		} else { // "replace" (default)
+			if targetOffset+len(req.Content) > len(root.Data) {
+				newData := make([]byte, targetOffset+len(req.Content))
+				copy(newData, root.Data)
+				root.Data = newData
+			}
+			for i := 0; i < len(req.Content); i++ {
+				root.Data[targetOffset+i] = req.Content[i]
+			}
 		}
 	} else {
+		// Full replace
 		root.Data = req.Content
+		op.Offset = 0
+		op.Type = "replace"
+		op.Length = len(req.Content)
 	}
 
 	root.Version++
 	root.Timestamp = time.Now().Unix()
+	
+	// Append to history and truncate
+	root.History = append(root.History, op)
+	if len(root.History) > 100 {
+		root.History = root.History[len(root.History)-100:]
+	}
+
 	notifyAll(req.ID, "update")
 
 	return plugin.Reply(msg, map[string]interface{}{
