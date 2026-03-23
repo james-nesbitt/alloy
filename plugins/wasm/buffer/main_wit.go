@@ -51,14 +51,14 @@ func main() {
 			"Alloy Team",
 		).
 		WithTags("buffer", "data", "storage").
-		WithCapability("create", "Create a new buffer").
-		WithCapability("list", "List all buffers").
-		WithCapability("read", "Read buffer content").
-		WithCapability("write", "Write buffer content").
-		WithCapability("delete", "Delete a buffer").
+		WithCapability("create", "Create a new buffer").WithShortcut("b n").
+		WithCapability("list", "List all buffers").WithShortcut("b l").
+		WithCapability("read", "Read buffer content").WithShortcut("b r").
+		WithCapability("write", "Write buffer content").WithShortcut("b w").
+		WithCapability("delete", "Delete a buffer").WithShortcut("b d").
 		WithCapability("unload", "Remove a buffer from memory only").
-		WithCapability("save", "Save buffer to persistent storage").
-		WithCapability("load", "Load buffers from persistent storage")
+		WithCapability("save", "Save buffer to persistent storage").WithShortcut("b s").
+		WithCapability("load", "Load buffers from persistent storage").WithShortcut("b o")
 
 	// Set up message handlers
 	plugin.Handle("create", handleCreate)

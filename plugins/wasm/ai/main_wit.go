@@ -143,9 +143,10 @@ func main() {
 		WithTags("ai", "llm", "chatbot", "automation").
 		WithCapability("config:set", "Configure AI provider").
 		WithCapability("config:get", "Get current configuration").
-		WithCapability("provider:set", "Switch AI provider").
-		WithCapability("query", "Query the AI directly").
-		WithCapability("summarize", "Summarize provided text").
+		WithCapability("provider:set", "Switch AI provider").WithShortcut("a p").
+		WithCapability("query", "Query the AI directly").WithShortcut("a q").
+		WithCapability("summarize", "Summarize provided text").WithShortcut("a s").
+		WithCapability("summarize-buffer", "Summarize the content of a specific buffer").WithShortcut("a b").
 		WithCapability("dashboard-update", "Internal dashboard update")
 
 	// Set up message handlers
@@ -154,6 +155,7 @@ func main() {
 	plugin.Handle("provider:set", handleProviderSet)
 	plugin.Handle("query", handleQuery)
 	plugin.Handle("summarize", handleSummarize)
+	plugin.Handle("summarize-buffer", handleSummarizeBuffer)
 	plugin.Handle("chat:message", handleChatMessageEvent)
 	plugin.Handle("dashboard-update", func(msg AlloyMessage) AlloyMessage {
 		emitDashboardUpdate()
@@ -163,6 +165,13 @@ func main() {
 	// Set up initialization
 	plugin.OnInit(func() error {
 		plugin.Log("info", "AI Agent initializing")
+		
+		// Register in the component registry
+		plugin.RegisterCapability(AlloyCapability{
+			Method:      "ai:query",
+			Description: "Query the AI assistant",
+		})
+
 		// Initialize with default config if none exists
 		_, err := configStore.Get("current")
 		if err != nil {
@@ -657,4 +666,33 @@ func sendChatResponse(channel, response string) {
 
 	// Route the message
 	plugin.RouteMessage(msg)
+}
+// handleSummarizeBuffer handles summarization of a specific buffer.
+func handleSummarizeBuffer(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_request")
+	}
+
+	// Use direct WIT call to read buffer content
+	buf, ok := plugin.ReadBuffer(req.ID)
+	if !ok {
+		return plugin.ErrorReply(msg, "buffer_not_found")
+	}
+
+	plugin.Log("info", fmt.Sprintf("Summarizing buffer: %s (%d bytes)", buf.Id, len(buf.Content)))
+
+	// Create summary prompt
+	summaryPrompt := fmt.Sprintf("Summarize the following content (Name: %s, Mime: %s):\n\n%s",
+		buf.Name, buf.MimeType, string(buf.Content))
+
+	// Query the AI
+	response, err := performLLMQueryWithFallback(summaryPrompt)
+	if err != nil {
+		return plugin.ErrorReply(msg, "summarization_failed: "+err.Error())
+	}
+
+	return plugin.Reply(msg, AIResponse{Response: response})
 }

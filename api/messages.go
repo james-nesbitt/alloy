@@ -134,3 +134,11 @@ type Workspace struct {
 	TeamID   string            `json:"team_id,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
+
+// Registration defines a component's presence in the system.
+type Registration struct {
+	ID           string       `json:"id"`
+	Type         string       `json:"type"`
+	Status       string       `json:"status,omitempty"`
+	Capabilities []Capability `json:"capabilities,omitempty"`
+}

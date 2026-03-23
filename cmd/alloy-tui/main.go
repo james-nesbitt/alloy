@@ -27,7 +27,7 @@ type Model struct {
 	messages []string
 	viewport viewport.Model
 	textarea textarea.Model
-	targets  []frontend.Registration
+	targets  []api.Registration
 	err      error
 	width    int
 	height   int
@@ -94,7 +94,7 @@ type Cursor struct {
 }
 
 type discoveryMsg struct {
-	Targets []frontend.Registration `json:"targets"`
+	Targets []api.Registration `json:"targets"`
 }
 
 type messageMsg api.Message
@@ -235,11 +235,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.subscribe("chat:message"), m.subscribe("chat:direct"),
 					m.subscribe("chat:presence"), m.subscribe("project:opened"),
 					m.subscribe("plugin:crashed"), m.subscribe("plugin:load_failed"),
-					m.subscribe("buffer:update"), m.subscribe("buffer:cursors_updated"))
+					m.subscribe("buffer:update"), m.subscribe("buffer:cursors_updated"),
+					m.subscribe("component:registered"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
+				m.subscriptions["component:registered"] = true
 			}
 			if t.ID == "project" && m.ActiveProject == nil {
 				cmds = append(cmds, m.fetchActiveProject())

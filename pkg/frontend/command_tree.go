@@ -7,15 +7,6 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 )
 
-// Registration is the frontend's view of a plugin's surface area.
-type Registration struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"`
-	Status       string           `json:"status,omitempty"`
-	Capabilities []api.Capability `json:"capabilities,omitempty"`
-}
-
-// CommandNode is a node in a hierarchical command tree.
 type CommandNode struct {
 	Key         string
 	Description string
@@ -27,36 +18,65 @@ type CommandNode struct {
 }
 
 // BuildCommandTree constructs a tree from a list of plugin registrations.
-func BuildCommandTree(regs []Registration) *CommandNode {
+func BuildCommandTree(regs []api.Registration) *CommandNode {
 	root := &CommandNode{Children: make(map[string]*CommandNode)}
 
 	for _, r := range regs {
 		for _, cap := range r.Capabilities {
-			if cap.Shortcut == "" {
-				continue
-			}
+			// 1. Add to shortcut tree if shortcut exists
+			if cap.Shortcut != "" {
+				// Split by space for keystroke sequences
+				keys := strings.Fields(cap.Shortcut)
+				curr := root
 
-			// Split by space for keystroke sequences
-			keys := strings.Fields(cap.Shortcut)
-			curr := root
+				for i, k := range keys {
+					if _, ok := curr.Children[k]; !ok {
+						curr.Children[k] = &CommandNode{
+							Key:      k,
+							Children: make(map[string]*CommandNode),
+						}
+					}
+					curr = curr.Children[k]
 
-			for i, k := range keys {
-				if _, ok := curr.Children[k]; !ok {
-					curr.Children[k] = &CommandNode{
-						Key:      k,
-						Children: make(map[string]*CommandNode),
+					if i == len(keys)-1 {
+						curr.Description = cap.Description
+						curr.Target = r.ID
+						curr.Method = cap.Method
+						curr.Shortcut = cap.Shortcut
+						if group, ok := cap.Annotations["group"]; ok {
+							curr.Annotation = group
+						}
 					}
 				}
-				curr = curr.Children[k]
+			}
 
-				if i == len(keys)-1 {
-					curr.Description = cap.Description
-					curr.Target = r.ID
-					curr.Method = cap.Method
-					curr.Shortcut = cap.Shortcut
-					if group, ok := cap.Annotations["group"]; ok {
-						curr.Annotation = group
-					}
+			// 2. Always add to the method-based lookup for fuzzy search (accessible via ':')
+			// We store these under a special hidden path or just ensure they are flattened.
+			// Actually, Flatten just traverses Children.
+			// Let's add them under the target ID if they don't have a shortcut.
+			
+			if _, ok := root.Children[r.ID]; !ok {
+				root.Children[r.ID] = &CommandNode{
+					Key:      r.ID,
+					Children: make(map[string]*CommandNode),
+				}
+			}
+			targetNode := root.Children[r.ID]
+			
+			// Use the part after ':' if it's there (e.g. project:open -> open)
+			methodKey := cap.Method
+			if idx := strings.Index(methodKey, ":"); idx != -1 {
+				methodKey = methodKey[idx+1:]
+			}
+			
+			if _, ok := targetNode.Children[methodKey]; !ok {
+				targetNode.Children[methodKey] = &CommandNode{
+					Key:         methodKey,
+					Description: cap.Description,
+					Target:      r.ID,
+					Method:      cap.Method,
+					Shortcut:    cap.Shortcut,
+					Children:    make(map[string]*CommandNode),
 				}
 			}
 		}

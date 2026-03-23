@@ -10,24 +10,17 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 )
 
-type registration struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"`
-	Status       string           `json:"status,omitempty"`
-	Capabilities []api.Capability `json:"capabilities,omitempty"`
-}
-
 // CommandManager maintains a registry of all system-wide actions.
 type CommandManager struct {
 	mu       sync.RWMutex
-	registry map[string]registration
+	registry map[string]api.Registration
 	logger   *slog.Logger
 	route    func(context.Context, api.Message)
 }
 
 func NewCommandManager(logger *slog.Logger) *CommandManager {
 	return &CommandManager{
-		registry: make(map[string]registration),
+		registry: make(map[string]api.Registration),
 		logger:   logger,
 	}
 }
@@ -60,7 +53,7 @@ func (c *CommandManager) Capabilities() []api.Capability {
 func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	switch msg.Method {
 	case "component:registered":
-		var reg registration
+		var reg api.Registration
 		if err := json.Unmarshal(msg.Payload, &reg); err != nil {
 			c.logger.Error("failed to unmarshal component registration", "error", err, "payload", string(msg.Payload))
 			return api.Message{}, err
@@ -72,7 +65,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		return api.Message{}, nil
 
 	case "register":
-		var reg registration
+		var reg api.Registration
 		if err := json.Unmarshal(msg.Payload, &reg); err != nil {
 			return api.Message{}, err
 		}
@@ -109,9 +102,38 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 			Timestamp: time.Now().Unix(),
 		}, nil
 
+	case "register-capability":
+		var cap api.Capability
+		if err := json.Unmarshal(msg.Payload, &cap); err != nil {
+			return api.Message{}, err
+		}
+
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		reg := c.registry[msg.Sender]
+		reg.ID = msg.Sender
+		reg.Type = "plugin"
+		
+		// Add or update capability
+		found := false
+		for i, c := range reg.Capabilities {
+			if c.Method == cap.Method {
+				reg.Capabilities[i] = cap
+				found = true
+				break
+			}
+		}
+		if !found {
+			reg.Capabilities = append(reg.Capabilities, cap)
+		}
+
+		c.registry[msg.Sender] = reg
+		return api.Message{}, nil
+
 	case "list", "discover":
 		c.mu.RLock()
-		var targets []registration
+		var targets []api.Registration
 		for _, reg := range c.registry {
 			targets = append(targets, reg)
 		}
