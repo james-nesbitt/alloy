@@ -121,7 +121,7 @@ func TestApplicationPlugins(t *testing.T) {
 	if !strings.Contains(aiMsg.Content, "Mock AI response") {
 		t.Errorf("unexpected AI message content: %s", aiMsg.Content)
 	}
-	if !strings.Contains(aiMsg.Content, "project context") {
+	if !strings.Contains(aiMsg.Content, "Current project") {
 		t.Errorf("AI response did not include project context: %s", aiMsg.Content)
 	}
 

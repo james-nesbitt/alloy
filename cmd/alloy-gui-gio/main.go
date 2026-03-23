@@ -29,22 +29,27 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 )
 
-type Project struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-}
-
-type Presence struct {
-	User      string `json:"user"`
-	Status    string `json:"status"`
-	LastSeen  int64  `json:"last_seen"`
-	Client    string `json:"client"`
-	ProjectID string `json:"project_id,omitempty"`
-}
-
-type discoveryMsg struct {
-	Targets []frontend.Registration `json:"targets"`
+type guiState struct {
+	mode            int
+	isLeader        bool
+	breadcrumbs     []string
+	targets         []frontend.Registration
+	commandTree     *frontend.CommandNode
+	recency         map[string]int
+	activeProject   *frontend.Project
+	activeWorkspace *frontend.Workspace
+	projects        []frontend.Project
+	workspaces      []frontend.Workspace
+	showProjects    bool
+	showWorkspaces  bool
+	subscriptions   map[string]bool
+	projectCreate   projectCreateState
+	aiSwitch        aiSwitchState
+	aiQuery         aiQueryState
+	selectedIdx     int
+	filtered        []frontend.SearchItem
+	dashboardTiles  map[string]frontend.DashboardTile
+	tileOrder       []string
 }
 
 const (
@@ -76,42 +81,8 @@ type aiQueryState struct {
 	cancel widget.Clickable
 }
 
-type DashboardTile struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Content   []string `json:"content"`
-	Status    string   `json:"status"`
-	Actions   []string `json:"actions"`
-	Timestamp int64    `json:"timestamp"`
-}
-
-type Workspace struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
-
-type guiState struct {
-	mode            int
-	isLeader        bool
-	breadcrumbs     []string
-	targets         []frontend.Registration
-	commandTree     *frontend.CommandNode
-	recency         map[string]int
-	activeProject   *Project
-	activeWorkspace *Workspace
-	projects        []Project
-	workspaces      []Workspace
-	showProjects    bool
-	showWorkspaces  bool
-	subscriptions   map[string]bool
-	projectCreate   projectCreateState
-	aiSwitch        aiSwitchState
-	aiQuery         aiQueryState
-	selectedIdx     int
-	filtered        []frontend.SearchItem
-	dashboardTiles  map[string]DashboardTile
-	tileOrder       []string
+type discoveryMsg struct {
+	Targets []frontend.Registration `json:"targets"`
 }
 
 func main() {
@@ -164,20 +135,20 @@ func run(w *app.Window, client *frontend.Client) error {
 	wsList.Axis = layout.Vertical
 	gui.subscriptions = make(map[string]bool)
 	gui.recency = make(map[string]int)
-	gui.dashboardTiles = make(map[string]DashboardTile)
+	gui.dashboardTiles = make(map[string]frontend.DashboardTile)
 	// Initial mock tiles to verify layout
-	gui.dashboardTiles["team"] = DashboardTile{
+	gui.dashboardTiles["team"] = frontend.DashboardTile{
 		Title:   "Team Presence",
 		Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
 		Status:  "Active",
 		Actions: []string{"Invite", "Call"},
 	}
-	gui.dashboardTiles["ai"] = DashboardTile{
+	gui.dashboardTiles["ai"] = frontend.DashboardTile{
 		Title:   "AI Assistant",
 		Content: []string{"Last Task: refactor TUI layout", "Status: Ready"},
 		Actions: []string{"Ask", "Reset Context"},
 	}
-	gui.dashboardTiles["project"] = DashboardTile{
+	gui.dashboardTiles["project"] = frontend.DashboardTile{
 		Title:   "Current Project",
 		Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-dashboards", "Health: Stable"},
 		Status:  "OK",
@@ -225,7 +196,7 @@ func run(w *app.Window, client *frontend.Client) error {
 									defer pCancel()
 									pResp, err := client.Send(pCtx, "project", "active", nil)
 									if err == nil && pResp.ID != "" {
-										var p Project
+										var p frontend.Project
 										if err := json.Unmarshal(pResp.Payload, &p); err == nil {
 											gui.activeProject = &p
 											w.Invalidate()
@@ -240,7 +211,7 @@ func run(w *app.Window, client *frontend.Client) error {
 								pResp, err := client.Send(pCtx, "project", "list", nil)
 								if err == nil {
 									var resp struct {
-										Projects []Project `json:"projects"`
+										Projects []frontend.Project `json:"projects"`
 									}
 									if err := json.Unmarshal(pResp.Payload, &resp); err == nil {
 										gui.projects = resp.Projects
@@ -255,7 +226,7 @@ func run(w *app.Window, client *frontend.Client) error {
 								defer wCancel()
 								wResp, err := client.Send(wCtx, "project", "list-workspaces", nil)
 								if err == nil {
-									var wsList []Workspace
+									var wsList []frontend.Workspace
 									if err := json.Unmarshal(wResp.Payload, &wsList); err == nil {
 										gui.workspaces = wsList
 										w.Invalidate()
@@ -269,7 +240,7 @@ func run(w *app.Window, client *frontend.Client) error {
 								defer wCancel()
 								wResp, err := client.Send(wCtx, "project", "get-active-workspace", nil)
 								if err == nil && wResp.ID != "" {
-									var ws Workspace
+									var ws frontend.Workspace
 									if err := json.Unmarshal(wResp.Payload, &ws); err == nil {
 										gui.activeWorkspace = &ws
 										w.Invalidate()
@@ -283,7 +254,7 @@ func run(w *app.Window, client *frontend.Client) error {
 						if gui.activeProject != nil { pID = gui.activeProject.ID }
 						payload, _ := json.Marshal(map[string]any{
 							"topic": "presence:heartbeat",
-							"data": Presence{
+							"data": frontend.Presence{
 								User:      client.Actor(),
 								Status:    "online",
 								Client:    "gui",
@@ -310,12 +281,12 @@ func run(w *app.Window, client *frontend.Client) error {
 			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
 				switch ev.Topic {
 				case "project:opened":
-					var p Project
+					var p frontend.Project
 					if err := json.Unmarshal(ev.Data, &p); err == nil {
 						gui.activeProject = &p
 					}
 				case "workspace:set":
-					var ws Workspace
+					var ws frontend.Workspace
 					if err := json.Unmarshal(ev.Data, &ws); err == nil {
 						gui.activeWorkspace = &ws
 					}
@@ -324,10 +295,10 @@ func run(w *app.Window, client *frontend.Client) error {
 		}
 
 		if msg.Method == "dashboard-update" {
-			var tile DashboardTile
+			var tile frontend.DashboardTile
 			if err := json.Unmarshal(msg.Payload, &tile); err == nil {
 				if gui.dashboardTiles == nil {
-					gui.dashboardTiles = make(map[string]DashboardTile)
+					gui.dashboardTiles = make(map[string]frontend.DashboardTile)
 				}
 				gui.dashboardTiles[msg.Sender] = tile
 
@@ -1009,8 +980,8 @@ func formatMessage(msg api.Message) string {
 			}
 		case "project:opened":
 			var ev struct {
-				Topic string  `json:"topic"`
-				Data  Project `json:"data"`
+				Topic string           `json:"topic"`
+				Data  frontend.Project `json:"data"`
 			}
 			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
 				return fmt.Sprintf("[%s] Project opened: %s", ts, ev.Data.Name)

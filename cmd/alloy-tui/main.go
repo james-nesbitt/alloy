@@ -20,9 +20,9 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
 
-// TUI Layout components
+// Model Layout components
 
-type model struct {
+type Model struct {
 	client   *frontend.Client
 	messages []string
 	viewport viewport.Model
@@ -35,10 +35,10 @@ type model struct {
 	msgCh    chan api.Message
 
 	// Modal interface state
-	mode            int
+	Mode            int
 	commandInput    textarea.Model
 	activeBuffer    string
-	activeChannel   string
+	ActiveChannel   string
 	isLeader        bool
 	breadcrumbs     []string
 	subscriptions   map[string]bool
@@ -49,9 +49,9 @@ type model struct {
 	selectedCmdIdx  int
 	leaderMenuWidth int
 
-	activeProject *Project
-	projects      []Project
-	workspaces    []Workspace
+	ActiveProject *frontend.Project
+	Projects      []frontend.Project
+	Workspaces    []frontend.Workspace
 	selectType    int
 
 	// Form state
@@ -61,8 +61,8 @@ type model struct {
 	formIdx    int
 
 	// Dashboard state
-	dashboardTiles map[string]DashboardTile
-	tileOrder      []string
+	DashboardTiles map[string]frontend.DashboardTile
+	TileOrder      []string
 
 	lastMainMode       int
 	localBufferVersion int
@@ -86,46 +86,6 @@ const (
 	ModeEdit      = 6
 )
 
-type DashboardTile struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Content   []string `json:"content"`
-	Status    string   `json:"status"`
-	Actions   []string `json:"actions"`
-	Timestamp int64    `json:"timestamp"`
-}
-
-type WorkspaceConfig struct {
-	DefaultMode string `json:"default_mode"`
-	Dashboard   struct {
-		Tiles []struct {
-			Plugin string `json:"plugin"`
-			Weight int    `json:"weight"`
-		} `json:"tiles"`
-	} `json:"dashboard"`
-}
-
-type Project struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Layout      WorkspaceConfig `json:"layout,omitempty"`
-}
-
-type Workspace struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Root string `json:"root"`
-}
-
-type Presence struct {
-	User      string `json:"user"`
-	Status    string `json:"status"`
-	LastSeen  int64  `json:"last_seen"`
-	Client    string `json:"client"`
-	ProjectID string `json:"project_id,omitempty"`
-}
-
 type Cursor struct {
 	Row      int    `json:"row"`
 	Col      int    `json:"col"`
@@ -141,7 +101,7 @@ type messageMsg api.Message
 type errMsg error
 type tickMsg time.Time
 
-func (m model) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		m.listenForMessages(),
@@ -149,14 +109,14 @@ func (m model) Init() tea.Cmd {
 	)
 }
 
-func (m model) listenForMessages() tea.Cmd {
+func (m Model) listenForMessages() tea.Cmd {
 	return func() tea.Msg {
 		msg := <-m.msgCh
 		return messageMsg(msg)
 	}
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -186,13 +146,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Handle keys based on mode
-		switch m.mode {
+		switch m.Mode {
 		case ModeNormal, ModeDashboard:
 			newM, cmd := m.handleNormalMode(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m = newM.(model)
+			m = newM.(Model)
 			var vpCmd tea.Cmd
 			m.viewport, vpCmd = m.viewport.Update(msg)
 			if vpCmd != nil {
@@ -204,7 +164,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m = newM.(model)
+			m = newM.(Model)
 			var taCmd tea.Cmd
 			m.textarea, taCmd = m.textarea.Update(msg)
 			if taCmd != nil {
@@ -216,7 +176,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m = newM.(model)
+			m = newM.(Model)
 			var taCmd tea.Cmd
 			m.textarea, taCmd = m.textarea.Update(msg)
 			if taCmd != nil {
@@ -228,7 +188,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m = newM.(model)
+			m = newM.(Model)
 
 			oldVal := m.textarea.Value()
 			oldLine := m.textarea.Line()
@@ -249,14 +209,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m = newM.(model)
+			m = newM.(Model)
 
 		case ModeForm:
 			newM, cmd := m.handleFormMode(msg, nil)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m = newM.(model)
+			m = newM.(Model)
 		}
 
 	case discoveryMsg:
@@ -281,7 +241,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
 			}
-			if t.ID == "project" && m.activeProject == nil {
+			if t.ID == "project" && m.ActiveProject == nil {
 				cmds = append(cmds, m.fetchActiveProject())
 			}
 		}
@@ -300,21 +260,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *model) processMessage(msg api.Message) tea.Cmd {
+func (m *Model) processMessage(msg api.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	var displayMsg string
 	if msg.Sender == "events" && msg.Method == "project:opened" {
 		var event struct {
 			Topic string  `json:"topic"`
-			Data  Project `json:"data"`
+			Data  frontend.Project `json:"data"`
 		}
 		if err := json.Unmarshal(msg.Payload, &event); err == nil {
-			m.activeProject = &event.Data
-			displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.activeProject.Name)
-			if m.activeProject.Layout.DefaultMode == "dashboard" {
-				m.mode = ModeDashboard
-			} else if m.activeProject.Layout.DefaultMode == "chat" {
-				m.mode = ModeChat
+			m.ActiveProject = &event.Data
+			displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.ActiveProject.Name)
+			if m.ActiveProject.Layout.DefaultMode == "dashboard" {
+				m.Mode = ModeDashboard
+			} else if m.ActiveProject.Layout.DefaultMode == "chat" {
+				m.Mode = ModeChat
 			}
 		}
 	}
@@ -364,47 +324,47 @@ func (m *model) processMessage(msg api.Message) tea.Cmd {
 	}
 
 	if msg.Method == "dashboard-update" {
-		var tile DashboardTile
+		var tile frontend.DashboardTile
 		if err := json.Unmarshal(msg.Payload, &tile); err == nil {
-			if m.dashboardTiles == nil {
-				m.dashboardTiles = make(map[string]DashboardTile)
+			if m.DashboardTiles == nil {
+				m.DashboardTiles = make(map[string]frontend.DashboardTile)
 			}
-			m.dashboardTiles[msg.Sender] = tile
+			m.DashboardTiles[msg.Sender] = tile
 			found := false
-			for _, id := range m.tileOrder {
+			for _, id := range m.TileOrder {
 				if id == msg.Sender {
 					found = true
 					break
 				}
 			}
 			if !found {
-				m.tileOrder = append(m.tileOrder, msg.Sender)
+				m.TileOrder = append(m.TileOrder, msg.Sender)
 			}
 		}
 	}
 
 	if displayMsg == "" && msg.Sender == "project" && msg.Method == "active-resp" {
-		var p Project
+		var p frontend.Project
 		if err := json.Unmarshal(msg.Payload, &p); err == nil {
-			m.activeProject = &p
+			m.ActiveProject = &p
 		}
 	}
 
 	if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-resp" {
 		var resp struct {
-			Projects []Project `json:"projects"`
+			Projects []frontend.Project `json:"projects"`
 		}
 		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
-			m.projects = resp.Projects
+			m.Projects = resp.Projects
 		}
 	}
 
 	if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-workspaces-resp" {
 		var resp struct {
-			Workspaces []Workspace `json:"workspaces"`
+			Workspaces []frontend.Workspace `json:"workspaces"`
 		}
 		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
-			m.workspaces = resp.Workspaces
+			m.Workspaces = resp.Workspaces
 		}
 	}
 
@@ -465,37 +425,37 @@ func (m *model) processMessage(msg api.Message) tea.Cmd {
 	return tea.Batch(append(cmds, m.listenForMessages())...)
 }
 
-func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case ":", "alt+x":
-		m.lastMainMode = m.mode
-		m.mode = ModeCommand
+		m.lastMainMode = m.Mode
+		m.Mode = ModeCommand
 		m.isLeader = false
 		m.commandInput.SetValue(":")
 		m.commandInput.Focus()
 		return m, nil
 	case " ":
-		m.lastMainMode = m.mode
-		m.mode = ModeCommand
+		m.lastMainMode = m.Mode
+		m.Mode = ModeCommand
 		m.isLeader = true
 		m.commandInput.SetValue("")
 		m.commandInput.Focus()
 		return m, nil
 	case "i":
-		m.mode = ModeInsert
+		m.Mode = ModeInsert
 		m.textarea.Focus()
 		return m, nil
 	case "d":
-		m.mode = ModeDashboard
+		m.Mode = ModeDashboard
 		m.isLeader = false
 		return m, nil
 	case "v":
-		m.mode = ModeNormal
+		m.Mode = ModeNormal
 		m.isLeader = false
 		return m, nil
 	case "c":
-		m.mode = ModeChat
-		m.textarea.Placeholder = "Type message to #" + m.activeChannel + "..."
+		m.Mode = ModeChat
+		m.textarea.Placeholder = "Type message to #" + m.ActiveChannel + "..."
 		m.textarea.Focus()
 		return m, nil
 	case "ctrl+c", "q":
@@ -504,19 +464,19 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleInsertMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleInsertMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
-		m.mode = ModeNormal
+		m.Mode = ModeNormal
 		m.textarea.Blur()
 		return m, nil
 	}
 	return m, tiCmd
 }
 
-func (m model) handleChatMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleChatMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.mode = ModeNormal
+		m.Mode = ModeNormal
 		m.textarea.Blur()
 		return m, nil
 	case tea.KeyEnter:
@@ -529,10 +489,10 @@ func (m model) handleChatMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd
 	return m, tiCmd
 }
 
-func (m model) handleEditMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleEditMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.mode = ModeNormal
+		m.Mode = ModeNormal
 		m.textarea.Blur()
 		return m, nil
 	case tea.KeyCtrlS:
@@ -546,7 +506,7 @@ func (m model) handleEditMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd
 	return m, tiCmd
 }
 
-func (m model) fetchBufferContent(id string) tea.Cmd {
+func (m Model) fetchBufferContent(id string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -559,7 +519,7 @@ func (m model) fetchBufferContent(id string) tea.Cmd {
 	}
 }
 
-func (m model) sendBufferUpdate(id string, content string, force bool) tea.Cmd {
+func (m Model) sendBufferUpdate(id string, content string, force bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -589,7 +549,7 @@ func (m model) sendBufferUpdate(id string, content string, force bool) tea.Cmd {
 	}
 }
 
-func (m model) sendCursorUpdate(id string, row, col int) tea.Cmd {
+func (m Model) sendCursorUpdate(id string, row, col int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -603,7 +563,7 @@ func (m model) sendCursorUpdate(id string, row, col int) tea.Cmd {
 	}
 }
 
-func (m model) subscribe(topic string) tea.Cmd {
+func (m Model) subscribe(topic string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -613,7 +573,7 @@ func (m model) subscribe(topic string) tea.Cmd {
 	}
 }
 
-func (m model) sendChatMessage(content string) tea.Cmd {
+func (m Model) sendChatMessage(content string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -621,16 +581,16 @@ func (m model) sendChatMessage(content string) tea.Cmd {
 		var method string
 		var payload []byte
 
-		if strings.HasPrefix(m.activeChannel, "dm:") {
+		if strings.HasPrefix(m.ActiveChannel, "dm:") {
 			method = "direct:send"
 			payload, _ = json.Marshal(map[string]string{
-				"to":      m.activeChannel[3:],
+				"to":      m.ActiveChannel[3:],
 				"content": content,
 			})
 		} else {
 			method = "send"
 			payload, _ = json.Marshal(map[string]string{
-				"channel": m.activeChannel,
+				"channel": m.ActiveChannel,
 				"content": content,
 			})
 		}
@@ -643,7 +603,7 @@ func (m model) sendChatMessage(content string) tea.Cmd {
 	}
 }
 
-func (m model) sendPresenceHeartbeat() tea.Cmd {
+func (m Model) sendPresenceHeartbeat() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -655,14 +615,14 @@ func (m model) sendPresenceHeartbeat() tea.Cmd {
 		_, _ = m.client.Send(ctx, "chat", "presence:update", payload)
 
 		// New team-presence event
-		presence := Presence{
+		presence := frontend.Presence{
 			User:     m.client.Actor(),
 			Status:   "online",
 			Client:   "tui",
 			LastSeen: time.Now().Unix(),
 		}
-		if m.activeProject != nil {
-			presence.ProjectID = m.activeProject.ID
+		if m.ActiveProject != nil {
+			presence.ProjectID = m.ActiveProject.ID
 		}
 
 		eventData, _ := json.Marshal(map[string]any{
@@ -675,7 +635,7 @@ func (m model) sendPresenceHeartbeat() tea.Cmd {
 	}
 }
 
-func (m model) fetchActiveProject() tea.Cmd {
+func (m Model) fetchActiveProject() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -688,7 +648,7 @@ func (m model) fetchActiveProject() tea.Cmd {
 	}
 }
 
-func (m model) fetchProjects() tea.Cmd {
+func (m Model) fetchProjects() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -701,7 +661,7 @@ func (m model) fetchProjects() tea.Cmd {
 	}
 }
 
-func (m model) fetchWorkspaces() tea.Cmd {
+func (m Model) fetchWorkspaces() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -714,7 +674,7 @@ func (m model) fetchWorkspaces() tea.Cmd {
 	}
 }
 
-func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	// 1. Pre-update Check: Drill-down shortcuts for Leader Mode
 	// We check this BEFORE updating the input so that keys like 'p' can be
 	// captured as drill-down actions instead of text input.
@@ -733,9 +693,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		if node != nil {
 			if child, ok := node.Children[char]; ok {
 				if len(child.Children) == 0 {
-					m.mode = m.lastMainMode
-					if m.mode == ModeCommand {
-						m.mode = ModeNormal
+					m.Mode = m.lastMainMode
+					if m.Mode == ModeCommand {
+						m.Mode = ModeNormal
 					} // Failsafe
 					m.isLeader = false
 					m.breadcrumbs = nil
@@ -768,9 +728,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlG:
-		m.mode = m.lastMainMode
-		if m.mode == ModeCommand {
-			m.mode = ModeNormal
+		m.Mode = m.lastMainMode
+		if m.Mode == ModeCommand {
+			m.Mode = ModeNormal
 		} // Failsafe
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
@@ -793,9 +753,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
 			opt := filtered[m.selectedCmdIdx]
 			if m.selectType == SelectProject {
-				m.mode = m.lastMainMode
-				if m.mode == ModeCommand {
-					m.mode = ModeNormal
+				m.Mode = m.lastMainMode
+				if m.Mode == ModeCommand {
+					m.Mode = ModeNormal
 				} // Failsafe
 				m.commandInput.Blur()
 				m.selectType = SelectNone
@@ -804,9 +764,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
 			}
 			if m.selectType == SelectWorkspace {
-				m.mode = m.lastMainMode
-				if m.mode == ModeCommand {
-					m.mode = ModeNormal
+				m.Mode = m.lastMainMode
+				if m.Mode == ModeCommand {
+					m.Mode = ModeNormal
 				} // Failsafe
 				m.commandInput.Blur()
 				m.selectType = SelectNone
@@ -824,9 +784,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					// Find the node to execute it properly
 					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
 					if node != nil {
-						m.mode = m.lastMainMode
-						if m.mode == ModeCommand {
-							m.mode = ModeNormal
+						m.Mode = m.lastMainMode
+						if m.Mode == ModeCommand {
+							m.Mode = ModeNormal
 						} // Failsafe
 						m.commandInput.Blur()
 						m.commandInput.SetValue("")
@@ -837,9 +797,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					}
 				}
 			} else {
-				m.mode = m.lastMainMode
-				if m.mode == ModeCommand {
-					m.mode = ModeNormal
+				m.Mode = m.lastMainMode
+				if m.Mode == ModeCommand {
+					m.Mode = ModeNormal
 				} // Failsafe
 				m.commandInput.Blur()
 				m.commandInput.SetValue("")
@@ -851,9 +811,9 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		}
 
 		cmd := m.commandInput.Value()
-		m.mode = m.lastMainMode
-		if m.mode == ModeCommand {
-			m.mode = ModeNormal
+		m.Mode = m.lastMainMode
+		if m.Mode == ModeCommand {
+			m.Mode = ModeNormal
 		} // Failsafe
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
@@ -878,10 +838,10 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 	return m, ciCmd
 }
 
-func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlG:
-		m.mode = ModeNormal
+		m.Mode = ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		return m, nil
@@ -889,7 +849,7 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 		m.formValues[m.formIdx] = m.commandInput.Value()
 		m.formIdx++
 		if m.formIdx >= len(m.formFields) {
-			m.mode = ModeNormal
+			m.Mode = ModeNormal
 			m.commandInput.Blur()
 			m.commandInput.SetValue("")
 
@@ -910,11 +870,11 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 
 			case "Switch AI Provider":
 				t := m.formValues[0]
-				model := m.formValues[1]
+				modelVal := m.formValues[1]
 				url := m.formValues[2]
 				payload, _ := json.Marshal(map[string]string{
 					"type":  t,
-					"model": model,
+					"model": modelVal,
 					"url":   url,
 				})
 				return m, func() tea.Msg {
@@ -946,7 +906,7 @@ func (m model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 	return m, ciCmd
 }
 
-func (m model) doDiscovery() tea.Msg {
+func (m Model) doDiscovery() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	resp, err := m.client.Send(ctx, "command-manager", "discover", nil)
@@ -960,7 +920,7 @@ func (m model) doDiscovery() tea.Msg {
 	return dMsg
 }
 
-func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
+func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	cmdStr = strings.TrimSpace(cmdStr)
 	if cmdStr == "" {
@@ -986,7 +946,7 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	switch verb {
 	case "ai":
 		if len(parts) >= 2 && (parts[1] == "switch" || parts[1] == "provider:set") {
-			m.mode = ModeForm
+			m.Mode = ModeForm
 			m.formTitle = "Switch AI Provider"
 			m.formFields = []string{"Type (ollama|openai|anthropic)", "Model", "URL (optional)"}
 			m.formValues = make([]string, 3)
@@ -998,7 +958,7 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 		}
 		if len(parts) >= 2 && parts[1] == "query" {
 			if len(parts) == 2 {
-				m.mode = ModeForm
+				m.Mode = ModeForm
 				m.formTitle = "AI Query"
 				m.formFields = []string{"Prompt"}
 				m.formValues = make([]string, 1)
@@ -1012,7 +972,7 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	case "p", "project":
 		if len(parts) >= 2 && parts[1] == "open" {
 			if len(parts) == 2 {
-				m.mode = ModeCommand
+				m.Mode = ModeCommand
 				m.selectType = SelectProject
 				m.commandInput.Focus()
 				m.commandInput.SetValue("")
@@ -1020,14 +980,14 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 			}
 			// if len(parts) > 2, it falls through to the default plugin call
 		} else if len(parts) >= 2 && parts[1] == "list-workspaces" {
-			m.mode = ModeCommand
+			m.Mode = ModeCommand
 			m.selectType = SelectWorkspace
 			m.commandInput.Focus()
 			m.commandInput.SetValue("")
 			return m, m.fetchWorkspaces()
 		} else if len(parts) >= 2 && parts[1] == "create" {
 			if len(parts) == 2 {
-				m.mode = ModeForm
+				m.Mode = ModeForm
 				m.formTitle = "Create New Project"
 				m.formFields = []string{"Name", "Description"}
 				m.formValues = make([]string, 2)
@@ -1048,19 +1008,19 @@ func (m model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	case "e", "edit":
 		if len(parts) > 1 {
 			m.activeBuffer = parts[1]
-			m.mode = ModeEdit
+			m.Mode = ModeEdit
 			m.textarea.Focus()
 			cmds = append(cmds, m.fetchBufferContent(m.activeBuffer))
 		}
 	case "join":
 		if len(parts) > 1 {
-			m.activeChannel = parts[1]
+			m.ActiveChannel = parts[1]
 		}
 	case "dm":
 		if len(parts) > 1 {
 			target := parts[1]
 			// The plugin expects dm:A:B where A < B
-			m.activeChannel = "dm:" + target
+			m.ActiveChannel = "dm:" + target
 		}
 	case "ls":
 		// List logic...
@@ -1111,12 +1071,12 @@ type CommandOption struct {
 	Score       int
 }
 
-func (m model) filteredCommands() []CommandOption {
+func (m Model) filteredCommands() []CommandOption {
 	var results []CommandOption
 
-	if m.mode == ModeCommand && m.selectType == SelectProject {
+	if m.Mode == ModeCommand && m.selectType == SelectProject {
 		input := m.commandInput.Value()
-		for _, p := range m.projects {
+		for _, p := range m.Projects {
 			score := frontend.FuzzyScore(p.Name, input)
 			if score > 0 {
 				results = append(results, CommandOption{
@@ -1127,20 +1087,20 @@ func (m model) filteredCommands() []CommandOption {
 				})
 			}
 		}
-	} else if m.mode == ModeCommand && m.selectType == SelectWorkspace {
+	} else if m.Mode == ModeCommand && m.selectType == SelectWorkspace {
 		input := m.commandInput.Value()
-		for _, w := range m.workspaces {
+		for _, w := range m.Workspaces {
 			score := frontend.FuzzyScore(w.Name, input)
 			if score > 0 {
 				results = append(results, CommandOption{
 					Raw:         w.ID,
 					Display:     w.Name,
-					Description: w.Root,
+					Description: w.Path,
 					Score:       score,
 				})
 			}
 		}
-	} else if m.mode == ModeCommand && !m.isLeader {
+	} else if m.Mode == ModeCommand && !m.isLeader {
 		input := m.commandInput.Value()
 		if len(input) > 0 && input[0] == ':' {
 			input = input[1:]
@@ -1204,7 +1164,7 @@ func (m model) filteredCommands() []CommandOption {
 
 			return results[i].Display < results[j].Display
 		})
-	} else if m.mode == ModeCommand && m.isLeader && m.commandTree != nil {
+	} else if m.Mode == ModeCommand && m.isLeader && m.commandTree != nil {
 		node := m.commandTree.Find(m.breadcrumbs)
 		if node != nil {
 			input := m.commandInput.Value()
@@ -1272,7 +1232,7 @@ func (m model) filteredCommands() []CommandOption {
 	return results
 }
 
-func (m model) leaderMenuView() string {
+func (m Model) leaderMenuView() string {
 	if !m.isLeader || m.commandTree == nil {
 		return ""
 	}
@@ -1348,8 +1308,8 @@ func max(a, b int) int {
 	return b
 }
 
-func (m model) dashboardView() string {
-	if len(m.tileOrder) == 0 {
+func (m Model) dashboardView() string {
+	if len(m.TileOrder) == 0 {
 		return lipgloss.NewStyle().
 			Width(m.width).
 			Height(m.height-3).
@@ -1371,8 +1331,8 @@ func (m model) dashboardView() string {
 	var rows []string
 	var currentRow []string
 
-	for i, id := range m.tileOrder {
-		tile := m.dashboardTiles[id]
+	for i, id := range m.TileOrder {
+		tile := m.DashboardTiles[id]
 
 		content := strings.Join(tile.Content, "\n")
 		footer := ""
@@ -1390,7 +1350,7 @@ func (m model) dashboardView() string {
 		)
 
 		currentRow = append(currentRow, tileView)
-		if (i+1)%2 == 0 || i == len(m.tileOrder)-1 {
+		if (i+1)%2 == 0 || i == len(m.TileOrder)-1 {
 			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, currentRow...))
 			currentRow = []string{}
 		}
@@ -1399,7 +1359,7 @@ func (m model) dashboardView() string {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func (m model) View() string {
+func (m Model) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
 	}
@@ -1407,7 +1367,7 @@ func (m model) View() string {
 	modeStr := " NORMAL "
 	modeStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
 
-	switch m.mode {
+	switch m.Mode {
 	case ModeInsert:
 		modeStr = " INSERT "
 		modeStyle = modeStyle.Background(lipgloss.Color("2"))
@@ -1435,8 +1395,8 @@ func (m model) View() string {
 
 	statusStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("15"))
 	projectStr := " No Project "
-	if m.activeProject != nil {
-		projectStr = " Project: " + m.activeProject.Name + " "
+	if m.ActiveProject != nil {
+		projectStr = " Project: " + m.ActiveProject.Name + " "
 	}
 
 	remoteStr := ""
@@ -1451,14 +1411,14 @@ func (m model) View() string {
 
 	statusLine := lipgloss.JoinHorizontal(lipgloss.Center,
 		modeStyle.Render(modeStr),
-		statusStyle.Width(m.width-len(modeStr)-len(projectStr)).Render(fmt.Sprintf(" Buffer: %s | Channel: #%s%s", m.activeBuffer, m.activeChannel, remoteStr)),
+		statusStyle.Width(m.width-len(modeStr)-len(projectStr)).Render(fmt.Sprintf(" Buffer: %s | Channel: #%s%s", m.activeBuffer, m.ActiveChannel, remoteStr)),
 		modeStyle.Background(lipgloss.Color("12")).Render(projectStr),
 	)
 
 	var mainView string
-	renderMode := m.mode
+	renderMode := m.Mode
 	workingHeight := m.height - 3
-	if m.mode == ModeCommand || m.mode == ModeForm {
+	if m.Mode == ModeCommand || m.Mode == ModeForm {
 		renderMode = m.lastMainMode
 		workingHeight = (m.height * 2) / 3
 	}
@@ -1482,7 +1442,7 @@ func (m model) View() string {
 		statusLine,
 	)
 
-	if m.mode == ModeCommand {
+	if m.Mode == ModeCommand {
 		prompt := ":"
 		if m.isLeader {
 			prompt = strings.Join(m.breadcrumbs, " > ")
@@ -1607,7 +1567,7 @@ func (m model) View() string {
 			}
 		}
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
-	} else if m.mode == ModeForm {
+	} else if m.Mode == ModeForm {
 		formStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
 		labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
 
@@ -1631,6 +1591,52 @@ func (m model) View() string {
 	}
 
 	return view
+}
+
+func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
+	ta := textarea.New()
+	ta.Placeholder = "Write content here..."
+	ta.SetHeight(5)
+
+	ci := textarea.New()
+	ci.Placeholder = ":"
+	ci.SetHeight(1)
+
+	return Model{
+		client:        client,
+		textarea:      ta,
+		commandInput:  ci,
+		msgCh:         msgCh,
+		ActiveChannel: "general",
+		Mode:          ModeDashboard,
+		subscriptions: make(map[string]bool),
+		recency:       make(map[string]int),
+		DashboardTiles: map[string]frontend.DashboardTile{
+			"team": {
+				Title:   "Team Presence",
+				Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
+				Status:  "Active",
+				Actions: []string{"Invite", "Call"},
+			},
+			"ai": {
+				Title:   "AI Assistant",
+				Content: []string{"● Ollama (Running)", "○ Active Model: llama3", "Tasks: 0/1 completed"},
+				Actions: []string{"Query", "Summarize"},
+			},
+			"chat": {
+				Title:   "Team Chat",
+				Content: []string{"#general", "<James> Anyone online?", "<AI> Ready to help."},
+				Status:  "2 unread",
+				Actions: []string{"Open", "Clear"},
+			},
+			"project": {
+				Title:   "Current Project",
+				Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-uipolish", "Health: Stable"},
+				Status:  "OK",
+			},
+		},
+		TileOrder: []string{"ai", "chat", "project"},
+	}
 }
 
 func main() {
@@ -1668,49 +1674,7 @@ func main() {
 		msgCh <- msg
 	})
 
-	ta := textarea.New()
-	ta.Placeholder = "Write content here..."
-	ta.SetHeight(5)
-
-	ci := textarea.New()
-	ci.Placeholder = ":"
-	ci.SetHeight(1)
-
-	m := model{
-		client:        client,
-		textarea:      ta,
-		commandInput:  ci,
-		msgCh:         msgCh,
-		activeChannel: "general",
-		mode:          ModeDashboard,
-		subscriptions: make(map[string]bool),
-		recency:       make(map[string]int),
-		dashboardTiles: map[string]DashboardTile{
-			"team": {
-				Title:   "Team Presence",
-				Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
-				Status:  "Active",
-				Actions: []string{"Invite", "Call"},
-			},
-			"ai": {
-				Title:   "AI Assistant",
-				Content: []string{"● Ollama (Running)", "○ Active Model: llama3", "Tasks: 0/1 completed"},
-				Actions: []string{"Query", "Summarize"},
-			},
-			"chat": {
-				Title:   "Team Chat",
-				Content: []string{"#general", "<James> Anyone online?", "<AI> Ready to help."},
-				Status:  "2 unread",
-				Actions: []string{"Open", "Clear"},
-			},
-			"project": {
-				Title:   "Current Project",
-				Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-uipolish", "Health: Stable"},
-				Status:  "OK",
-			},
-		},
-		tileOrder: []string{"ai", "chat", "project"},
-	}
+	m := NewModel(client, msgCh)
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
