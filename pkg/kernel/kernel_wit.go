@@ -461,6 +461,28 @@ func (k *WITKernel) GetPlugin(pluginID string) (api.Plugin, bool) {
 	return plugin, ok
 }
 
+// Workspace Management
+
+func (k *WITKernel) RegisterWorkspace(ws api.Workspace) {
+	k.wasmManager.RegisterWorkspace(ws)
+}
+
+func (k *WITKernel) UnregisterWorkspace(id string) {
+	k.wasmManager.UnregisterWorkspace(id)
+}
+
+func (k *WITKernel) SetActiveWorkspace(id string) {
+	k.wasmManager.SetActiveWorkspace(id)
+}
+
+func (k *WITKernel) GetActiveWorkspace() (api.Workspace, bool) {
+	return k.wasmManager.GetActiveWorkspace()
+}
+
+func (k *WITKernel) ListWorkspaces() []api.Workspace {
+	return k.wasmManager.ListWorkspaces()
+}
+
 // Shutdown gracefully shuts down the kernel.
 func (k *WITKernel) Shutdown(ctx context.Context) error {
 	k.logger.Info("shutting down kernel")

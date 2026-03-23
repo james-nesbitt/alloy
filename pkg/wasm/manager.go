@@ -237,3 +237,25 @@ func (m *Manager) checkPluginsHealth() {
 		m.logger.Debug("plugin status", "id", id, "status", plugin.Status)
 	}
 }
+
+// Workspace Management
+
+func (m *Manager) RegisterWorkspace(ws api.Workspace) {
+	m.runtime.RegisterWorkspace(ws)
+}
+
+func (m *Manager) UnregisterWorkspace(id string) {
+	m.runtime.UnregisterWorkspace(id)
+}
+
+func (m *Manager) SetActiveWorkspace(id string) {
+	m.runtime.SetActiveWorkspace(id)
+}
+
+func (m *Manager) GetActiveWorkspace() (api.Workspace, bool) {
+	return m.runtime.GetActiveWorkspace()
+}
+
+func (m *Manager) ListWorkspaces() []api.Workspace {
+	return m.runtime.ListWorkspaces()
+}

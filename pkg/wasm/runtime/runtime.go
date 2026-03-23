@@ -1288,3 +1288,53 @@ func (r *Runtime) internalUpdateWidget(ctx context.Context, mod wazeroapi.Module
 		},
 	})
 }
+
+// Public Workspace Management
+
+func (r *Runtime) RegisterWorkspace(ws api.Workspace) {
+	r.mu.Lock()
+	r.workspaces[ws.ID] = ws
+	if r.activeWorkspace == "" {
+		r.activeWorkspace = ws.ID
+	}
+	r.mu.Unlock()
+	r.saveWorkspaces()
+}
+
+func (r *Runtime) UnregisterWorkspace(id string) {
+	r.mu.Lock()
+	delete(r.workspaces, id)
+	if r.activeWorkspace == id {
+		r.activeWorkspace = ""
+		for nextID := range r.workspaces {
+			r.activeWorkspace = nextID
+			break
+		}
+	}
+	r.mu.Unlock()
+	r.saveWorkspaces()
+}
+
+func (r *Runtime) SetActiveWorkspace(id string) {
+	r.mu.Lock()
+	r.activeWorkspace = id
+	r.mu.Unlock()
+	r.saveWorkspaces()
+}
+
+func (r *Runtime) GetActiveWorkspace() (api.Workspace, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ws, ok := r.workspaces[r.activeWorkspace]
+	return ws, ok
+}
+
+func (r *Runtime) ListWorkspaces() []api.Workspace {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	workspaces := make([]api.Workspace, 0, len(r.workspaces))
+	for _, ws := range r.workspaces {
+		workspaces = append(workspaces, ws)
+	}
+	return workspaces
+}
