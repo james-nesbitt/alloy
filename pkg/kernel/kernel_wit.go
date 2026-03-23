@@ -483,6 +483,10 @@ func (k *WITKernel) ListWorkspaces() []api.Workspace {
 	return k.wasmManager.ListWorkspaces()
 }
 
+func (k *WITKernel) ListWidgets() []api.Widget {
+	return k.wasmManager.ListWidgets()
+}
+
 // Shutdown gracefully shuts down the kernel.
 func (k *WITKernel) Shutdown(ctx context.Context) error {
 	k.logger.Info("shutting down kernel")
@@ -624,6 +628,19 @@ func (k *WITKernel) handleInternalMessage(ctx context.Context, msg api.Message) 
 			Target:    msg.Sender,
 			Method:    "ping",
 			Payload:   []byte(`{"status":"pong"}`),
+			Timestamp: time.Now().Unix(),
+		}
+		k.RouteMessage(ctx, resp)
+	case "dashboard:list-widgets":
+		widgets := k.ListWidgets()
+		payload, _ := json.Marshal(widgets)
+		resp := api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Method:    "dashboard:list-widgets",
+			Payload:   payload,
 			Timestamp: time.Now().Unix(),
 		}
 		k.RouteMessage(ctx, resp)

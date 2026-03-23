@@ -251,12 +251,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.subscribe("chat:presence"), m.subscribe("project:opened"),
 					m.subscribe("plugin:crashed"), m.subscribe("plugin:load_failed"),
 					m.subscribe("buffer:update"), m.subscribe("buffer:cursors_updated"),
+					m.subscribe("dashboard:widget-registered"),
+					m.subscribe("dashboard:widget-updated"),
+					m.subscribe("dashboard:widget-unregistered"),
 					m.subscribe("component:registered"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
 				m.subscriptions["component:registered"] = true
+
+				// NEW: Request initial dashboard widgets
+				cmds = append(cmds, m.fetchInitialWidgets())
 			}
 			if t.ID == "project" && m.ActiveProject == nil {
 				cmds = append(cmds, m.fetchActiveProject())
@@ -370,48 +376,43 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 		}
 	}
 
-	if msg.Method == "dashboard-update" {
-		var tile frontend.DashboardTile
-		if err := json.Unmarshal(msg.Payload, &tile); err == nil {
-			if m.DashboardTiles == nil {
-				m.DashboardTiles = make(map[string]frontend.DashboardTile)
-			}
-			m.DashboardTiles[msg.Sender] = tile
-			found := false
-			for _, id := range m.TileOrder {
-				if id == msg.Sender {
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.TileOrder = append(m.TileOrder, msg.Sender)
-			}
-		}
-	}
-
-	if displayMsg == "" && msg.Sender == "project" && msg.Method == "active-resp" {
-		var p frontend.Project
-		if err := json.Unmarshal(msg.Payload, &p); err == nil {
-			m.ActiveProject = &p
-		}
-	}
-
-	if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-resp" {
-		var resp struct {
-			Projects []frontend.Project `json:"projects"`
-		}
-		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
-			m.Projects = resp.Projects
-		}
-	}
-
 	if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-workspaces-resp" {
 		var resp struct {
 			Workspaces []frontend.Workspace `json:"workspaces"`
 		}
 		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
 			m.Workspaces = resp.Workspaces
+		}
+	}
+
+	if displayMsg == "" && msg.Sender == "kernel" && msg.Method == "dashboard:list-widgets-resp" {
+		var widgets []api.Widget
+		if err := json.Unmarshal(msg.Payload, &widgets); err == nil {
+			for _, w := range widgets {
+				if m.DashboardTiles == nil {
+					m.DashboardTiles = make(map[string]frontend.DashboardTile)
+				}
+				m.DashboardTiles[w.ID] = frontend.DashboardTile{
+					ID:          w.ID,
+					Title:       w.Title,
+					ContentType: w.ContentType,
+					RawContent:  w.Content,
+					RefreshMS:   w.RefreshIntervalMs,
+					Timestamp:   time.Now().Unix(),
+					Content:     []string{string(w.Content)},
+				}
+				found := false
+				for _, id := range m.TileOrder {
+					if id == w.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.TileOrder = append(m.TileOrder, w.ID)
+				}
+			}
+			displayMsg = fmt.Sprintf("[%s] Dashboard synchronized (%d widgets)", time.Now().Format("15:04:05"), len(widgets))
 		}
 	}
 
@@ -490,6 +491,7 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				tile.Timestamp = time.Now().Unix()
 				m.DashboardTiles[widgetID] = tile
 			}
+			displayMsg = "skip"
 		case "dashboard:widget-unregistered":
 			var dat struct {
 				ID string `json:"id"`
@@ -513,6 +515,10 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 		} else {
 			displayMsg = fmt.Sprintf("[%s] %s: %s", time.Now().Format("15:04:05"), msg.Sender, string(msg.Payload))
 		}
+	}
+
+	if displayMsg == "skip" {
+		return tea.Batch(append(cmds, m.listenForMessages())...)
 	}
 
 	m.messages = append(m.messages, displayMsg)
@@ -764,6 +770,19 @@ func (m Model) fetchWorkspaces() tea.Cmd {
 		resp, _ := m.client.Send(ctx, "project", "list-workspaces", nil)
 		if resp.ID != "" {
 			resp.Method = "list-workspaces-resp"
+			return messageMsg(resp)
+		}
+		return nil
+	}
+}
+
+func (m Model) fetchInitialWidgets() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		resp, _ := m.client.Send(ctx, "kernel", "dashboard:list-widgets", nil)
+		if resp.ID != "" {
+			resp.Method = "dashboard:list-widgets-resp"
 			return messageMsg(resp)
 		}
 		return nil

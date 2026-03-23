@@ -37,6 +37,9 @@ type Runtime struct {
 	// Workspace management
 	workspaces      map[string]api.Workspace
 	activeWorkspace string
+
+	// Dashboard management
+	widgets map[string]api.Widget
 }
 
 // Instance represents a WASM plugin instance.
@@ -103,6 +106,7 @@ func NewRuntime(
 		callFn:     call,
 		plugins:    make(map[string]*Instance),
 		workspaces: make(map[string]api.Workspace),
+		widgets:    make(map[string]api.Widget),
 	}
 	rt.loadWorkspaces()
 
@@ -852,11 +856,11 @@ func (r *Runtime) internalListWorkspaces(ctx context.Context, mod wazeroapi.Modu
 		return
 	}
 
-	// alloy_workspace_t is 44 bytes
-	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(workspaces)*44))
+	// alloy_workspace_t is 56 bytes
+	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(workspaces)*56))
 	basePtr := uint32(res[0])
 	for i, ws := range workspaces {
-		r.writeWorkspace(ctx, mod, basePtr+uint32(i*44), ws)
+		r.writeWorkspace(ctx, mod, basePtr+uint32(i*56), ws)
 	}
 
 	mod.Memory().WriteUint32Le(resultPtr, basePtr)
@@ -1245,6 +1249,10 @@ func (r *Runtime) internalRegisterWidget(ctx context.Context, mod wazeroapi.Modu
 
 	r.logger.Info("plugin registering dashboard widget", "plugin", mod.Name(), "widget", w.ID, "title", w.Title)
 
+	r.mu.Lock()
+	r.widgets[w.ID] = w
+	r.mu.Unlock()
+
 	// Broadast as event
 	wData, _ := json.Marshal(w)
 	payload, _ := json.Marshal(map[string]any{
@@ -1266,6 +1274,10 @@ func (r *Runtime) internalUnregisterWidget(ctx context.Context, mod wazeroapi.Mo
 	id := r.readStringFromArgs(mod, idPtr, idLen)
 	r.logger.Info("plugin unregistering dashboard widget", "plugin", mod.Name(), "widget", id)
 
+	r.mu.Lock()
+	delete(r.widgets, id)
+	r.mu.Unlock()
+
 	payload, _ := json.Marshal(map[string]any{
 		"topic": "dashboard:widget-unregistered",
 		"data":  map[string]string{"id": id},
@@ -1284,6 +1296,13 @@ func (r *Runtime) internalUnregisterWidget(ctx context.Context, mod wazeroapi.Mo
 func (r *Runtime) internalUpdateWidget(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, contentPtr, contentLen uint32) {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
 	content, _ := mod.Memory().Read(contentPtr, contentLen)
+
+	r.mu.Lock()
+	if w, ok := r.widgets[id]; ok {
+		w.Content = content
+		r.widgets[id] = w
+	}
+	r.mu.Unlock()
 
 	// Ensure the content is valid JSON (wrap in quotes if it's text)
 	// Actually, let's just marshal it as a byte slice to be safe.
@@ -1353,4 +1372,14 @@ func (r *Runtime) ListWorkspaces() []api.Workspace {
 		workspaces = append(workspaces, ws)
 	}
 	return workspaces
+}
+
+func (r *Runtime) ListWidgets() []api.Widget {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	widgets := make([]api.Widget, 0, len(r.widgets))
+	for _, w := range r.widgets {
+		widgets = append(widgets, w)
+	}
+	return widgets
 }

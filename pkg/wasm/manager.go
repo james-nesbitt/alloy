@@ -259,3 +259,7 @@ func (m *Manager) GetActiveWorkspace() (api.Workspace, bool) {
 func (m *Manager) ListWorkspaces() []api.Workspace {
 	return m.runtime.ListWorkspaces()
 }
+
+func (m *Manager) ListWidgets() []api.Widget {
+	return m.runtime.ListWidgets()
+}
