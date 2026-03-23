@@ -33,7 +33,7 @@ type guiState struct {
 	mode            int
 	isLeader        bool
 	breadcrumbs     []string
-	targets         []frontend.Registration
+	targets         []api.Registration
 	commandTree     *frontend.CommandNode
 	recency         map[string]int
 	activeProject   *frontend.Project
@@ -82,7 +82,7 @@ type aiQueryState struct {
 }
 
 type discoveryMsg struct {
-	Targets []frontend.Registration `json:"targets"`
+	Targets []api.Registration `json:"targets"`
 }
 
 func main() {

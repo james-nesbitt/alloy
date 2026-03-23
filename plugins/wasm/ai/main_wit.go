@@ -108,27 +108,12 @@ func emitDashboardUpdate() {
 		cfg = ProviderConfig{Type: ProviderMock, Model: "mock-model"}
 	}
 
-	content := []string{
-		fmt.Sprintf("Provider: %s", cfg.Type),
-		fmt.Sprintf("Model: %s", cfg.Model),
-	}
+	content := fmt.Sprintf("● Provider: %s\n● Model: %s", cfg.Type, cfg.Model)
 	if cfg.URL != "" {
-		content = append(content, fmt.Sprintf("URL: %s", cfg.URL))
+		content += fmt.Sprintf("\n● URL: %s", cfg.URL)
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{
-		"title":   "AI Assistant",
-		"content": content,
-		"status":  "Ready",
-		"actions": []string{"query", "summarize", "config:set"},
-	})
-
-	plugin.RouteMessage(AlloyMessage{
-		MsgType: "event",
-		Method:  "dashboard-update",
-		Sender:  "ai",
-		Payload: payload,
-	})
+	plugin.UpdateWidget("ai-status", []byte(content))
 }
 
 func main() {
@@ -170,6 +155,15 @@ func main() {
 		plugin.RegisterCapability(AlloyCapability{
 			Method:      "ai:query",
 			Description: "Query the AI assistant",
+		})
+
+		// Register a dashboard widget
+		plugin.RegisterWidget(AlloyWidget{
+			Id:                "ai-status",
+			Title:             "AI Assistant",
+			ContentType:       "text",
+			Content:           []byte("Initializing..."),
+			RefreshIntervalMs: 0,
 		})
 
 		// Initialize with default config if none exists

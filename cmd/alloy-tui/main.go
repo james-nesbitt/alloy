@@ -410,6 +410,55 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
 					time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
 			}
+		case "dashboard:widget-registered":
+			var w api.Widget
+			if err := json.Unmarshal(msg.Payload, &w); err == nil {
+				if m.DashboardTiles == nil {
+					m.DashboardTiles = make(map[string]frontend.DashboardTile)
+				}
+				m.DashboardTiles[w.ID] = frontend.DashboardTile{
+					ID:          w.ID,
+					Title:       w.Title,
+					ContentType: w.ContentType,
+					RawContent:  w.Content,
+					RefreshMS:   w.RefreshIntervalMs,
+					Timestamp:   time.Now().Unix(),
+					Content:     []string{string(w.Content)}, // Fallback
+				}
+				found := false
+				for _, id := range m.TileOrder {
+					if id == w.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.TileOrder = append(m.TileOrder, w.ID)
+				}
+				displayMsg = fmt.Sprintf("[%s] New dashboard widget: %s (%s)", time.Now().Format("15:04:05"), w.Title, msg.Sender)
+			}
+		case "dashboard:widget-updated":
+			widgetID, _ := msg.Metadata["widget_id"].(string)
+			if tile, ok := m.DashboardTiles[widgetID]; ok {
+				tile.RawContent = msg.Payload
+				tile.Content = []string{string(msg.Payload)}
+				tile.Timestamp = time.Now().Unix()
+				m.DashboardTiles[widgetID] = tile
+			}
+		case "dashboard:widget-unregistered":
+			var dat struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(msg.Payload, &dat); err == nil {
+				delete(m.DashboardTiles, dat.ID)
+				newOrder := []string{}
+				for _, id := range m.TileOrder {
+					if id != dat.ID {
+						newOrder = append(newOrder, id)
+					}
+				}
+				m.TileOrder = newOrder
+			}
 		}
 	}
 
@@ -1316,7 +1365,7 @@ func (m Model) dashboardView() string {
 			Width(m.width).
 			Height(m.height-3).
 			Align(lipgloss.Center, lipgloss.Center).
-			Render("No active dashboard tiles.\nPress ':' and type 'dashboard' to see providers.")
+			Render("No dynamic dashboard widgets registered.\nWaiting for WASM plugins to initialize...")
 	}
 
 	tileStyle := lipgloss.NewStyle().
@@ -1328,6 +1377,7 @@ func (m Model) dashboardView() string {
 		Height((m.height / 3) - 2)
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
+	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	var rows []string
@@ -1336,7 +1386,25 @@ func (m Model) dashboardView() string {
 	for i, id := range m.TileOrder {
 		tile := m.DashboardTiles[id]
 
-		content := strings.Join(tile.Content, "\n")
+		var content string
+		if tile.ContentType == "json" {
+			// Pretty print JSON
+			var obj interface{}
+			if err := json.Unmarshal(tile.RawContent, &obj); err == nil {
+				pretty, _ := json.MarshalIndent(obj, "", "  ")
+				content = string(pretty)
+			} else {
+				content = string(tile.RawContent)
+			}
+		} else {
+			// Default to text/markdown list
+			if len(tile.Content) > 0 && tile.Content[0] != "" {
+				content = strings.Join(tile.Content, "\n")
+			} else {
+				content = string(tile.RawContent)
+			}
+		}
+
 		footer := ""
 		if len(tile.Actions) > 0 {
 			footer = "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Actions: "+strings.Join(tile.Actions, ", "))
@@ -1346,7 +1414,7 @@ func (m Model) dashboardView() string {
 			lipgloss.JoinVertical(lipgloss.Left,
 				lipgloss.JoinHorizontal(lipgloss.Top, titleStyle.Render(tile.Title), " ", statusStyle.Render(" "+tile.Status)),
 				"",
-				content,
+				contentStyle.Render(content),
 				footer,
 			),
 		)
@@ -1613,31 +1681,8 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 		Mode:          ModeDashboard,
 		subscriptions: make(map[string]bool),
 		recency:       make(map[string]int),
-		DashboardTiles: map[string]frontend.DashboardTile{
-			"team": {
-				Title:   "Team Presence",
-				Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
-				Status:  "Active",
-				Actions: []string{"Invite", "Call"},
-			},
-			"ai": {
-				Title:   "AI Assistant",
-				Content: []string{"● Ollama (Running)", "○ Active Model: llama3", "Tasks: 0/1 completed"},
-				Actions: []string{"Query", "Summarize"},
-			},
-			"chat": {
-				Title:   "Team Chat",
-				Content: []string{"#general", "<James> Anyone online?", "<AI> Ready to help."},
-				Status:  "2 unread",
-				Actions: []string{"Open", "Clear"},
-			},
-			"project": {
-				Title:   "Current Project",
-				Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-uipolish", "Health: Stable"},
-				Status:  "OK",
-			},
-		},
-		TileOrder: []string{"ai", "chat", "project"},
+		DashboardTiles: make(map[string]frontend.DashboardTile),
+		TileOrder:      nil,
 	}
 }
 

@@ -164,6 +164,11 @@ func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, 
 	builder.NewFunctionBuilder().WithFunc(r.internalWriteBuffer).Export("write-buffer")
 	builder.NewFunctionBuilder().WithFunc(r.internalListBuffers).Export("list-buffers")
 
+	// Dashboard/Widget Management
+	builder.NewFunctionBuilder().WithFunc(r.internalRegisterWidget).Export("register-widget")
+	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterWidget).Export("unregister-widget")
+	builder.NewFunctionBuilder().WithFunc(r.internalUpdateWidget).Export("update-widget")
+
 	// Complex data types (save/load state) - currently placeholders
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
@@ -1209,4 +1214,77 @@ func (r *Runtime) internalListBuffers(ctx context.Context, mod wazeroapi.Module,
 	
 	mod.Memory().WriteUint32Le(resultPtr, basePtr)
 	mod.Memory().WriteUint32Le(resultPtr+4, uint32(len(ids)))
+}
+
+func (r *Runtime) internalRegisterWidget(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, titlePtr, titleLen, typePtr, typeLen, contentPtr, contentLen, interval uint32) {
+	w := api.Widget{
+		ID:                r.readStringFromArgs(mod, idPtr, idLen),
+		Title:             r.readStringFromArgs(mod, titlePtr, titleLen),
+		ContentType:       r.readStringFromArgs(mod, typePtr, typeLen),
+		RefreshIntervalMs: interval,
+	}
+	if contentLen > 0 {
+		w.Content, _ = mod.Memory().Read(contentPtr, contentLen)
+	}
+
+	r.logger.Info("plugin registering dashboard widget", "plugin", mod.Name(), "widget", w.ID, "title", w.Title)
+
+	// Broadast as event
+	wData, _ := json.Marshal(w)
+	payload, _ := json.Marshal(map[string]any{
+		"topic": "dashboard:widget-registered",
+		"data":  json.RawMessage(wData),
+	})
+	
+	r.routerFn(ctx, api.Message{
+		ID:      fmt.Sprintf("reg-widget-%d", time.Now().UnixNano()),
+		Type:    api.TypeEvent,
+		Sender:  mod.Name(),
+		Target:  "events",
+		Method:  "publish",
+		Payload: payload,
+	})
+}
+
+func (r *Runtime) internalUnregisterWidget(ctx context.Context, mod wazeroapi.Module, idPtr, idLen uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	r.logger.Info("plugin unregistering dashboard widget", "plugin", mod.Name(), "widget", id)
+
+	payload, _ := json.Marshal(map[string]any{
+		"topic": "dashboard:widget-unregistered",
+		"data":  map[string]string{"id": id},
+	})
+
+	r.routerFn(ctx, api.Message{
+		ID:     fmt.Sprintf("unreg-widget-%d", time.Now().UnixNano()),
+		Type:   api.TypeEvent,
+		Sender: mod.Name(),
+		Target: "events",
+		Method: "publish",
+		Payload: payload,
+	})
+}
+
+func (r *Runtime) internalUpdateWidget(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, contentPtr, contentLen uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	content, _ := mod.Memory().Read(contentPtr, contentLen)
+
+	// Ensure the content is valid JSON (wrap in quotes if it's text)
+	// Actually, let's just marshal it as a byte slice to be safe.
+	payload, _ := json.Marshal(map[string]any{
+		"topic": "dashboard:widget-updated",
+		"data":  content,
+	})
+
+	r.routerFn(ctx, api.Message{
+		ID:      fmt.Sprintf("upd-widget-%d", time.Now().UnixNano()),
+		Type:    api.TypeEvent,
+		Sender:  mod.Name(),
+		Target:  "events",
+		Method:  "publish",
+		Payload: payload,
+		Metadata: map[string]any{
+			"widget_id": id,
+		},
+	})
 }

@@ -1,12 +1,15 @@
 package frontend
 
 type DashboardTile struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Content   []string `json:"content"`
-	Status    string   `json:"status"`
-	Actions   []string `json:"actions"`
-	Timestamp int64    `json:"timestamp"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	ContentType string   `json:"content_type"` // "text", "markdown", "json", "ascii"
+	Content     []string `json:"content"`      // Backward compatibility or for text
+	RawContent  []byte   `json:"raw_content,omitempty"`
+	Status      string   `json:"status"`
+	Actions     []string `json:"actions"`
+	Timestamp   int64    `json:"timestamp"`
+	RefreshMS   uint32   `json:"refresh_ms"`
 }
 
 type WorkspaceConfig struct {

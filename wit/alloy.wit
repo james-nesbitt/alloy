@@ -39,6 +39,15 @@ world alloy {
             mime-type: string,
         }
         
+        // Widget structure for dynamic dashboard tiles
+        record widget {
+            id: string,
+            title: string,
+            content-type: string, // "markdown", "json", "ascii-art"
+            content: list<u8>,
+            refresh-interval-ms: u32, // 0 for manual/push, >0 for suggested polling
+        }
+        
         // Plugin status
         enum status {
             running,
@@ -100,5 +109,10 @@ world alloy {
         read-buffer: func(id: string) -> option<buffer>;
         write-buffer: func(id: string, content: list<u8>) -> bool;
         list-buffers: func() -> list<string>;
+
+        // Dashboard/Widget Management
+        register-widget: func(w: widget);
+        unregister-widget: func(id: string);
+        update-widget: func(id: string, content: list<u8>);
     }
 }

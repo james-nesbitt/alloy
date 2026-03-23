@@ -424,3 +424,18 @@ func (p *Plugin) WriteBuffer(id string, content []byte) bool {
 func (p *Plugin) ListBuffers() []string {
 	return guest.AlloyListBuffers()
 }
+
+// RegisterWidget registers a dashboard widget.
+func (p *Plugin) RegisterWidget(w guest.AlloyWidget) {
+	guest.AlloyRegisterWidget(w)
+}
+
+// UnregisterWidget unregisters a dashboard widget.
+func (p *Plugin) UnregisterWidget(id string) {
+	guest.AlloyUnregisterWidget(id)
+}
+
+// UpdateWidget updates a dashboard widget's content.
+func (p *Plugin) UpdateWidget(id string, content []byte) {
+	guest.AlloyUpdateWidget(id, content)
+}

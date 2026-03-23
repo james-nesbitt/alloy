@@ -89,10 +89,19 @@ func main() {
 			Description: "Directly write buffer content",
 		})
 
+		// Register a dashboard widget
+		plugin.RegisterWidget(AlloyWidget{
+			Id:                "buffer-summary",
+			Title:             "Active Buffers",
+			ContentType:       "text",
+			Content:           []byte("No active buffers"),
+			RefreshIntervalMs: 5000,
+		})
+
 		// Periodically clean up stale cursors
 		go func() {
 			for {
-				time.Sleep(30 * time.Second)
+				time.Sleep(10 * time.Second) // Faster update during dev
 				now := time.Now().Unix()
 				for buffID, b := range buffers {
 					if b.UserCursors != nil {
@@ -107,6 +116,15 @@ func main() {
 							notifyAll(buffID, "cursors_updated")
 						}
 					}
+				}
+				
+				// Update Dashboard Widget
+				if len(buffers) > 0 {
+					var lines []string
+					for _, b := range buffers {
+						lines = append(lines, fmt.Sprintf("● %s (%s) - %d bytes", b.Name, b.MimeType, len(b.Data)))
+					}
+					plugin.UpdateWidget("buffer-summary", []byte(strings.Join(lines, "\n")))
 				}
 			}
 		}()

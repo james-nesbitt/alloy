@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
@@ -46,6 +47,15 @@ func main() {
 			Target:  wit.Some("events"),
 			Method:  "subscribe",
 			Payload: subPayload,
+		})
+
+		// Register the dashboard widget
+		p.RegisterWidget(wit.AlloyWidget{
+			Id:                "team-presence",
+			Title:             "Team Presence",
+			ContentType:       "text",
+			Content:           []byte("Initializing..."),
+			RefreshIntervalMs: 0,
 		})
 		return nil
 	})
@@ -127,6 +137,10 @@ func updateDashboard(p *guest.Plugin) {
 		entries = append(entries, "No one else is online")
 	}
 
+	// Update the official dynamic widget
+	p.UpdateWidget("team-presence", []byte(strings.Join(entries, "\n")))
+
+	// (Legacy support remains for a bit)
 	tile := DashboardTile{
 		ID:      "team-presence",
 		Title:   "Team Presence",

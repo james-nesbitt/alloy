@@ -142,3 +142,12 @@ type Registration struct {
 	Status       string       `json:"status,omitempty"`
 	Capabilities []Capability `json:"capabilities,omitempty"`
 }
+
+// Widget represents a dynamic dashboard tile.
+type Widget struct {
+	ID                string `json:"id"`
+	Title             string `json:"title"`
+	ContentType       string `json:"content_type"` // "markdown", "json", "ascii-art"
+	Content           []byte `json:"content"`
+	RefreshIntervalMs uint32 `json:"refresh_interval_ms"`
+}
