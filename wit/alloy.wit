@@ -13,6 +13,15 @@ world alloy {
             timestamp: u64,
         }
         
+        // Workspace structure
+        record workspace {
+            id: string,
+            name: string,
+            path: string,
+            team-id: option<string>,
+            metadata: list<tuple<string, string>>,
+        }
+        
         // Capability description for plugin registration
         record capability {
             method: string,
@@ -64,5 +73,12 @@ world alloy {
         
         // Load plugin state
         load-state: func(state: list<u8>);
+
+        // Workspace management
+        get-active-workspace: func() -> option<workspace>;
+        set-active-workspace: func(id: string);
+        list-workspaces: func() -> list<workspace>;
+        register-workspace: func(ws: workspace);
+        unregister-workspace: func(id: string);
     }
 }

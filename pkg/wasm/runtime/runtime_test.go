@@ -245,3 +245,100 @@ func createTestWASMModule(t *testing.T) []byte {
 	t.Skip("WASM module creation not implemented")
 	return nil
 }
+
+func TestWorkspaceWIT(t *testing.T) {
+	// Create a temporary directory for test data
+	tempDir, err := os.MkdirTemp("", "workspace-wit-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Set up logger
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Set up storage
+	storagePath := filepath.Join(tempDir, "storage")
+	kv, err := storage.NewFileStateStore(storagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create message router
+	router := func(ctx context.Context, msg api.Message) {}
+
+	// Create call function
+	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
+		return api.Message{}, nil
+	}
+
+	// Create runtime
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(context.Background())
+
+	// Load the workspace-test plugin
+	pluginID := "workspace-test"
+	wasmPath := "../../../build/dist/usr/lib/alloy/plugins/workspace-test.wasm"
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("Failed to read workspace-test.wasm: %v (run 'just build-plugin workspace-test' first)", err)
+	}
+
+	caps := []api.Capability{
+		{Method: "test", Description: "Test workspace WIT calls"},
+	}
+
+	instance, err := rt.LoadPlugin(context.Background(), pluginID, wasmBytes, 0, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close(context.Background())
+
+	// Give it a moment to initialize
+	time.Sleep(500 * time.Millisecond)
+
+	// Call the test method
+	testMsg := api.Message{
+		ID:      "req-1",
+		Method:  "test",
+		Sender:  "tester",
+		Target:  pluginID,
+		Type:    api.TypeRequest,
+		Payload: json.RawMessage("{}"),
+	}
+
+	err = rt.RouteMessage(context.Background(), pluginID, testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := rt.GetResponse(context.Background(), pluginID, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result struct {
+		Status string
+		Active string
+		Count  int
+	}
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v. Payload: %s", err, string(resp.Payload))
+	}
+
+	if result.Status != "passed" {
+		t.Errorf("Expected status 'passed', got '%s'", result.Status)
+	}
+	if result.Active != "test-ws" {
+		t.Errorf("Expected active workspace 'test-ws', got '%s'", result.Active)
+	}
+	if result.Count != 1 {
+		t.Errorf("Expected 1 workspace, got %d", result.Count)
+	}
+
+	t.Log("Workspace WIT integration test passed!")
+}
+

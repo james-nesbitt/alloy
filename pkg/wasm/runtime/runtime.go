@@ -33,6 +33,10 @@ type Runtime struct {
 	plugins    map[string]*Instance
 	mu         sync.RWMutex
 	hostModule wazeroapi.Module
+
+	// Workspace management
+	workspaces      map[string]api.Workspace
+	activeWorkspace string
 }
 
 // Instance represents a WASM plugin instance.
@@ -91,14 +95,16 @@ func NewRuntime(
 	logger.Info("creating new WIT-based runtime (v2.9-async-compile)")
 
 	rt := &Runtime{
-		runtime:  r,
-		logger:   logger,
-		kv:       kv,
-		dataDir:  dataDir,
-		routerFn: router,
-		callFn:   call,
-		plugins:  make(map[string]*Instance),
+		runtime:    r,
+		logger:     logger,
+		kv:         kv,
+		dataDir:    dataDir,
+		routerFn:   router,
+		callFn:     call,
+		plugins:    make(map[string]*Instance),
+		workspaces: make(map[string]api.Workspace),
 	}
+	rt.loadWorkspaces()
 
 	// Instantiate the host module with functions
 	hostMod, err := rt.instantiateHostModule(ctx)
@@ -141,6 +147,12 @@ func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, 
 	builder.NewFunctionBuilder().WithFunc(r.internalStarted).Export("started")
 	builder.NewFunctionBuilder().WithFunc(r.internalGetNextMessage).Export("get-next-message")
 	builder.NewFunctionBuilder().WithFunc(r.internalSendResponse).Export("send-response")
+
+	builder.NewFunctionBuilder().WithFunc(r.internalGetActiveWorkspace).Export("get-active-workspace")
+	builder.NewFunctionBuilder().WithFunc(r.internalSetActiveWorkspace).Export("set-active-workspace")
+	builder.NewFunctionBuilder().WithFunc(r.internalListWorkspaces).Export("list-workspaces")
+	builder.NewFunctionBuilder().WithFunc(r.internalRegisterWorkspace).Export("register-workspace")
+	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterWorkspace).Export("unregister-workspace")
 
 	// Complex data types (save/load state) - currently placeholders
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
@@ -665,4 +677,198 @@ func (l *loggerWriter) Write(p []byte) (n int, err error) {
 		}
 	}
 	return len(p), nil
+}
+
+// Workspace WIT implementation
+
+func (r *Runtime) writeWorkspace(ctx context.Context, mod wazeroapi.Module, ptr uint32, ws api.Workspace) {
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		return
+	}
+
+	writeStr := func(fieldPtr uint32, s string) {
+		if s == "" {
+			mod.Memory().WriteUint32Le(fieldPtr, 0)
+			mod.Memory().WriteUint32Le(fieldPtr+4, 0)
+			return
+		}
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		mod.Memory().Write(uint32(res[0]), []byte(s))
+		mod.Memory().WriteUint32Le(fieldPtr, uint32(res[0]))
+		mod.Memory().WriteUint32Le(fieldPtr+4, uint32(len(s)))
+	}
+
+	writeStr(ptr, ws.ID)      // offset 0
+	writeStr(ptr+8, ws.Name)  // offset 8
+	writeStr(ptr+16, ws.Path) // offset 16
+
+	// offset 24: team_id (option<string>)
+	// option<string> is bool (4 bytes) + alloy_string_t (8 bytes) = 12 bytes
+	if ws.TeamID != "" {
+		mod.Memory().WriteUint32Le(ptr+24, 1) // some
+		writeStr(ptr+28, ws.TeamID)
+	} else {
+		mod.Memory().WriteUint32Le(ptr+24, 0) // none
+		mod.Memory().WriteUint32Le(ptr+28, 0)
+		mod.Memory().WriteUint32Le(ptr+32, 0)
+	}
+
+	// offset 36: metadata (list<tuple<string, string>>)
+	// list is ptr (4) + len (4) = 8 bytes
+	if len(ws.Metadata) > 0 {
+		metaData := make([]byte, len(ws.Metadata)*16)
+		i := 0
+		for k, v := range ws.Metadata {
+			// Write key
+			keyRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(k)))
+			mod.Memory().Write(uint32(keyRes[0]), []byte(k))
+			i32le.PutUint32(metaData[i*16:], uint32(keyRes[0]))
+			i32le.PutUint32(metaData[i*16+4:], uint32(len(k)))
+
+			// Write value
+			valRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(v)))
+			mod.Memory().Write(uint32(valRes[0]), []byte(v))
+			i32le.PutUint32(metaData[i*16+8:], uint32(valRes[0]))
+			i32le.PutUint32(metaData[i*16+12:], uint32(len(v)))
+			i++
+		}
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(metaData)))
+		mod.Memory().Write(uint32(res[0]), metaData)
+		mod.Memory().WriteUint32Le(ptr+36, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+40, uint32(len(ws.Metadata)))
+	} else {
+		mod.Memory().WriteUint32Le(ptr+36, 0)
+		mod.Memory().WriteUint32Le(ptr+40, 0)
+	}
+}
+
+func (r *Runtime) internalGetActiveWorkspace(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
+	r.mu.RLock()
+	ws, ok := r.workspaces[r.activeWorkspace]
+	r.mu.RUnlock()
+
+	if !ok {
+		mod.Memory().WriteUint32Le(resultPtr, 0) // is_some = false
+		return
+	}
+
+	mod.Memory().WriteUint32Le(resultPtr, 1)    // is_some = true
+	r.writeWorkspace(ctx, mod, resultPtr+4, ws) // Offset 4 because alloy_option_workspace_t has bool is_some at start
+}
+
+func (r *Runtime) internalSetActiveWorkspace(ctx context.Context, mod wazeroapi.Module, idPtr, idLen uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	r.mu.Lock()
+	r.activeWorkspace = id
+	r.mu.Unlock()
+	r.saveWorkspaces()
+}
+
+func (r *Runtime) internalListWorkspaces(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
+	r.mu.RLock()
+	workspaces := make([]api.Workspace, 0, len(r.workspaces))
+	for _, ws := range r.workspaces {
+		workspaces = append(workspaces, ws)
+	}
+	r.mu.RUnlock()
+
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		return
+	}
+
+	// alloy_workspace_t is 44 bytes
+	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(workspaces)*44))
+	basePtr := uint32(res[0])
+	for i, ws := range workspaces {
+		r.writeWorkspace(ctx, mod, basePtr+uint32(i*44), ws)
+	}
+
+	mod.Memory().WriteUint32Le(resultPtr, basePtr)
+	mod.Memory().WriteUint32Le(resultPtr+4, uint32(len(workspaces)))
+}
+
+func (r *Runtime) internalRegisterWorkspace(
+	ctx context.Context, mod wazeroapi.Module,
+	idPtr, idLen, namePtr, nameLen, pathPtr, pathLen uint32,
+	teamIDSet, teamIDPtr, teamIDLen uint32,
+	metadataPtr, metadataLen uint32,
+) {
+	ws := api.Workspace{
+		ID:   r.readStringFromArgs(mod, idPtr, idLen),
+		Name: r.readStringFromArgs(mod, namePtr, nameLen),
+		Path: r.readStringFromArgs(mod, pathPtr, pathLen),
+	}
+
+	if teamIDSet != 0 {
+		ws.TeamID = r.readStringFromArgs(mod, teamIDPtr, teamIDLen)
+	}
+
+	if metadataLen > 0 {
+		ws.Metadata = make(map[string]string)
+		// metadata is a list of tuples, each tuple is 16 bytes
+		metaData, _ := mod.Memory().Read(metadataPtr, metadataLen*16)
+		for i := uint32(0); i < metadataLen; i++ {
+			kPtr := i32le.Uint32(metaData[i*16:])
+			kLen := i32le.Uint32(metaData[i*16+4:])
+			vPtr := i32le.Uint32(metaData[i*16+8:])
+			vLen := i32le.Uint32(metaData[i*16+12:])
+
+			k := r.readStringFromArgs(mod, kPtr, kLen)
+			v := r.readStringFromArgs(mod, vPtr, vLen)
+			ws.Metadata[k] = v
+		}
+	}
+
+	r.mu.Lock()
+	r.workspaces[ws.ID] = ws
+	// If no active workspace, make this one active
+	if r.activeWorkspace == "" {
+		r.activeWorkspace = ws.ID
+	}
+	r.mu.Unlock()
+	r.saveWorkspaces()
+}
+
+func (r *Runtime) internalUnregisterWorkspace(ctx context.Context, mod wazeroapi.Module, idPtr, idLen uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	r.mu.Lock()
+	delete(r.workspaces, id)
+	if r.activeWorkspace == id {
+		r.activeWorkspace = ""
+		// Pick another one if available
+		for nextID := range r.workspaces {
+			r.activeWorkspace = nextID
+			break
+		}
+	}
+	r.mu.Unlock()
+	r.saveWorkspaces()
+}
+
+// Persistence for workspaces
+func (r *Runtime) saveWorkspaces() {
+	r.mu.RLock()
+	data, _ := json.Marshal(r.workspaces)
+	active := r.activeWorkspace
+	r.mu.RUnlock()
+
+	_ = r.kv.Set("system", "workspaces", data)
+	_ = r.kv.Set("system", "active_workspace", []byte(active))
+}
+
+func (r *Runtime) loadWorkspaces() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	data, err := r.kv.Get("system", "workspaces")
+	if err == nil && data != nil {
+		_ = json.Unmarshal(data, &r.workspaces)
+	}
+
+	active, err := r.kv.Get("system", "active_workspace")
+	if err == nil && active != nil {
+		r.activeWorkspace = string(active)
+	}
 }

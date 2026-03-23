@@ -125,3 +125,12 @@ type Capability struct {
 	Shortcut    string            `json:"shortcut,omitempty"`    // Keyboard shortcut/mnemonic (e.g., "b l")
 	Annotations map[string]string `json:"annotations,omitempty"` // Additional metadata (e.g., {"group": "buffers"})
 }
+
+// Workspace represents a project or team-level context.
+type Workspace struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Path     string            `json:"path"`
+	TeamID   string            `json:"team_id,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
