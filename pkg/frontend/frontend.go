@@ -127,6 +127,18 @@ func (c *Client) Messages() []api.Message {
 	return res
 }
 
+func (c *Client) Name() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.name
+}
+
+func (c *Client) Actor() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.actor
+}
+
 func (c *Client) Close() error {
 	return c.ipc.Close()
 }

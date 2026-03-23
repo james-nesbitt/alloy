@@ -35,6 +35,14 @@ type Project struct {
 	Description string   `json:"description,omitempty"`
 }
 
+type Presence struct {
+	User      string `json:"user"`
+	Status    string `json:"status"`
+	LastSeen  int64  `json:"last_seen"`
+	Client    string `json:"client"`
+	ProjectID string `json:"project_id,omitempty"`
+}
+
 type discoveryMsg struct {
 	Targets []frontend.Registration `json:"targets"`
 }
@@ -227,6 +235,21 @@ func run(w *app.Window, client *frontend.Client) error {
 								}
 							}()
 						}
+
+						// Heartbeat
+						pID := ""
+						if gui.activeProject != nil { pID = gui.activeProject.ID }
+						payload, _ := json.Marshal(map[string]any{
+							"topic": "presence:heartbeat",
+							"data": Presence{
+								User:      client.Actor(),
+								Status:    "online",
+								Client:    "gui",
+								LastSeen:  time.Now().Unix(),
+								ProjectID: pID,
+							},
+						})
+						go client.Send(context.Background(), "events", "publish", payload)
 					}
 					w.Invalidate()
 				}

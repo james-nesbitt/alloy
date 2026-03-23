@@ -47,6 +47,12 @@
       "type": "wasm",
       "path": "tasks.wasm",
       "load_time": "lazy"
+    },
+    {
+      "id": "team-presence",
+      "type": "wasm",
+      "path": "team-presence.wasm",
+      "load_time": "boot"
     }
   ]
 }

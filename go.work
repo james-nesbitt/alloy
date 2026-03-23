@@ -12,4 +12,5 @@ use (
 	./plugins/wasm/project
 	./plugins/wasm/secrets
 	./plugins/wasm/tasks
+	./plugins/wasm/team-presence
 )

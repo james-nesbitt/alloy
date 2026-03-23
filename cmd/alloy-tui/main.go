@@ -106,6 +106,14 @@ type Project struct {
 	Layout      WorkspaceConfig `json:"layout,omitempty"`
 }
 
+type Presence struct {
+	User      string `json:"user"`
+	Status    string `json:"status"`
+	LastSeen  int64  `json:"last_seen"`
+	Client    string `json:"client"`
+	ProjectID string `json:"project_id,omitempty"`
+}
+
 type discoveryMsg struct {
 	Targets []frontend.Registration `json:"targets"`
 }
@@ -441,10 +449,30 @@ func (m model) sendPresenceHeartbeat() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		
+		// Legacy chat update
 		payload, _ := json.Marshal(map[string]string{
 			"status": "online",
 		})
 		_, _ = m.client.Send(ctx, "chat", "presence:update", payload)
+
+		// New team-presence event
+		presence := Presence{
+			User:    m.client.Actor(),
+			Status:  "online",
+			Client:  "tui",
+			LastSeen: time.Now().Unix(),
+		}
+		if m.activeProject != nil {
+			presence.ProjectID = m.activeProject.ID
+		}
+		
+		eventData, _ := json.Marshal(map[string]any{
+			"topic": "presence:heartbeat",
+			"data":  presence,
+		})
+		_, _ = m.client.Send(ctx, "events", "publish", eventData)
+
 		return nil
 	}
 }
