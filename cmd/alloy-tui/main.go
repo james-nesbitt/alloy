@@ -676,7 +676,8 @@ func (m Model) fetchBufferContent(id string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		payload, _ := json.Marshal(map[string]string{"id": id})
-		resp, err := m.client.Send(ctx, "buffer", "read", payload)
+		// Use capability-based routing
+		resp, err := m.client.Send(ctx, "buffer:read", "read", payload)
 		if err != nil {
 			return errMsg(err)
 		}
@@ -695,7 +696,8 @@ func (m Model) sendBufferUpdate(id string, content string, force bool) tea.Cmd {
 			"base_version": m.localBufferVersion,
 			"force":        force,
 		})
-		resp, err := m.client.Send(ctx, "buffer", "write", payload)
+		// Use capability-based routing
+		resp, err := m.client.Send(ctx, "buffer:write", "write", payload)
 		if err != nil {
 			return errMsg(err)
 		}
@@ -723,7 +725,8 @@ func (m Model) sendCursorUpdate(id string, row, col int) tea.Cmd {
 			"row": row,
 			"col": col,
 		})
-		_, _ = m.client.Send(ctx, "buffer", "update_cursor", payload)
+		// Capability-based routing
+		_, _ = m.client.Send(ctx, "buffer:update-cursor", "update_cursor", payload)
 		return nil
 	}
 }
@@ -733,7 +736,8 @@ func (m Model) subscribe(topic string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		payload, _ := json.Marshal(map[string]string{"topic": topic})
-		_, _ = m.client.Send(ctx, "events", "subscribe", payload)
+		// Capability-based routing
+		_, _ = m.client.Send(ctx, "events:subscribe", "subscribe", payload)
 		return nil
 	}
 }
@@ -743,16 +747,19 @@ func (m Model) sendChatMessage(content string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
+		var target string
 		var method string
 		var payload []byte
 
 		if strings.HasPrefix(m.ActiveChannel, "dm:") {
+			target = "chat:direct:send"
 			method = "direct:send"
 			payload, _ = json.Marshal(map[string]string{
 				"to":      m.ActiveChannel[3:],
 				"content": content,
 			})
 		} else {
+			target = "chat:send"
 			method = "send"
 			payload, _ = json.Marshal(map[string]string{
 				"channel": m.ActiveChannel,
@@ -760,7 +767,8 @@ func (m Model) sendChatMessage(content string) tea.Cmd {
 			})
 		}
 
-		_, err := m.client.Send(ctx, "chat", method, payload)
+		// Capability-based routing
+		_, err := m.client.Send(ctx, target, method, payload)
 		if err != nil {
 			return errMsg(err)
 		}
@@ -773,13 +781,13 @@ func (m Model) sendPresenceHeartbeat() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		// Legacy chat update
+		// Legacy chat update - Capability-based
 		payload, _ := json.Marshal(map[string]string{
 			"status": "online",
 		})
-		_, _ = m.client.Send(ctx, "chat", "presence:update", payload)
+		_, _ = m.client.Send(ctx, "chat:presence:update", "presence:update", payload)
 
-		// New team-presence event
+		// New team-presence event - Capability-based
 		presence := frontend.Presence{
 			User:     m.client.Actor(),
 			Status:   "online",
@@ -794,7 +802,7 @@ func (m Model) sendPresenceHeartbeat() tea.Cmd {
 			"topic": "presence:heartbeat",
 			"data":  presence,
 		})
-		_, _ = m.client.Send(ctx, "events", "publish", eventData)
+		_, _ = m.client.Send(ctx, "events:publish", "publish", eventData)
 
 		return nil
 	}
@@ -804,7 +812,7 @@ func (m Model) fetchActiveProject() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		resp, _ := m.client.Send(ctx, "project", "active", nil)
+		resp, _ := m.client.Send(ctx, "project:get_active", "get_active", nil)
 		if resp.ID != "" {
 			resp.Method = "active-resp"
 			return messageMsg(resp)
@@ -817,7 +825,7 @@ func (m Model) fetchProjects() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		resp, _ := m.client.Send(ctx, "project", "list", nil)
+		resp, _ := m.client.Send(ctx, "project:list", "list", nil)
 		if resp.ID != "" {
 			resp.Method = "list-resp"
 			return messageMsg(resp)
@@ -830,7 +838,7 @@ func (m Model) fetchWorkspaces() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		resp, _ := m.client.Send(ctx, "project", "list-workspaces", nil)
+		resp, _ := m.client.Send(ctx, "project:list-workspaces", "list-workspaces", nil)
 		if resp.ID != "" {
 			resp.Method = "list-workspaces-resp"
 			return messageMsg(resp)
@@ -1036,7 +1044,8 @@ func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
-					resp, _ := m.client.Send(ctx, "project", "create", payload)
+					// Capability-based
+					resp, _ := m.client.Send(ctx, "project:create", "create", payload)
 					return messageMsg(resp)
 				}
 
@@ -1052,7 +1061,8 @@ func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
-					resp, _ := m.client.Send(ctx, "ai", "provider:set", payload)
+					// Capability-based
+					resp, _ := m.client.Send(ctx, "ai:provider:set", "provider:set", payload)
 					return messageMsg(resp)
 				}
 
@@ -1064,7 +1074,8 @@ func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
-					resp, _ := m.client.Send(ctx, "ai", "query", payload)
+					// Capability-based
+					resp, _ := m.client.Send(ctx, "ai:query", "query", payload)
 					return messageMsg(resp)
 				}
 			}

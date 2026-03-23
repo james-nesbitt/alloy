@@ -138,28 +138,36 @@ func main() {
 			"Alloy Team",
 		).
 		WithTags("project", "management", "organization").
-		WithCapability("create", "Create a new project").
-		WithCapability("list", "List all projects").WithShortcut("p l").
-		WithCapability("get_active", "Get current active project").
-		WithCapability("add:buffer", "Add a buffer to a project").
-		WithCapability("add:channel", "Add a chat channel to a project").
-		WithCapability("import", "Import a workspace from a path").
-		WithCapability("open", "Open a project").WithShortcut("p o").
-		WithCapability("save", "Save projects to durable store").
-		WithCapability("discover", "Automatically detect and register workspaces").WithShortcut("p d").
-		WithCapability("list-workspaces", "List all workspaces").WithShortcut("p p").
-		WithCapability("set-workspace", "Switch active workspace")
+		WithCapability("project:create", "Create a new project").
+		WithCapability("project:list", "List all projects").WithShortcut("p l").
+		WithCapability("project:get_active", "Get current active project").
+		WithCapability("project:add-buffer", "Add a buffer to a project").
+		WithCapability("project:add-channel", "Add a chat channel to a project").
+		WithCapability("project:import", "Import a workspace from a path").
+		WithCapability("project:open", "Open a project").WithShortcut("p o").
+		WithCapability("project:save", "Save projects to durable store").
+		WithCapability("project:discover", "Automatically detect and register workspaces").WithShortcut("p d").
+		WithCapability("project:list-workspaces", "List all workspaces").WithShortcut("p p").
+		WithCapability("project:set-workspace", "Switch active workspace")
 
 	// Set up message handlers
+	plugin.Handle("project:create", handleCreate)
+	plugin.Handle("project:get_active", handleActive)
+	plugin.Handle("project:list", handleList)
+	plugin.Handle("project:add-buffer", handleAddBuffer)
+	plugin.Handle("project:add-channel", handleAddChannel)
+	plugin.Handle("project:open", handleOpen)
+	plugin.Handle("project:save", handleSave)
+	plugin.Handle("project:import", handleImport)
+	plugin.Handle("project:discover", handleDiscover)
+	plugin.Handle("project:list-workspaces", handleListWorkspaces)
+	plugin.Handle("project:set-workspace", handleSetWorkspace)
+
+	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
 	plugin.Handle("get_active", handleActive)
 	plugin.Handle("list", handleList)
-	plugin.Handle("add:buffer", handleAddBuffer)
-	plugin.Handle("add:channel", handleAddChannel)
 	plugin.Handle("open", handleOpen)
-	plugin.Handle("save", handleSave)
-	plugin.Handle("import", handleImport)
-	plugin.Handle("discover", handleDiscover)
 	plugin.Handle("list-workspaces", handleListWorkspaces)
 	plugin.Handle("set-workspace", handleSetWorkspace)
 

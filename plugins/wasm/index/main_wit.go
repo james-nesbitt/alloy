@@ -47,17 +47,22 @@ func main() {
 			"Alloy Team",
 		).
 		WithTags("search", "rag", "knowledge", "indexing").
-		WithCapability("ingest", "Add a document to the index").WithShortcut("i i").
-		WithCapability("ingest-buffer", "Ingest a buffer's content").WithShortcut("i b").
-		WithCapability("search", "Search the knowledge graph").WithShortcut("i s").
-		WithCapability("clear", "Wipe the current index").
-		WithCapability("status", "Get indexer status")
+		WithCapability("knowledge:ingest", "Add a document to the index").WithShortcut("i i").
+		WithCapability("knowledge:ingest-buffer", "Ingest a buffer's content").WithShortcut("i b").
+		WithCapability("knowledge:search", "Search the knowledge graph").WithShortcut("i s").
+		WithCapability("knowledge:clear", "Wipe the current index").
+		WithCapability("knowledge:status", "Get indexer status")
 
+	plugin.Handle("knowledge:ingest", handleIngest)
+	plugin.Handle("knowledge:ingest-buffer", handleIngestBuffer)
+	plugin.Handle("knowledge:search", handleSearch)
+	plugin.Handle("knowledge:clear", handleClear)
+	plugin.Handle("knowledge:status", handleStatus)
+
+	// Backward compatibility handlers
 	plugin.Handle("ingest", handleIngest)
 	plugin.Handle("ingest-buffer", handleIngestBuffer)
 	plugin.Handle("search", handleSearch)
-	plugin.Handle("clear", handleClear)
-	plugin.Handle("status", handleStatus)
 
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Knowledge Graph Indexer initializing")

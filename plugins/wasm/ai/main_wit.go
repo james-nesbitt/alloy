@@ -126,26 +126,34 @@ func main() {
 			"Alloy Team",
 		).
 		WithTags("ai", "llm", "chatbot", "automation").
-		WithCapability("config:set", "Configure AI provider").
-		WithCapability("config:get", "Get current configuration").
-		WithCapability("provider:set", "Switch AI provider").WithShortcut("a p").
-		WithCapability("query", "Query the AI directly").WithShortcut("a q").
-		WithCapability("summarize", "Summarize provided text").WithShortcut("a s").
-		WithCapability("summarize-buffer", "Summarize the content of a specific buffer").WithShortcut("a b").
-		WithCapability("dashboard-update", "Internal dashboard update")
+		WithCapability("ai:config:set", "Configure AI provider").
+		WithCapability("ai:config:get", "Get current configuration").
+		WithCapability("ai:provider:set", "Switch AI provider").WithShortcut("a p").
+		WithCapability("ai:query", "Query the AI directly").WithShortcut("a q").
+		WithCapability("ai:summarize", "Summarize provided text").WithShortcut("a s").
+		WithCapability("ai:summarize-buffer", "Summarize the content of a specific buffer").WithShortcut("a b").
+		WithCapability("ai:dashboard-update", "Internal dashboard update")
 
 	// Set up message handlers
+	plugin.Handle("ai:config:set", handleConfigSet)
+	plugin.Handle("ai:config:get", handleConfigGet)
+	plugin.Handle("ai:provider:set", handleProviderSet)
+	plugin.Handle("ai:query", handleQuery)
+	plugin.Handle("ai:summarize", handleSummarize)
+	plugin.Handle("ai:summarize-buffer", handleSummarizeBuffer)
+	plugin.Handle("ai:dashboard-update", func(msg AlloyMessage) AlloyMessage {
+		emitDashboardUpdate()
+		return AlloyMessage{}
+	})
+	plugin.Handle("chat:message", handleChatMessageEvent)
+
+	// Backward compatibility handlers
 	plugin.Handle("config:set", handleConfigSet)
 	plugin.Handle("config:get", handleConfigGet)
 	plugin.Handle("provider:set", handleProviderSet)
 	plugin.Handle("query", handleQuery)
 	plugin.Handle("summarize", handleSummarize)
 	plugin.Handle("summarize-buffer", handleSummarizeBuffer)
-	plugin.Handle("chat:message", handleChatMessageEvent)
-	plugin.Handle("dashboard-update", func(msg AlloyMessage) AlloyMessage {
-		emitDashboardUpdate()
-		return AlloyMessage{}
-	})
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -182,13 +190,13 @@ func main() {
 
 	// Set up event handling
 	plugin.OnStart(func() {
-		// Subscribe to chat events
+		// Subscribe to chat events - Decoupled: call by capability
 		subPayload, _ := json.Marshal(map[string]string{"topic": "chat:message"})
 		plugin.RouteMessage(AlloyMessage{
 			MsgType: "request",
-			Method:  "subscribe",
+			Method:  "events:subscribe", // Use capability-based method
 			Sender:  "ai",
-			Target:  Some("events"),
+			Target:  Some("events:subscribe"), // Route to capability instead of hard-coded "events"
 			Payload: subPayload,
 		})
 	})
@@ -368,16 +376,16 @@ func handleSummarize(msg AlloyMessage) AlloyMessage {
 
 // discoverNativeLLM discovers native LLM providers.
 func discoverNativeLLM() string {
-	// Create discovery message
+	// Create discovery message - Decoupled: call by capability
 	discoverMsg := AlloyMessage{
 		Id:      "ai-discover-" + fmt.Sprint(time.Now().UnixNano()),
 		MsgType: "request",
-		Method:  "discover",
+		Method:  "service:discovery", // New method name
 		Sender:  "ai",
-		Target:  Some("command-manager"),
+		Target:  Some("service:discovery"), // Route to capability instead of hard-coded "command-manager"
 	}
 
-	// Call the command manager
+	// Call the capability provider
 	resp := plugin.Call(discoverMsg)
 	if resp.Id == "" {
 		return ""
@@ -593,16 +601,16 @@ func getProjectContext() string {
 
 // getActiveProject gets the active project.
 func getActiveProject() (*ProjectInfo, error) {
-	// Create message to get active project
+	// Create message to get active project - Decoupled: call by capability
 	msg := AlloyMessage{
 		Id:      "get-active-project-" + fmt.Sprint(time.Now().UnixNano()),
 		MsgType: "request",
-		Method:  "get_active",
+		Method:  "project:get_active", // Method to match the capability name
 		Sender:  "ai",
-		Target:  Some("project"),
+		Target:  Some("project:get_active"), // Route to capability instead of hard-coded "project"
 	}
 
-	// Call the project manager
+	// Call the capability provider
 	resp := plugin.Call(msg)
 	if resp.Id == "" {
 		return nil, fmt.Errorf("failed_to_get_project")
@@ -656,13 +664,13 @@ func handleChatMessageEvent(msg AlloyMessage) AlloyMessage {
 
 // sendChatResponse sends a response to a chat channel.
 func sendChatResponse(channel, response string) {
-	// Create message to send chat response
+	// Create message to send chat response - Decoupled: call by capability
 	msg := AlloyMessage{
 		Id:      "ai-response-" + fmt.Sprint(time.Now().UnixNano()),
 		MsgType: "event",
-		Method:  "send",
+		Method:  "chat:send", // Method to match the capability
 		Sender:  "ai",
-		Target:  Some("chat"),
+		Target:  Some("chat:send"), // Route to capability instead of hard-coded "chat"
 		Payload: json.RawMessage(fmt.Sprintf(`{"channel":"%s","content":"%s"}`, channel, response)),
 	}
 
@@ -707,13 +715,13 @@ func getKnowledgeContext(query string) string {
 		"limit": 3,
 	})
 
-	// Create call message
+	// Create call message - Decoupled: call by capability
 	msg := AlloyMessage{
 		Id:      "ai-search-" + fmt.Sprint(time.Now().UnixNano()),
 		MsgType: "request",
-		Method:  "search",
+		Method:  "knowledge:search", // New method name to match capability
 		Sender:  "ai",
-		Target:  Some("index"),
+		Target:  Some("knowledge:search"), // Use the capability as target
 		Payload: searchReq,
 	}
 

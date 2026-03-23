@@ -33,6 +33,9 @@ func (e *EventManager) ID() string { return "events" }
 
 func (e *EventManager) Capabilities() []api.Capability {
 	return []api.Capability{
+		{Method: "events:subscribe", Description: "Subscribe to an event topic"},
+		{Method: "events:publish", Description: "Publish an event to a topic"},
+		// Backward compatibility
 		{Method: "subscribe", Description: "Subscribe to an event topic"},
 		{Method: "publish", Description: "Publish an event to a topic"},
 	}
@@ -40,7 +43,7 @@ func (e *EventManager) Capabilities() []api.Capability {
 
 func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	switch msg.Method {
-	case "subscribe":
+	case "subscribe", "events:subscribe":
 		var req struct {
 			Topic string `json:"topic"`
 		}
@@ -59,7 +62,7 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 			Payload:   []byte(`{"status":"subscribed"}`),
 			Timestamp: time.Now().Unix(),
 		}, nil
-	case "publish":
+	case "publish", "events:publish":
 		var req struct {
 			Topic string          `json:"topic"`
 			Data  json.RawMessage `json:"data"`

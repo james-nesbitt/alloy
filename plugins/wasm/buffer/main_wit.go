@@ -60,28 +60,37 @@ func main() {
 			"Alloy Team",
 		).
 		WithTags("buffer", "data", "storage").
-		WithCapability("create", "Create a new buffer").WithShortcut("b n").
-		WithCapability("list", "List all buffers").WithShortcut("b l").
-		WithCapability("read", "Read buffer content").WithShortcut("b r").
-		WithCapability("write", "Write buffer content").WithShortcut("b w").
-		WithCapability("delete", "Delete a buffer").WithShortcut("b d").
-		WithCapability("unload", "Remove a buffer from memory only").
-		WithCapability("save", "Save buffer to persistent storage").WithShortcut("b s").
-		WithCapability("load", "Load buffers from persistent storage").WithShortcut("b o")
+		WithCapability("buffer:create", "Create a new buffer").WithShortcut("b n").
+		WithCapability("buffer:list", "List all buffers").WithShortcut("b l").
+		WithCapability("buffer:read", "Read buffer content").WithShortcut("b r").
+		WithCapability("buffer:write", "Write buffer content").WithShortcut("b w").
+		WithCapability("buffer:delete", "Delete a buffer").WithShortcut("b d").
+		WithCapability("buffer:unload", "Remove a buffer from memory only").
+		WithCapability("buffer:save", "Save buffer to persistent storage").WithShortcut("b s").
+		WithCapability("buffer:load", "Load buffers from persistent storage").WithShortcut("b o").
+		WithCapability("buffer:update-cursor", "Update user cursor position")
 
 	// Set up message handlers
+	plugin.Handle("buffer:create", handleCreate)
+	plugin.Handle("buffer:read", handleRead)
+	plugin.Handle("buffer:write", handleWrite)
+	plugin.Handle("buffer:append", handleAppend)
+	plugin.Handle("buffer:list", handleList)
+	plugin.Handle("buffer:delete", handleDelete)
+	plugin.Handle("buffer:unload", handleUnload)
+	plugin.Handle("buffer:subscribe", handleSubscribe)
+	plugin.Handle("buffer:clear", handleClear)
+	plugin.Handle("buffer:save", handleSave)
+	plugin.Handle("buffer:load", handleLoad)
+	plugin.Handle("buffer:set_metadata", handleSetMetadata)
+	plugin.Handle("buffer:update_cursor", handleUpdateCursor)
+
+	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
 	plugin.Handle("read", handleRead)
 	plugin.Handle("write", handleWrite)
 	plugin.Handle("append", handleAppend)
 	plugin.Handle("list", handleList)
-	plugin.Handle("delete", handleDelete)
-	plugin.Handle("unload", handleUnload)
-	plugin.Handle("subscribe", handleSubscribe)
-	plugin.Handle("clear", handleClear)
-	plugin.Handle("save", handleSave)
-	plugin.Handle("load", handleLoad)
-	plugin.Handle("set_metadata", handleSetMetadata)
 	plugin.Handle("update_cursor", handleUpdateCursor)
 
 	// Set up initialization
@@ -90,11 +99,11 @@ func main() {
 		
 		// Register in the component registry
 		plugin.RegisterCapability(AlloyCapability{
-			Method:      "buffer-manager:read",
+			Method:      "buffer:read",
 			Description: "Directly read buffer content",
 		})
 		plugin.RegisterCapability(AlloyCapability{
-			Method:      "buffer-manager:write",
+			Method:      "buffer:write",
 			Description: "Directly write buffer content",
 		})
 

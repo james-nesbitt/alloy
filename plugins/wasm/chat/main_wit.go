@@ -47,14 +47,22 @@ func main() {
 			"Alloy Team",
 		).
 		WithTags("chat", "messaging", "communication").
-		WithCapability("send", "Send a message to a channel").
-		WithCapability("history", "Retrieve chat history for a channel").
-		WithCapability("direct:send", "Send a direct message").
-		WithCapability("direct:history", "Get direct message history").
-		WithCapability("presence:update", "Update user presence status").
-		WithCapability("presence:list", "List online users")
+		WithCapability("chat:send", "Send a message to a channel").
+		WithCapability("chat:history", "Retrieve chat history for a channel").
+		WithCapability("chat:direct:send", "Send a direct message").
+		WithCapability("chat:direct:history", "Get direct message history").
+		WithCapability("chat:presence:update", "Update user presence status").
+		WithCapability("chat:presence:list", "List online users")
 
 	// Set up message handlers
+	plugin.Handle("chat:send", handleSendMessage)
+	plugin.Handle("chat:direct:send", handleDirectSend)
+	plugin.Handle("chat:presence:update", handlePresenceUpdate)
+	plugin.Handle("chat:presence:list", handlePresenceList)
+	plugin.Handle("chat:direct:history", handleDirectHistory)
+	plugin.Handle("chat:history", handleHistory)
+
+	// Backward compatibility handlers
 	plugin.Handle("send", handleSendMessage)
 	plugin.Handle("direct:send", handleDirectSend)
 	plugin.Handle("presence:update", handlePresenceUpdate)

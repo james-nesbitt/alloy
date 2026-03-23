@@ -35,6 +35,9 @@ type WITKernel struct {
 	// Internal core services
 	events   api.Plugin
 	commands api.Plugin
+
+	// Capability mapping
+	capabilityMap map[string]string // capability name -> plugin ID
 }
 
 // NewWITKernel creates a new WIT-based kernel.
@@ -54,6 +57,7 @@ func NewWITKernel(
 		stopCh:    make(chan struct{}),
 		storage:   storage,
 		dataDir:   dataDir,
+		capabilityMap: make(map[string]string),
 	}
 
 	// Create the WASM manager
@@ -173,7 +177,19 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 	ch, isFrontend := k.frontends[msg.Target]
 	plugin, isPlugin := k.plugins[msg.Target]
 	_, isLazy := k.metadata[msg.Target]
+	capabilityTarget, isCapability := k.capabilityMap[msg.Target]
 	k.mu.RUnlock()
+
+	if isCapability && !isPlugin && !isFrontend {
+		k.logger.Debug("resolved capability to target", "capability", msg.Target, "target", capabilityTarget)
+		msg.Target = capabilityTarget
+		// Re-fetch target after resolution
+		k.mu.RLock()
+		ch, isFrontend = k.frontends[msg.Target]
+		plugin, isPlugin = k.plugins[msg.Target]
+		_, isLazy = k.metadata[msg.Target]
+		k.mu.RUnlock()
+	}
 
 	if isFrontend {
 		select {
@@ -240,11 +256,31 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 	}
 
 	k.logger.Warn("message target not found", "target", msg.Target)
+
+	// Return error response if this is a request
+	if msg.Type == api.TypeRequest || msg.Type == "" {
+		resp := api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "system",
+			Target:    msg.Sender,
+			Payload:   []byte(fmt.Sprintf(`{"error":"target service or capability not found: %s"}`, msg.Target)),
+			Timestamp: time.Now().Unix(),
+		}
+		k.RouteMessage(ctx, resp)
+	}
 }
 
 // handleMessageSync handles a synchronous message call.
 func (k *WITKernel) handleMessageSync(ctx context.Context, msg api.Message) (api.Message, error) {
 	k.mu.RLock()
+	// Attempt capability resolution first
+	if capTarget, ok := k.capabilityMap[msg.Target]; ok {
+		if _, exists := k.plugins[msg.Target]; !exists {
+			msg.Target = capTarget
+		}
+	}
+
 	plugin, ok := k.plugins[msg.Target]
 	k.mu.RUnlock()
 
@@ -320,6 +356,12 @@ func (k *WITKernel) RegisterPluginLoader(pluginID string, loader api.PluginLoade
 	k.mu.Lock()
 	k.loaders[pluginID] = loader
 	k.metadata[pluginID] = metadata
+	
+	for _, cap := range metadata.Capabilities {
+		if cap.Method != "" {
+			k.capabilityMap[cap.Method] = pluginID
+		}
+	}
 	k.mu.Unlock()
 
 	// Broadcast registration for lazy loader
@@ -362,6 +404,13 @@ func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 	k.metadata[id] = api.PluginMetadata{
 		ID:           id,
 		Capabilities: plugin.Capabilities(),
+	}
+
+	// Update capability map
+	for _, cap := range plugin.Capabilities() {
+		if cap.Method != "" {
+			k.capabilityMap[cap.Method] = id
+		}
 	}
 	k.mu.Unlock()
 
