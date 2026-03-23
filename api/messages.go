@@ -132,7 +132,17 @@ type Workspace struct {
 	Name     string            `json:"name"`
 	Path     string            `json:"path"`
 	TeamID   string            `json:"team_id,omitempty"`
+	Layout   string            `json:"layout,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// Presence represents a user's status in the system.
+type Presence struct {
+	User      string `json:"user"`
+	Status    string `json:"status"`
+	LastSeen  int64  `json:"last_seen"`
+	Client    string `json:"client"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // Registration defines a component's presence in the system.
@@ -150,4 +160,22 @@ type Widget struct {
 	ContentType       string `json:"content_type"` // "markdown", "json", "ascii-art"
 	Content           []byte `json:"content"`
 	RefreshIntervalMs uint32 `json:"refresh_interval_ms"`
+}
+
+// WorkspaceConfig defines the visual and operational layout for a project.
+type WorkspaceConfig struct {
+	DefaultMode string `json:"default_mode"`
+	Layout      []struct {
+		Type     string  `json:"type"` // "dashboard", "chat", "editor", "status"
+		WidthPct float64 `json:"width_pct"`
+	} `json:"layout"`
+}
+
+// Project represents a logical unit of work.
+type Project struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Layout      WorkspaceConfig `json:"layout,omitempty"`
+	Metadata    map[string]any  `json:"metadata,omitempty"`
 }

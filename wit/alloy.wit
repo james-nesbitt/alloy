@@ -19,6 +19,7 @@ world alloy {
             name: string,
             path: string,
             team-id: option<string>,
+            layout: option<string>, // JSON workspace configuration
             metadata: list<tuple<string, string>>,
         }
         

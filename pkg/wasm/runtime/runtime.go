@@ -767,7 +767,7 @@ func (r *Runtime) writeWorkspace(ctx context.Context, mod wazeroapi.Module, ptr 
 	writeStr(ptr+16, ws.Path) // offset 16
 
 	// offset 24: team_id (option<string>)
-	// option<string> is bool (4 bytes) + alloy_string_t (8 bytes) = 12 bytes
+	// option<string> is bool (4) + alloy_string_t (8) = 12 bytes
 	if ws.TeamID != "" {
 		mod.Memory().WriteUint32Le(ptr+24, 1) // some
 		writeStr(ptr+28, ws.TeamID)
@@ -777,12 +777,23 @@ func (r *Runtime) writeWorkspace(ctx context.Context, mod wazeroapi.Module, ptr 
 		mod.Memory().WriteUint32Le(ptr+32, 0)
 	}
 
-	// offset 36: metadata (list<tuple<string, string>>)
+	// offset 36: layout (option<string>)
+	if ws.Layout != "" {
+		mod.Memory().WriteUint32Le(ptr+36, 1) // some
+		writeStr(ptr+40, ws.Layout)
+	} else {
+		mod.Memory().WriteUint32Le(ptr+36, 0)
+		mod.Memory().WriteUint32Le(ptr+40, 0)
+		mod.Memory().WriteUint32Le(ptr+44, 0)
+	}
+
+	// offset 48: metadata (list<tuple<string, string>>)
 	// list is ptr (4) + len (4) = 8 bytes
 	if len(ws.Metadata) > 0 {
 		metaData := make([]byte, len(ws.Metadata)*16)
 		i := 0
 		for k, v := range ws.Metadata {
+			vStr := fmt.Sprintf("%v", v)
 			// Write key
 			keyRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(k)))
 			mod.Memory().Write(uint32(keyRes[0]), []byte(k))
@@ -790,19 +801,19 @@ func (r *Runtime) writeWorkspace(ctx context.Context, mod wazeroapi.Module, ptr 
 			i32le.PutUint32(metaData[i*16+4:], uint32(len(k)))
 
 			// Write value
-			valRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(v)))
-			mod.Memory().Write(uint32(valRes[0]), []byte(v))
+			valRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(vStr)))
+			mod.Memory().Write(uint32(valRes[0]), []byte(vStr))
 			i32le.PutUint32(metaData[i*16+8:], uint32(valRes[0]))
-			i32le.PutUint32(metaData[i*16+12:], uint32(len(v)))
+			i32le.PutUint32(metaData[i*16+12:], uint32(len(vStr)))
 			i++
 		}
 		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(metaData)))
 		mod.Memory().Write(uint32(res[0]), metaData)
-		mod.Memory().WriteUint32Le(ptr+36, uint32(res[0]))
-		mod.Memory().WriteUint32Le(ptr+40, uint32(len(ws.Metadata)))
+		mod.Memory().WriteUint32Le(ptr+48, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+52, uint32(len(ws.Metadata)))
 	} else {
-		mod.Memory().WriteUint32Le(ptr+36, 0)
-		mod.Memory().WriteUint32Le(ptr+40, 0)
+		mod.Memory().WriteUint32Le(ptr+48, 0)
+		mod.Memory().WriteUint32Le(ptr+52, 0)
 	}
 }
 
@@ -856,6 +867,7 @@ func (r *Runtime) internalRegisterWorkspace(
 	ctx context.Context, mod wazeroapi.Module,
 	idPtr, idLen, namePtr, nameLen, pathPtr, pathLen uint32,
 	teamIDSet, teamIDPtr, teamIDLen uint32,
+	layoutSet, layoutPtr, layoutLen uint32,
 	metadataPtr, metadataLen uint32,
 ) {
 	ws := api.Workspace{
@@ -866,6 +878,10 @@ func (r *Runtime) internalRegisterWorkspace(
 
 	if teamIDSet != 0 {
 		ws.TeamID = r.readStringFromArgs(mod, teamIDPtr, teamIDLen)
+	}
+
+	if layoutSet != 0 {
+		ws.Layout = r.readStringFromArgs(mod, layoutPtr, layoutLen)
 	}
 
 	if metadataLen > 0 {

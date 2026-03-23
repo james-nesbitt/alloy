@@ -402,6 +402,13 @@ func registerWorkspaceFromFile(alloyDir, workspaceFile string) {
 		return
 	}
 	
+	// Temporarily unmarshal into a Project to get the layout
+	var proj Project
+	if err := json.Unmarshal(data, &proj); err != nil {
+		plugin.Log("error", "Failed to parse workspace file as project: "+err.Error())
+		return
+	}
+
 	var ws AlloyWorkspace
 	if err := json.Unmarshal(data, &ws); err != nil {
 		plugin.Log("error", "Failed to parse workspace file: "+err.Error())
@@ -414,6 +421,11 @@ func registerWorkspaceFromFile(alloyDir, workspaceFile string) {
 	}
 	if ws.Path == "" {
 		ws.Path = filepath.Dir(alloyDir)
+	}
+
+	// Set layout if present in the project struct
+	if len(proj.Layout) > 0 {
+		ws.Layout = Some(string(proj.Layout))
 	}
 	
 	plugin.Log("info", fmt.Sprintf("Registering discovered workspace: %s (%s)", ws.Name, ws.Path))

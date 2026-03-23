@@ -68,6 +68,15 @@ type Model struct {
 	localBufferVersion int
 	isLocalBufferDirty bool
 	remoteCursors      map[string]Cursor
+
+	// Multi-pane state
+	Panes []Pane
+	FocusIdx int
+}
+
+type Pane struct {
+	Type int // ModeNormal, ModeDashboard, ModeChat, ModeEdit
+	WidthPct float64 // 0.0 to 1.0
 }
 
 const (
@@ -143,6 +152,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global quit
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
+		}
+
+		// Pane switching
+		if msg.String() == "ctrl+w" {
+			// This is just a modifier prefix in many layouts, but let's make it a simple toggle for now
+			// Or wait for next key...
 		}
 
 		// Handle keys based on mode
@@ -259,6 +274,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 	}
 
+	// Sync mode with focused pane
+	if len(m.Panes) > 0 && m.FocusIdx < len(m.Panes) {
+		m.Panes[m.FocusIdx].Type = m.Mode
+	}
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -267,16 +287,41 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 	var displayMsg string
 	if msg.Sender == "events" && msg.Method == "project:opened" {
 		var event struct {
-			Topic string  `json:"topic"`
+			Topic string           `json:"topic"`
 			Data  frontend.Project `json:"data"`
 		}
 		if err := json.Unmarshal(msg.Payload, &event); err == nil {
 			m.ActiveProject = &event.Data
 			displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.ActiveProject.Name)
-			if m.ActiveProject.Layout.DefaultMode == "dashboard" {
-				m.Mode = ModeDashboard
-			} else if m.ActiveProject.Layout.DefaultMode == "chat" {
-				m.Mode = ModeChat
+
+			// Apply multi-pane layout if defined
+			if len(m.ActiveProject.Layout.Layout) > 0 {
+				newPanes := []Pane{}
+				for _, lp := range m.ActiveProject.Layout.Layout {
+					p := Pane{WidthPct: lp.WidthPct}
+					switch lp.Type {
+					case "dashboard":
+						p.Type = ModeDashboard
+					case "chat":
+						p.Type = ModeChat
+					case "editor":
+						p.Type = ModeEdit
+					default:
+						p.Type = ModeNormal
+					}
+					newPanes = append(newPanes, p)
+				}
+				m.Panes = newPanes
+				m.FocusIdx = 0
+				m.Mode = m.Panes[0].Type
+			} else {
+				if m.ActiveProject.Layout.DefaultMode == "dashboard" {
+					m.Mode = ModeDashboard
+				} else if m.ActiveProject.Layout.DefaultMode == "chat" {
+					m.Mode = ModeChat
+				}
+				m.Panes = []Pane{{Type: m.Mode, WidthPct: 1.0}}
+				m.FocusIdx = 0
 			}
 		}
 	}
@@ -1075,6 +1120,28 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 		}
 	case "ls":
 		// List logic...
+	case "vsplit":
+		if len(m.Panes) < 3 {
+			m.Panes = append(m.Panes, Pane{Type: ModeChat, WidthPct: 0.5})
+			// Adjust widths
+			for i := range m.Panes {
+				m.Panes[i].WidthPct = 1.0 / float64(len(m.Panes))
+			}
+			m.FocusIdx = len(m.Panes) - 1
+			m.Mode = m.Panes[m.FocusIdx].Type
+		}
+	case "focus-next":
+		m.FocusIdx = (m.FocusIdx + 1) % len(m.Panes)
+		m.Mode = m.Panes[m.FocusIdx].Type
+	case "close-pane":
+		if len(m.Panes) > 1 {
+			m.Panes = append(m.Panes[:m.FocusIdx], m.Panes[m.FocusIdx+1:]...)
+			m.FocusIdx = 0
+			for i := range m.Panes {
+				m.Panes[i].WidthPct = 1.0 / float64(len(m.Panes))
+			}
+			m.Mode = m.Panes[m.FocusIdx].Type
+		}
 	default:
 		// Attempt to call plugin
 		if len(parts) >= 2 {
@@ -1368,12 +1435,17 @@ func (m Model) dashboardView() string {
 			Render("No dynamic dashboard widgets registered.\nWaiting for WASM plugins to initialize...")
 	}
 
+	cols := 2
+	if m.width < 100 {
+		cols = 1
+	}
+
 	tileStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
 		Padding(1, 2).
 		Margin(1, 1).
-		Width((m.width / 2) - 4).
+		Width((m.width / cols) - 4).
 		Height((m.height / 3) - 2)
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
@@ -1420,13 +1492,33 @@ func (m Model) dashboardView() string {
 		)
 
 		currentRow = append(currentRow, tileView)
-		if (i+1)%2 == 0 || i == len(m.TileOrder)-1 {
+		if (i+1)%cols == 0 || i == len(m.TileOrder)-1 {
 			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, currentRow...))
 			currentRow = []string{}
 		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+func (m Model) renderPaneContent(paneType int, width int, height int) string {
+	if paneType == ModeInsert || paneType == ModeChat || paneType == ModeEdit {
+		m.textarea.SetWidth(width)
+		m.textarea.SetHeight(height)
+		return m.textarea.View()
+	} else if paneType == ModeDashboard {
+		// Dashboard needs careful handling of child widget widths
+		// Temporarily adjust m.width/height for dashboardView logic
+		oldW, oldH := m.width, m.height
+		m.width, m.height = width, height+3
+		view := m.dashboardView()
+		m.width, m.height = oldW, oldH
+		return view
+	}
+
+	m.viewport.Width = width
+	m.viewport.Height = height
+	return m.viewport.View()
 }
 
 func (m Model) View() string {
@@ -1486,25 +1578,38 @@ func (m Model) View() string {
 	)
 
 	var mainView string
-	renderMode := m.Mode
 	workingHeight := m.height - 3
 	if m.Mode == ModeCommand || m.Mode == ModeForm {
-		renderMode = m.lastMainMode
 		workingHeight = (m.height * 2) / 3
 	}
 
-	if renderMode == ModeInsert || renderMode == ModeChat || renderMode == ModeEdit {
-		m.textarea.SetHeight(workingHeight)
-		mainView = m.textarea.View()
-	} else if renderMode == ModeDashboard {
-		// Temporarily adjust m.height for dashboardView logic
-		oldHeight := m.height
-		m.height = workingHeight + 3
-		mainView = m.dashboardView()
-		m.height = oldHeight
+	if len(m.Panes) > 1 {
+		var views []string
+		for i, p := range m.Panes {
+			paneWidth := int(float64(m.width) * p.WidthPct)
+			if i == len(m.Panes)-1 {
+				// Fill remaining width
+				used := 0
+				for j := 0; j < i; j++ {
+					used += int(float64(m.width) * m.Panes[j].WidthPct)
+				}
+				paneWidth = m.width - used
+			}
+
+			// Add visual border for focused pane
+			style := lipgloss.NewStyle().Width(paneWidth).Height(workingHeight)
+			if i == m.FocusIdx {
+				style = style.Border(lipgloss.DoubleBorder(), false, true, false, true).BorderForeground(lipgloss.Color("62"))
+			} else {
+				style = style.Border(lipgloss.NormalBorder(), false, true, false, true).BorderForeground(lipgloss.Color("240"))
+			}
+
+			content := m.renderPaneContent(p.Type, paneWidth-2, workingHeight)
+			views = append(views, style.Render(content))
+		}
+		mainView = lipgloss.JoinHorizontal(lipgloss.Top, views...)
 	} else {
-		m.viewport.Height = workingHeight
-		mainView = m.viewport.View()
+		mainView = m.renderPaneContent(m.Mode, m.width, workingHeight)
 	}
 
 	view := lipgloss.JoinVertical(lipgloss.Left,
@@ -1683,6 +1788,10 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 		recency:       make(map[string]int),
 		DashboardTiles: make(map[string]frontend.DashboardTile),
 		TileOrder:      nil,
+		Panes: []Pane{
+			{Type: ModeDashboard, WidthPct: 1.0},
+		},
+		FocusIdx: 0,
 	}
 }
 

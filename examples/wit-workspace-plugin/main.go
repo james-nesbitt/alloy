@@ -17,6 +17,8 @@ func main() {
 			Id:   "test-ws",
 			Name: "Test Workspace",
 			Path: "/tmp/test",
+			TeamId: alloy.None[string](),
+			Layout: alloy.None[string](),
 			Metadata: []alloy.AlloyTuple2StringStringT{
 				{F0: "env", F1: "dev"},
 			},

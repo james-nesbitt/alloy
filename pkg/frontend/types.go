@@ -1,5 +1,7 @@
 package frontend
 
+import "github.com/james-nesbitt/alloy/api"
+
 type DashboardTile struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
@@ -12,33 +14,7 @@ type DashboardTile struct {
 	RefreshMS   uint32   `json:"refresh_ms"`
 }
 
-type WorkspaceConfig struct {
-	DefaultMode string `json:"default_mode"`
-	Dashboard   struct {
-		Tiles []struct {
-			Plugin string `json:"plugin"`
-			Weight int    `json:"weight"`
-		} `json:"tiles"`
-	} `json:"dashboard"`
-}
-
-type Project struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Layout      WorkspaceConfig `json:"layout,omitempty"`
-}
-
-type Workspace struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
-
-type Presence struct {
-	User      string `json:"user"`
-	Status    string `json:"status"`
-	LastSeen  int64  `json:"last_seen"`
-	Client    string `json:"client"`
-	ProjectID string `json:"project_id,omitempty"`
-}
+type WorkspaceConfig = api.WorkspaceConfig
+type Project = api.Project
+type Workspace = api.Workspace
+type Presence = api.Presence
