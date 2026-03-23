@@ -29,6 +29,15 @@ world alloy {
             shortcut: option<string>,
             annotations: option<list<tuple<string, string>>>,
         }
+
+        // Buffer structure for high-performance direct data access
+        record buffer {
+            id: string,
+            name: string,
+            content: list<u8>,
+            last-modified: u64,
+            mime-type: string,
+        }
         
         // Plugin status
         enum status {
@@ -80,5 +89,16 @@ world alloy {
         list-workspaces: func() -> list<workspace>;
         register-workspace: func(ws: workspace);
         unregister-workspace: func(id: string);
+
+        // Registry management (new)
+        register-capability: func(cap: capability);
+        unregister-capability: func(method: string);
+        find-providers: func(method: string) -> list<string>;
+        get-all-capabilities: func() -> list<capability>;
+
+        // Direct Buffer Access (Direct Component interaction)
+        read-buffer: func(id: string) -> option<buffer>;
+        write-buffer: func(id: string, content: list<u8>) -> bool;
+        list-buffers: func() -> list<string>;
     }
 }

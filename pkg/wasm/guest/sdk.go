@@ -385,3 +385,42 @@ func (p *Plugin) RegisterWorkspace(ws guest.AlloyWorkspace) {
 func (p *Plugin) UnregisterWorkspace(id string) {
 	guest.AlloyUnregisterWorkspace(id)
 }
+
+// RegisterCapability registers a capability with the registry.
+func (p *Plugin) RegisterCapability(cap guest.AlloyCapability) {
+	guest.AlloyRegisterCapability(cap)
+}
+
+// UnregisterCapability unregisters a capability.
+func (p *Plugin) UnregisterCapability(method string) {
+	guest.AlloyUnregisterCapability(method)
+}
+
+// FindProviders finds plugins that provide a specific capability.
+func (p *Plugin) FindProviders(method string) []string {
+	return guest.AlloyFindProviders(method)
+}
+
+// GetAllCapabilities gets all registered capabilities.
+func (p *Plugin) GetAllCapabilities() []guest.AlloyCapability {
+	return guest.AlloyGetAllCapabilities()
+}
+
+// ReadBuffer reads a buffer directly.
+func (p *Plugin) ReadBuffer(id string) (guest.AlloyBuffer, bool) {
+	res := guest.AlloyReadBuffer(id)
+	if res.IsSome() {
+		return res.Unwrap(), true
+	}
+	return guest.AlloyBuffer{}, false
+}
+
+// WriteBuffer writes a buffer directly.
+func (p *Plugin) WriteBuffer(id string, content []byte) bool {
+	return guest.AlloyWriteBuffer(id, content)
+}
+
+// ListBuffers lists available buffers.
+func (p *Plugin) ListBuffers() []string {
+	return guest.AlloyListBuffers()
+}

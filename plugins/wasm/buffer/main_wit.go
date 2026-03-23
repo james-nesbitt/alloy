@@ -79,6 +79,16 @@ func main() {
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Buffer manager initializing")
 		
+		// Register in the component registry
+		plugin.RegisterCapability(AlloyCapability{
+			Method:      "buffer-manager:read",
+			Description: "Directly read buffer content",
+		})
+		plugin.RegisterCapability(AlloyCapability{
+			Method:      "buffer-manager:write",
+			Description: "Directly write buffer content",
+		})
+
 		// Periodically clean up stale cursors
 		go func() {
 			for {
@@ -555,4 +565,40 @@ func notifyAll(id string, event string) {
 			Payload: payload,
 		})
 	}
+}
+
+// Direct interaction handlers (WIT interface implementation)
+
+func ReadBuffer(id string) (AlloyBuffer, bool) {
+	root, ok := findRootBuffer(id)
+	if !ok {
+		return AlloyBuffer{}, false
+	}
+	return AlloyBuffer{
+		Id:           root.ID,
+		Name:         root.Name,
+		Content:      root.Data,
+		LastModified: uint64(root.Timestamp),
+		MimeType:     root.MimeType,
+	}, true
+}
+
+func WriteBuffer(id string, content []byte) bool {
+	root, ok := findRootBuffer(id)
+	if !ok {
+		return false
+	}
+	root.Data = content
+	root.Version++
+	root.Timestamp = time.Now().Unix()
+	notifyAll(id, "update")
+	return true
+}
+
+func ListBuffers() []string {
+	ids := make([]string, 0, len(buffers))
+	for id := range buffers {
+		ids = append(ids, id)
+	}
+	return ids
 }

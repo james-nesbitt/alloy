@@ -154,6 +154,16 @@ func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, 
 	builder.NewFunctionBuilder().WithFunc(r.internalRegisterWorkspace).Export("register-workspace")
 	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterWorkspace).Export("unregister-workspace")
 
+	// Registry & Direct Interaction (New)
+	builder.NewFunctionBuilder().WithFunc(r.internalRegisterCapability).Export("register-capability")
+	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterCapability).Export("unregister-capability")
+	builder.NewFunctionBuilder().WithFunc(r.internalFindProviders).Export("find-providers")
+	builder.NewFunctionBuilder().WithFunc(r.internalGetAllCapabilities).Export("get-all-capabilities")
+
+	builder.NewFunctionBuilder().WithFunc(r.internalReadBuffer).Export("read-buffer")
+	builder.NewFunctionBuilder().WithFunc(r.internalWriteBuffer).Export("write-buffer")
+	builder.NewFunctionBuilder().WithFunc(r.internalListBuffers).Export("list-buffers")
+
 	// Complex data types (save/load state) - currently placeholders
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
@@ -880,4 +890,162 @@ func (r *Runtime) loadWorkspaces() {
 	if err == nil && active != nil {
 		r.activeWorkspace = string(active)
 	}
+}
+
+// Registry & Direct Interaction implemention
+
+func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoPtr, annoLen uint32) {
+	method := r.readStringFromArgs(mod, methodPtr, methodLen)
+	desc := r.readStringFromArgs(mod, descPtr, descLen)
+	cap := api.Capability{
+		Method:      method,
+		Description: desc,
+	}
+	if shortcutSet != 0 {
+		cap.Shortcut = r.readStringFromArgs(mod, shortcutPtr, shortcutLen)
+	}
+	
+	r.logger.Info("plugin registering capability", "id", mod.Name(), "method", method)
+	
+	// Implementation: send a message to the command manager to update capabilities
+	payload, _ := json.Marshal(cap)
+	r.routerFn(ctx, api.Message{
+		ID:      fmt.Sprintf("reg-cap-%d", time.Now().UnixNano()),
+		Sender:  mod.Name(),
+		Target:  "command-manager",
+		Method:  "register-capability",
+		Payload: payload,
+	})
+}
+
+func (r *Runtime) internalUnregisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen uint32) {
+	method := r.readStringFromArgs(mod, methodPtr, methodLen)
+	r.routerFn(ctx, api.Message{
+		ID:      fmt.Sprintf("unreg-cap-%d", time.Now().UnixNano()),
+		Sender:  mod.Name(),
+		Target:  "command-manager",
+		Method:  "unregister-capability",
+		Payload: []byte(fmt.Sprintf("{\"method\":\"%s\"}", method)),
+	})
+}
+
+func (r *Runtime) internalFindProviders(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, resultPtr uint32) {
+	// For now, return an empty list or implement via sync call to command manager
+	mod.Memory().WriteUint32Le(resultPtr, 0)
+	mod.Memory().WriteUint32Le(resultPtr+4, 0)
+}
+
+func (r *Runtime) internalGetAllCapabilities(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
+	mod.Memory().WriteUint32Le(resultPtr, 0)
+	mod.Memory().WriteUint32Le(resultPtr+4, 0)
+}
+
+func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, resultPtr uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	
+	// Synchronous call to buffer-manager
+	resp, err := r.callFn(ctx, api.Message{
+		ID:      fmt.Sprintf("read-buf-%d", time.Now().UnixNano()),
+		Sender:  mod.Name(),
+		Target:  "buffer-manager",
+		Method:  "read",
+		Payload: []byte(fmt.Sprintf("{\"id\":\"%s\"}", id)),
+	})
+	
+	if err != nil || len(resp.Payload) == 0 {
+		mod.Memory().WriteUint32Le(resultPtr, 0) // None
+		return
+	}
+	
+	var buf struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		Content      []byte `json:"content"`
+		LastModified uint64 `json:"last_modified"`
+		MimeType     string `json:"mime_type"`
+	}
+	if err := json.Unmarshal(resp.Payload, &buf); err != nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		return
+	}
+	
+	alloc := mod.ExportedFunction("cabi_realloc")
+	writeStr := func(ptr uint32, s string) {
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		mod.Memory().Write(uint32(res[0]), []byte(s))
+		mod.Memory().WriteUint32Le(ptr, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+4, uint32(len(s)))
+	}
+	
+	mod.Memory().WriteUint32Le(resultPtr, 1) // Some
+	// alloy_buffer_t layout: id(8), name(8), content(8), last_modified(8), mime_type(8) = 40 bytes
+	bufPtr := resultPtr + 8 // Alignment/offset check
+	
+	writeStr(bufPtr, buf.ID)
+	writeStr(bufPtr+8, buf.Name)
+	
+	// Content list
+	cRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(buf.Content)))
+	mod.Memory().Write(uint32(cRes[0]), buf.Content)
+	mod.Memory().WriteUint32Le(bufPtr+16, uint32(cRes[0]))
+	mod.Memory().WriteUint32Le(bufPtr+20, uint32(len(buf.Content)))
+	
+	mod.Memory().WriteUint64Le(bufPtr+24, buf.LastModified)
+	writeStr(bufPtr+32, buf.MimeType)
+}
+
+func (r *Runtime) internalWriteBuffer(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, contentPtr, contentLen uint32) uint32 {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	content, _ := mod.Memory().Read(contentPtr, contentLen)
+	
+	payload, _ := json.Marshal(map[string]any{
+		"id": id,
+		"content": content,
+	})
+	
+	_, err := r.callFn(ctx, api.Message{
+		ID:      fmt.Sprintf("write-buf-%d", time.Now().UnixNano()),
+		Sender:  mod.Name(),
+		Target:  "buffer-manager",
+		Method:  "write",
+		Payload: payload,
+	})
+	
+	if err != nil {
+		return 0
+	}
+	return 1
+}
+
+func (r *Runtime) internalListBuffers(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
+	resp, err := r.callFn(ctx, api.Message{
+		ID:      fmt.Sprintf("list-bufs-%d", time.Now().UnixNano()),
+		Sender:  mod.Name(),
+		Target:  "buffer-manager",
+		Method:  "list",
+		Payload: []byte("{}"),
+	})
+	
+	if err != nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		mod.Memory().WriteUint32Le(resultPtr+4, 0)
+		return
+	}
+	
+	var ids []string
+	json.Unmarshal(resp.Payload, &ids)
+	
+	alloc := mod.ExportedFunction("cabi_realloc")
+	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(ids)*8))
+	basePtr := uint32(res[0])
+	
+	for i, id := range ids {
+		sRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(id)))
+		mod.Memory().Write(uint32(sRes[0]), []byte(id))
+		mod.Memory().WriteUint32Le(basePtr+uint32(i*8), uint32(sRes[0]))
+		mod.Memory().WriteUint32Le(basePtr+uint32(i*8+4), uint32(len(id)))
+	}
+	
+	mod.Memory().WriteUint32Le(resultPtr, basePtr)
+	mod.Memory().WriteUint32Le(resultPtr+4, uint32(len(ids)))
 }
