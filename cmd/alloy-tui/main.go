@@ -853,10 +853,11 @@ func (m Model) fetchInitialWidgets() tea.Cmd {
 }
 
 func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
-	// 1. Pre-update Check: Drill-down shortcuts for Leader Mode
-	// We check this BEFORE updating the input so that keys like 'p' can be
-	// captured as drill-down actions instead of text input.
-	if m.isLeader && msg.Type == tea.KeyRunes && m.commandInput.Value() == "" {
+	// 1. Pre-update Check: Omni-Palette Logic
+	// We handle space-based transitions and backspace breadcrumb navigation.
+	input := m.commandInput.Value()
+
+	if m.isLeader && msg.Type == tea.KeyRunes && input == "" {
 		char := string(msg.Runes)
 		if char == ":" {
 			m.isLeader = false
@@ -866,15 +867,13 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 			return m, nil
 		}
 
-		// If typing the exact shortcut key of a child, drill down immediately
+		// Instant drill-down for single-key leader shortcuts
 		node := m.commandTree.Find(m.breadcrumbs)
 		if node != nil {
 			if child, ok := node.Children[char]; ok {
 				if len(child.Children) == 0 {
+					// Execute leaf node
 					m.Mode = m.lastMainMode
-					if m.Mode == ModeCommand {
-						m.Mode = ModeNormal
-					} // Failsafe
 					m.isLeader = false
 					m.breadcrumbs = nil
 					m.selectedCmdIdx = 0
@@ -882,10 +881,10 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					m.commandInput.SetValue("")
 					return m.executeCommand(fmt.Sprintf("%s %s", child.Target, child.Method))
 				} else {
+					// Drill down
 					m.breadcrumbs = append(m.breadcrumbs, char)
 					m.selectedCmdIdx = 0
 					m.commandInput.SetValue("")
-					// Success! Swallowed the key and drilled down.
 					return m, nil
 				}
 			}
@@ -893,13 +892,18 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 	}
 
 	// 2. Normal Input Handling
-	// First, let the input handle the key unless it's navigation
 	switch msg.Type {
 	case tea.KeyDown, tea.KeyCtrlN, tea.KeyUp, tea.KeyCtrlP, tea.KeyEnter, tea.KeyEsc, tea.KeyCtrlG:
 		// Navigation/Termination handled below
 	default:
 		m.commandInput, ciCmd = m.commandInput.Update(msg)
 		m.selectedCmdIdx = 0
+		
+		// Auto-transition: if user types ':' while in leader mode, switch to command mode
+		if m.isLeader && strings.HasPrefix(m.commandInput.Value(), ":") {
+			m.isLeader = false
+			m.breadcrumbs = nil
+		}
 	}
 
 	filteredCount := len(m.filteredCommands())
@@ -928,76 +932,66 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		return m, nil
 	case tea.KeyEnter:
 		filtered := m.filteredCommands()
-		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
+		if len(filtered) > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
 			opt := filtered[m.selectedCmdIdx]
+			
+			// Selection sub-modes
 			if m.selectType == SelectProject {
 				m.Mode = m.lastMainMode
-				if m.Mode == ModeCommand {
-					m.Mode = ModeNormal
-				} // Failsafe
 				m.commandInput.Blur()
 				m.selectType = SelectNone
 				m.commandInput.SetValue("")
-				m.isLeader = false // Reset leader
+				m.isLeader = false
 				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
 			}
 			if m.selectType == SelectWorkspace {
 				m.Mode = m.lastMainMode
-				if m.Mode == ModeCommand {
-					m.Mode = ModeNormal
-				} // Failsafe
 				m.commandInput.Blur()
 				m.selectType = SelectNone
 				m.commandInput.SetValue("")
-				m.isLeader = false // Reset leader
+				m.isLeader = false
 				return m.executeCommand(fmt.Sprintf("project set-workspace %s", opt.Raw))
 			}
-			if m.isLeader {
+
+			// Omni/Leader Execution
+			if m.isLeader && m.commandInput.Value() == "" {
+				// We are in classic leader drill-down mode (empty input)
 				if opt.IsDir {
 					m.breadcrumbs = append(m.breadcrumbs, opt.Display)
 					m.selectedCmdIdx = 0
 					m.commandInput.SetValue("")
 					return m, nil
 				} else {
-					// Find the node to execute it properly
+					// Execute leaf
 					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
 					if node != nil {
 						m.Mode = m.lastMainMode
-						if m.Mode == ModeCommand {
-							m.Mode = ModeNormal
-						} // Failsafe
 						m.commandInput.Blur()
 						m.commandInput.SetValue("")
 						m.breadcrumbs = nil
-						m.selectedCmdIdx = 0
-						m.isLeader = false // Explicitly reset before executing
+						m.isLeader = false
 						return m.executeCommand(fmt.Sprintf("%s %s", node.Target, node.Method))
 					}
 				}
 			} else {
+				// Omni mode (fuzzy search) or Direct Command Mode (starts with :)
 				m.Mode = m.lastMainMode
-				if m.Mode == ModeCommand {
-					m.Mode = ModeNormal
-				} // Failsafe
 				m.commandInput.Blur()
 				m.commandInput.SetValue("")
 				m.breadcrumbs = nil
-				m.selectedCmdIdx = 0
 				m.isLeader = false
 				return m.executeCommand(opt.Raw)
 			}
 		}
 
+		// Fallback: execute whatever is in the input field
 		cmd := m.commandInput.Value()
 		m.Mode = m.lastMainMode
-		if m.Mode == ModeCommand {
-			m.Mode = ModeNormal
-		} // Failsafe
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		m.breadcrumbs = nil
-		m.selectedCmdIdx = 0
 		m.isLeader = false
+		return m.executeCommand(cmd)
 		return m.executeCommand(cmd)
 	case tea.KeyBackspace:
 		if m.commandInput.Value() == "" && m.isLeader {
@@ -1273,9 +1267,9 @@ type CommandOption struct {
 
 func (m Model) filteredCommands() []CommandOption {
 	var results []CommandOption
+	input := m.commandInput.Value()
 
-	if m.Mode == ModeCommand && m.selectType == SelectProject {
-		input := m.commandInput.Value()
+	if m.selectType == SelectProject {
 		for _, p := range m.Projects {
 			score := frontend.FuzzyScore(p.Name, input)
 			if score > 0 {
@@ -1287,8 +1281,7 @@ func (m Model) filteredCommands() []CommandOption {
 				})
 			}
 		}
-	} else if m.Mode == ModeCommand && m.selectType == SelectWorkspace {
-		input := m.commandInput.Value()
+	} else if m.selectType == SelectWorkspace {
 		for _, w := range m.Workspaces {
 			score := frontend.FuzzyScore(w.Name, input)
 			if score > 0 {
@@ -1300,9 +1293,9 @@ func (m Model) filteredCommands() []CommandOption {
 				})
 			}
 		}
-	} else if m.Mode == ModeCommand && !m.isLeader {
-		input := m.commandInput.Value()
-		if len(input) > 0 && input[0] == ':' {
+	} else if !m.isLeader || (m.isLeader && input != "") {
+		// OMNI Mode: search across the entire tree
+		if strings.HasPrefix(input, ":") {
 			input = input[1:]
 		}
 
@@ -1310,7 +1303,7 @@ func (m Model) filteredCommands() []CommandOption {
 			return nil
 		}
 
-		// Flatten the entire tree and fuzzy find
+		// Search depth-first across the tree
 		flattened := m.commandTree.Flatten("")
 		for _, item := range flattened {
 			score := frontend.FuzzyScore(item.FullTitle, input)
@@ -1330,101 +1323,71 @@ func (m Model) filteredCommands() []CommandOption {
 				})
 			}
 		}
-
-		// Weight by recency/frequency/status
-		sort.Slice(results, func(i, j int) bool {
-			// 1. Status priority
-			if results[i].Status != results[j].Status {
-				if results[i].Status == "crashed" {
-					return false
-				}
-				if results[j].Status == "crashed" {
-					return true
-				}
-			}
-
-			// 2. Fuzzy Score (Prefix match + score)
-			if results[i].Score != results[j].Score {
-				return results[i].Score > results[j].Score
-			}
-
-			// 3. Recency (last used in session)
-			ri := m.recency[results[i].Raw]
-			rj := m.recency[results[j].Raw]
-			if ri != rj {
-				return ri > rj
-			}
-
-			// 4. Frequency
-			fi := results[i].Frequency
-			fj := results[j].Frequency
-			if fi != fj {
-				return fi > fj
-			}
-
-			return results[i].Display < results[j].Display
-		})
-	} else if m.Mode == ModeCommand && m.isLeader && m.commandTree != nil {
+	} else if m.isLeader && input == "" {
+		// LEADER Mode (empty input): show children of current breadcrumbs
 		node := m.commandTree.Find(m.breadcrumbs)
 		if node != nil {
-			input := m.commandInput.Value()
 			var keys []string
 			for k := range node.Children {
 				keys = append(keys, k)
 			}
+			sort.Strings(keys)
 
 			for _, k := range keys {
 				child := node.Children[k]
-				// Match against key or method name
-				scoreK := frontend.FuzzyScore(k, input)
-				scoreM := frontend.FuzzyScore(child.Method, input)
-				score := max(scoreK, scoreM)
-
-				if score > 0 {
-					status := "running"
-					if s, ok := m.statuses[child.Target]; ok {
-						status = s
-					}
-
-					results = append(results, CommandOption{
-						Raw:         child.Target + " " + child.Method,
-						Display:     k,
-						Description: child.Description,
-						Annotation:  child.Annotation,
-						IsDir:       len(child.Children) > 0,
-						Method:      child.Method,
-						Status:      status,
-						Frequency:   m.frequency[child.Target+" "+child.Method],
-						Score:       score,
-					})
+				status := "running"
+				if s, ok := m.statuses[child.Target]; ok {
+					status = s
 				}
+
+				results = append(results, CommandOption{
+					Raw:         child.Target + " " + child.Method,
+					Display:     k,
+					Description: child.Description,
+					Annotation:  child.Annotation,
+					IsDir:       len(child.Children) > 0,
+					Method:      child.Method,
+					Status:      status,
+					Frequency:   m.frequency[child.Target+" "+child.Method],
+					Score:       1, // Base score for showing children
+				})
 			}
-
-			// Weight by recency/frequency/status
-			sort.Slice(results, func(i, j int) bool {
-				if results[i].Status != results[j].Status {
-					if results[i].Status == "crashed" {
-						return false
-					}
-					if results[j].Status == "crashed" {
-						return true
-					}
-				}
-
-				if results[i].Score != results[j].Score {
-					return results[i].Score > results[j].Score
-				}
-
-				ri := m.recency[results[i].Raw]
-				rj := m.recency[results[j].Raw]
-				if ri != rj {
-					return ri > rj
-				}
-
-				return results[i].Display < results[j].Display
-			})
 		}
 	}
+
+	// 1. Grouping and Weighting
+	sort.Slice(results, func(i, j int) bool {
+		// Status priority
+		if results[i].Status != results[j].Status {
+			if results[i].Status == "crashed" {
+				return false
+			}
+			if results[j].Status == "crashed" {
+				return true
+			}
+		}
+
+		// Fuzzy Score
+		if results[i].Score != results[j].Score {
+			return results[i].Score > results[j].Score
+		}
+
+		// Recency
+		ri := m.recency[results[i].Raw]
+		rj := m.recency[results[j].Raw]
+		if ri != rj {
+			return ri > rj
+		}
+
+		// Frequency
+		fi := results[i].Frequency
+		fj := results[j].Frequency
+		if fi != fj {
+			return fi > fj
+		}
+
+		return results[i].Display < results[j].Display
+	})
 
 	if len(results) > 10 {
 		results = results[:10]
