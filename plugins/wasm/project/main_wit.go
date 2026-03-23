@@ -7,6 +7,8 @@ import (
 	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -144,6 +146,7 @@ func main() {
 		WithCapability("import", "Import a workspace from a path").
 		WithCapability("open", "Open a project").WithShortcut("p o").
 		WithCapability("save", "Save projects to durable store").
+		WithCapability("discover", "Automatically detect and register workspaces").WithShortcut("p d").
 		WithCapability("list-workspaces", "List all workspaces").WithShortcut("p p").
 		WithCapability("set-workspace", "Switch active workspace")
 
@@ -156,12 +159,17 @@ func main() {
 	plugin.Handle("open", handleOpen)
 	plugin.Handle("save", handleSave)
 	plugin.Handle("import", handleImport)
+	plugin.Handle("discover", handleDiscover)
 	plugin.Handle("list-workspaces", handleListWorkspaces)
 	plugin.Handle("set-workspace", handleSetWorkspace)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Project manager initializing")
+
+		// Automatically discover workspaces on start
+		go discoverWorkspaces("/")
+
 		// Restore from KV on startup
 		if data, err := store.Get("all"); err == nil {
 			projects = data
@@ -349,6 +357,61 @@ func handleOpen(msg AlloyMessage) AlloyMessage {
 func handleSave(msg AlloyMessage) AlloyMessage {
 	saveProjects()
 	return plugin.Reply(msg, map[string]string{"status": "saved"})
+}
+
+// handleDiscover initiates a filesystem scan for workspaces.
+func handleDiscover(msg AlloyMessage) AlloyMessage {
+	go discoverWorkspaces("/")
+	return plugin.Reply(msg, map[string]string{"status": "discovery-initiated"})
+}
+
+// discoverWorkspaces scans the filesystem for .alloy/workspace.json files.
+func discoverWorkspaces(root string) {
+	plugin.Log("info", "Starting workspace discovery in: "+root)
+	
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Continue scanning even if one branch fails
+		}
+		
+		if info.IsDir() && info.Name() == ".alloy" {
+			workspaceFile := filepath.Join(path, "workspace.json")
+			if _, err := os.Stat(workspaceFile); err == nil {
+				registerWorkspaceFromFile(path, workspaceFile)
+			}
+			return filepath.SkipDir // Don't scan inside .alloy
+		}
+		
+		return nil
+	})
+	
+	plugin.Log("info", "Workspace discovery complete")
+}
+
+// registerWorkspaceFromFile reads a workspace file and registers it with the host.
+func registerWorkspaceFromFile(alloyDir, workspaceFile string) {
+	data, err := os.ReadFile(workspaceFile)
+	if err != nil {
+		plugin.Log("error", "Failed to read workspace file: "+err.Error())
+		return
+	}
+	
+	var ws AlloyWorkspace
+	if err := json.Unmarshal(data, &ws); err != nil {
+		plugin.Log("error", "Failed to parse workspace file: "+err.Error())
+		return
+	}
+	
+	// If ID or Path are not set in the JSON, derive them from the location
+	if ws.Id == "" {
+		ws.Id = filepath.Base(filepath.Dir(alloyDir))
+	}
+	if ws.Path == "" {
+		ws.Path = filepath.Dir(alloyDir)
+	}
+	
+	plugin.Log("info", fmt.Sprintf("Registering discovered workspace: %s (%s)", ws.Name, ws.Path))
+	plugin.RegisterWorkspace(ws)
 }
 
 // handleListWorkspaces returns a list of all workspaces from the host registry.

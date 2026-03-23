@@ -505,11 +505,20 @@ func (r *Runtime) LoadPlugin(
 
 		r.logger.Debug("instantiating wasm module", "id", id)
 
+		// For the project manager plugin, we allow access to the base data directory
+		// to enable automatic discovery of project workspaces.
+		var fs wazero.FSConfig
+		if id == "project" {
+			fs = wazero.NewFSConfig().WithDirMount(r.dataDir, "/")
+		} else {
+			fs = wazero.NewFSConfig().WithDirMount(pluginDir, "/")
+		}
+
 		config := wazero.NewModuleConfig().
 			WithName(id).
 			WithStdout(newLoggerWriter(r.logger, id, "stdout")).
 			WithStderr(newLoggerWriter(r.logger, id, "stderr")).
-			WithFS(os.DirFS(pluginDir))
+			WithFSConfig(fs)
 
 		mod, err := r.runtime.InstantiateModule(instCtx, compiled, config)
 		if err != nil {
