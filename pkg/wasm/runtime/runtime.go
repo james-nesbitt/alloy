@@ -178,6 +178,45 @@ func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, 
 // Internal host logic
 
 func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, capsPtr, capsLen uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+	
+	if capsLen > 0 {
+		// alloy_capability_t is 40 bytes
+		data, _ := mod.Memory().Read(capsPtr, capsLen*40)
+		for i := uint32(0); i < capsLen; i++ {
+			ptr := uint32(i * 40)
+			
+			methodPtr := i32le.Uint32(data[ptr:])
+			methodLen := i32le.Uint32(data[ptr+4:])
+			descPtr := i32le.Uint32(data[ptr+8:])
+			descLen := i32le.Uint32(data[ptr+12:])
+			
+			cap := api.Capability{
+				Method:      r.readStringFromArgs(mod, methodPtr, methodLen),
+				Description: r.readStringFromArgs(mod, descPtr, descLen),
+			}
+			
+			shortSet := i32le.Uint32(data[ptr+16:])
+			if shortSet != 0 {
+				shortPtr := i32le.Uint32(data[ptr+20:])
+				shortLen := i32le.Uint32(data[ptr+24:])
+				cap.Shortcut = r.readStringFromArgs(mod, shortPtr, shortLen)
+			}
+			
+			// We skip annotations for now in the bulk init to keep it simple, 
+			// or we could implement it if needed.
+			
+			// Register in command-manager
+			payload, _ := json.Marshal(cap)
+			r.routerFn(ctx, api.Message{
+				ID:      fmt.Sprintf("init-cap-%d-%d", time.Now().UnixNano(), i),
+				Sender:  id,
+				Target:  "command-manager",
+				Method:  "register-capability",
+				Payload: payload,
+			})
+		}
+	}
 }
 
 func (r *Runtime) internalStarted(ctx context.Context, mod wazeroapi.Module) {
@@ -894,7 +933,7 @@ func (r *Runtime) loadWorkspaces() {
 
 // Registry & Direct Interaction implemention
 
-func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoPtr, annoLen uint32) {
+func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen uint32) {
 	method := r.readStringFromArgs(mod, methodPtr, methodLen)
 	desc := r.readStringFromArgs(mod, descPtr, descLen)
 	cap := api.Capability{
@@ -904,8 +943,24 @@ func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.
 	if shortcutSet != 0 {
 		cap.Shortcut = r.readStringFromArgs(mod, shortcutPtr, shortcutLen)
 	}
+
+	if annoSet != 0 && annoLen > 0 {
+		cap.Annotations = make(map[string]string)
+		// annotations is a list of tuples, each tuple is 16 bytes (ptr, len, ptr, len)
+		metaData, _ := mod.Memory().Read(annoPtr, annoLen*16)
+		for i := uint32(0); i < annoLen; i++ {
+			kPtr := i32le.Uint32(metaData[i*16:])
+			kLen := i32le.Uint32(metaData[i*16+4:])
+			vPtr := i32le.Uint32(metaData[i*16+8:])
+			vLen := i32le.Uint32(metaData[i*16+12:])
+
+			k := r.readStringFromArgs(mod, kPtr, kLen)
+			v := r.readStringFromArgs(mod, vPtr, vLen)
+			cap.Annotations[k] = v
+		}
+	}
 	
-	r.logger.Info("plugin registering capability", "id", mod.Name(), "method", method)
+	r.logger.Info("plugin registering capability", "id", mod.Name(), "method", method, "annos", len(cap.Annotations))
 	
 	// Implementation: send a message to the command manager to update capabilities
 	payload, _ := json.Marshal(cap)
@@ -936,18 +991,122 @@ func (r *Runtime) internalFindProviders(ctx context.Context, mod wazeroapi.Modul
 }
 
 func (r *Runtime) internalGetAllCapabilities(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
-	mod.Memory().WriteUint32Le(resultPtr, 0)
-	mod.Memory().WriteUint32Le(resultPtr+4, 0)
+	resp, err := r.callFn(ctx, api.Message{
+		ID:      fmt.Sprintf("get-caps-%d", time.Now().UnixNano()),
+		Type:    api.TypeRequest,
+		Sender:  mod.Name(),
+		Target:  "command-manager",
+		Method:  "list",
+		Payload: []byte("{}"),
+	})
+
+	if err != nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		mod.Memory().WriteUint32Le(resultPtr+4, 0)
+		return
+	}
+
+	var data struct {
+		Targets []api.Registration `json:"targets"`
+	}
+	if err := json.Unmarshal(resp.Payload, &data); err != nil {
+		mod.Memory().WriteUint32Le(resultPtr, 0)
+		mod.Memory().WriteUint32Le(resultPtr+4, 0)
+		return
+	}
+
+	var allCaps []api.Capability
+	for _, target := range data.Targets {
+		allCaps = append(allCaps, target.Capabilities...)
+	}
+
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		return
+	}
+
+	// alloy_capability_t is 40 bytes
+	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(allCaps)*40))
+	basePtr := uint32(res[0])
+	for i, cap := range allCaps {
+		r.writeCapability(ctx, mod, basePtr+uint32(i*40), cap)
+	}
+
+	mod.Memory().WriteUint32Le(resultPtr, basePtr)
+	mod.Memory().WriteUint32Le(resultPtr+4, uint32(len(allCaps)))
+}
+
+func (r *Runtime) writeCapability(ctx context.Context, mod wazeroapi.Module, ptr uint32, cap api.Capability) {
+	alloc := mod.ExportedFunction("cabi_realloc")
+	if alloc == nil {
+		return
+	}
+
+	writeStr := func(fieldPtr uint32, s string) {
+		if s == "" {
+			mod.Memory().WriteUint32Le(fieldPtr, 0)
+			mod.Memory().WriteUint32Le(fieldPtr+4, 0)
+			return
+		}
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		mod.Memory().Write(uint32(res[0]), []byte(s))
+		mod.Memory().WriteUint32Le(fieldPtr, uint32(res[0]))
+		mod.Memory().WriteUint32Le(fieldPtr+4, uint32(len(s)))
+	}
+
+	writeStr(ptr, cap.Method)           // offset 0
+	writeStr(ptr+8, cap.Description)    // offset 8
+	
+	// offset 16: shortcut (option<string>)
+	if cap.Shortcut != "" {
+		mod.Memory().WriteUint32Le(ptr+16, 1)
+		writeStr(ptr+20, cap.Shortcut)
+	} else {
+		mod.Memory().WriteUint32Le(ptr+16, 0)
+		mod.Memory().WriteUint32Le(ptr+20, 0)
+		mod.Memory().WriteUint32Le(ptr+24, 0)
+	}
+
+	// offset 28: annotations (option<list<tuple<string, string>>>)
+	if len(cap.Annotations) > 0 {
+		mod.Memory().WriteUint32Le(ptr+28, 1) // is_some
+		
+		metaData := make([]byte, len(cap.Annotations)*16)
+		i := 0
+		for k, v := range cap.Annotations {
+			// Write key
+			keyRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(k)))
+			mod.Memory().Write(uint32(keyRes[0]), []byte(k))
+			i32le.PutUint32(metaData[i*16:], uint32(keyRes[0]))
+			i32le.PutUint32(metaData[i*16+4:], uint32(len(k)))
+
+			// Write value
+			valRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(v)))
+			mod.Memory().Write(uint32(valRes[0]), []byte(v))
+			i32le.PutUint32(metaData[i*16+8:], uint32(valRes[0]))
+			i32le.PutUint32(metaData[i*16+12:], uint32(len(v)))
+			i++
+		}
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(metaData)))
+		mod.Memory().Write(uint32(res[0]), metaData)
+		mod.Memory().WriteUint32Le(ptr+32, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+36, uint32(len(cap.Annotations)))
+	} else {
+		mod.Memory().WriteUint32Le(ptr+28, 0)
+		mod.Memory().WriteUint32Le(ptr+32, 0)
+		mod.Memory().WriteUint32Le(ptr+36, 0)
+	}
 }
 
 func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, resultPtr uint32) {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
 	
-	// Synchronous call to buffer-manager
+	// Synchronous call to buffer plugin
 	resp, err := r.callFn(ctx, api.Message{
 		ID:      fmt.Sprintf("read-buf-%d", time.Now().UnixNano()),
+		Type:    api.TypeRequest,
 		Sender:  mod.Name(),
-		Target:  "buffer-manager",
+		Target:  "buffer",
 		Method:  "read",
 		Payload: []byte(fmt.Sprintf("{\"id\":\"%s\"}", id)),
 	})
@@ -1005,8 +1164,9 @@ func (r *Runtime) internalWriteBuffer(ctx context.Context, mod wazeroapi.Module,
 	
 	_, err := r.callFn(ctx, api.Message{
 		ID:      fmt.Sprintf("write-buf-%d", time.Now().UnixNano()),
+		Type:    api.TypeRequest,
 		Sender:  mod.Name(),
-		Target:  "buffer-manager",
+		Target:  "buffer",
 		Method:  "write",
 		Payload: payload,
 	})
@@ -1020,8 +1180,9 @@ func (r *Runtime) internalWriteBuffer(ctx context.Context, mod wazeroapi.Module,
 func (r *Runtime) internalListBuffers(ctx context.Context, mod wazeroapi.Module, resultPtr uint32) {
 	resp, err := r.callFn(ctx, api.Message{
 		ID:      fmt.Sprintf("list-bufs-%d", time.Now().UnixNano()),
+		Type:    api.TypeRequest,
 		Sender:  mod.Name(),
-		Target:  "buffer-manager",
+		Target:  "buffer",
 		Method:  "list",
 		Payload: []byte("{}"),
 	})

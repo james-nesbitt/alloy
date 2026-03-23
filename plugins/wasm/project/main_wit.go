@@ -167,6 +167,12 @@ func main() {
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Project manager initializing")
 
+		// Register in the component registry
+		plugin.RegisterCapability(AlloyCapability{
+			Method:      "project:get_active",
+			Description: "Get the current active project",
+		})
+
 		// Automatically discover workspaces on start
 		go discoverWorkspaces("/")
 

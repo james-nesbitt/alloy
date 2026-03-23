@@ -17,7 +17,7 @@ type Model struct {
 	messages []string
 	Viewport viewport.Model
 	Textarea textarea.Model
-	targets  []frontend.Registration
+	targets  []api.Registration
 	Err      error
 	Width    int
 	Height   int
@@ -124,7 +124,7 @@ type Cursor struct {
 }
 
 type DiscoveryMsg struct {
-	Targets []frontend.Registration `json:"targets"`
+	Targets []api.Registration `json:"targets"`
 }
 
 type MessageMsg api.Message
