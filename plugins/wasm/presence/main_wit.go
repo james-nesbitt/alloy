@@ -166,7 +166,12 @@ func publishPresenceEvent(userID string, eventType string) {
 		"event":     eventType,
 		"timestamp": time.Now().Unix(),
 	}
-	payload, _ := json.Marshal(evt)
+	
+	// Create the event payload as expected by the events plugin
+	payload, _ := json.Marshal(map[string]interface{}{
+		"topic": "presence:" + eventType,
+		"data":  evt,
+	})
 	
 	plugin.RouteMessage(AlloyMessage{
 		Id:      fmt.Sprintf("presence-evt-%d", time.Now().UnixNano()),

@@ -250,6 +250,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.subscribe("chat:message"), m.subscribe("chat:direct"),
 					m.subscribe("chat:presence"), m.subscribe("project:opened"),
 					m.subscribe("workspace:opened"),
+					m.subscribe("presence:online"), m.subscribe("presence:offline"),
+					m.subscribe("presence:heartbeat"),
 					m.subscribe("plugin:crashed"), m.subscribe("plugin:load_failed"),
 					m.subscribe("buffer:update"), m.subscribe("buffer:cursors_updated"),
 					m.subscribe("dashboard:widget-registered"),
@@ -261,6 +263,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
 				m.subscriptions["workspace:opened"] = true
+				m.subscriptions["presence:online"] = true
+				m.subscriptions["presence:offline"] = true
+				m.subscriptions["presence:heartbeat"] = true
 				m.subscriptions["component:registered"] = true
 
 				// NEW: Request initial dashboard widgets
@@ -368,6 +373,24 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				}
 			} else {
 				displayMsg = fmt.Sprintf("[%s] Workspace active: %s", time.Now().Format("15:04:05"), event.Data.Name)
+			}
+		}
+	}
+
+	if msg.Sender == "events" && (msg.Method == "presence:online" || msg.Method == "presence:offline" || msg.Method == "presence:heartbeat") {
+		var event struct {
+			Topic string `json:"topic"`
+			Data  struct {
+				UserID    string `json:"user_id"`
+				Event     string `json:"event"`
+				Timestamp int64  `json:"timestamp"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(msg.Payload, &event); err == nil {
+			if event.Data.Event == "online" {
+				displayMsg = fmt.Sprintf("[%s] User joined: %s", time.Now().Format("15:04:05"), event.Data.UserID)
+			} else if event.Data.Event == "offline" {
+				displayMsg = fmt.Sprintf("[%s] User left: %s", time.Now().Format("15:04:05"), event.Data.UserID)
 			}
 		}
 	}
