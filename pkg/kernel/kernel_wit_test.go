@@ -2,10 +2,12 @@ package kernel_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
@@ -75,7 +77,7 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 	// Test 1: Register WASM plugin
 	pluginID := "test-plugin"
 	caps := []api.Capability{
-		{Method: "test:method", Description: "Test method"},
+		{Method: "status", Description: "Test method"},
 	}
 
 	err = kernel.RegisterWASMPlugin(pluginID, wasmBytes, caps)
@@ -94,7 +96,7 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 		t.Error("plugin should have 1 capability")
 	}
 
-	if pluginMD.Capabilities[0].Method != "test:method" {
+	if pluginMD.Capabilities[0].Method != "status" {
 		t.Error("unexpected capability method")
 	}
 
@@ -120,68 +122,83 @@ func TestWITKernelMessageRouting(t *testing.T) {
 	}
 
 	// Create WIT kernel
-	kernel, err := kernel.NewWITKernel(logger, kv, tempDir)
+	k, err := kernel.NewWITKernel(logger, kv, tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kernel.Shutdown(context.Background())
+	defer k.Shutdown(context.Background())
 
-	// Create a simple WASM module for testing
-	wasmBytes := createTestWASMModule(t)
-
-	// Register WASM plugin
-	pluginID := "test-plugin"
-	caps := []api.Capability{
-		{Method: "test:method", Description: "Test method"},
+	// Read the health plugin for testing
+	cwd, _ := os.Getwd()
+	projectRoot := filepath.Dir(filepath.Dir(cwd))
+	healthWasm, err := os.ReadFile(filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/health.wasm"))
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	err = kernel.RegisterWASMPlugin(pluginID, wasmBytes, caps)
+	// Register WASM plugin
+	pluginID := "health"
+	caps := []api.Capability{
+		{Method: "status", Description: "Get health status"},
+	}
+
+	err = k.RegisterWASMPlugin(pluginID, healthWasm, caps)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create frontend channel
 	frontendCh := make(chan api.Message, 10)
-	frontendID := "test-frontend"
+	frontendID := "test-user"
 
 	// Register frontend
-	kernel.RegisterFrontend(frontendID, frontendCh)
-	defer kernel.UnregisterFrontend(frontendID)
+	k.RegisterFrontend(frontendID, frontendCh)
+	defer k.UnregisterFrontend(frontendID)
 
 	// Test 1: Route message to plugin
 	testMsg := api.Message{
 		ID:      "test-1",
-		Method:  "test:method",
+		Type:    api.TypeRequest,
+		Method:  "status",
 		Sender:  frontendID,
 		Target:  pluginID,
 		Payload: []byte(`{}`),
 	}
 
-	// This would normally be called by a frontend
-	// For testing, we'll use the kernel's routeMessage method directly
-	err = routeMessageToPlugin(kernel, pluginID, testMsg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Route the message through kernel (this should trigger IAM check if present, 
+	// which is allowed for health:status by default as per iam_interceptor logic)
+	go k.RouteMessage(context.Background(), testMsg)
 
-	// Test 2: Verify message was routed
-	// In a real test, we would verify the plugin received the message
-	// and sent a response
+	// Test 2: Verify message was routed and we got a response in the frontend
+	select {
+	case resp := <-frontendCh:
+		if resp.ID != "test-1-resp" {
+			t.Errorf("unexpected response ID: %s", resp.ID)
+		}
+		if resp.Sender != "health" {
+			t.Errorf("unexpected response sender: %s", resp.Sender)
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["status"] != "healthy" {
+			t.Errorf("unexpected status: %s", payload["status"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for response from plugin")
+	}
 
 	t.Log("WIT kernel message routing test passed!")
 }
 
-// routeMessageToPlugin routes a message to a plugin using the kernel's internal method.
-func routeMessageToPlugin(k *kernel.WITKernel, pluginID string, msg api.Message) error {
-	// This is a test helper that would normally be called by a frontend
-	// In a real implementation, we would use the kernel's routeMessage method
-	return nil
-}
-
-// createTestWASMModule creates a simple WASM module for testing.
 func createTestWASMModule(t *testing.T) []byte {
-	// In a real test, we would build a WASM module
-	// For now, we'll skip this test
-	t.Skip("WASM module creation not implemented")
-	return nil
+	// Re-use built-in plugins for kernel testing
+	cwd, _ := os.Getwd()
+	projectRoot := filepath.Dir(filepath.Dir(cwd))
+	healthWasm, err := os.ReadFile(filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/health.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return healthWasm
 }

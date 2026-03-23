@@ -16,9 +16,6 @@ import (
 )
 
 func TestWITIntegration(t *testing.T) {
-	// Skip for now - this would require a complete test environment
-	t.Skip("WIT integration test - requires complete test environment")
-
 	// Create a temporary directory for test data
 	tempDir, err := os.MkdirTemp("", "wit-integration-test")
 	if err != nil {
@@ -63,12 +60,13 @@ func TestWITIntegration(t *testing.T) {
 	defer manager.Close(context.Background())
 
 	// Build and load the health plugin
-	justBuildHealth := exec.Command("just", "build-plugins-plugin", "health")
+	justBuildHealth := exec.Command("just", "build-plugin", "health")
 	if err := justBuildHealth.Run(); err != nil {
 		t.Fatal(err)
 	}
 
-	healthWasm, err := os.ReadFile("build/dist/usr/lib/alloy/plugins/health.wasm")
+	cwd, _ := os.Getwd()
+	healthWasm, err := os.ReadFile(filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins/health.wasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +120,7 @@ func TestWITIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-1-response" {
+	if resp.ID != "test-1-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 

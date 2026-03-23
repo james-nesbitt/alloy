@@ -16,9 +16,6 @@ import (
 )
 
 func TestWITPlugins(t *testing.T) {
-	// Skip for now - this would require a complete test environment
-	t.Skip("WIT plugin test - requires complete test environment")
-
 	// Create a temporary directory for test data
 	tempDir, err := os.MkdirTemp("", "wit-plugins-test")
 	if err != nil {
@@ -45,7 +42,7 @@ func TestWITPlugins(t *testing.T) {
 	// Create call function
 	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
 		resp := api.Message{
-			ID:      msg.ID + "-response",
+			ID:      msg.ID + "-resp",
 			Type:    "response",
 			Method:  msg.Method,
 			Sender:  msg.Target,
@@ -68,6 +65,9 @@ func TestWITPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	cwd, _ := os.Getwd()
+	projectRoot := filepath.Dir(cwd)
+
 	// Test each plugin
 	testPlugins := []struct {
 		name     string
@@ -77,13 +77,13 @@ func TestWITPlugins(t *testing.T) {
 	}{
 		{
 			name:     "health",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/health.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/health.wasm"),
 			caps:     []api.Capability{{Method: "status", Description: "Get health status"}},
 			tests:    testHealthPlugin,
 		},
 		{
 			name:     "buffer",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/buffer.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/buffer.wasm"),
 			caps: []api.Capability{
 				{Method: "create", Description: "Create buffer"},
 				{Method: "list", Description: "List buffers"},
@@ -92,7 +92,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "chat",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/chat.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/chat.wasm"),
 			caps: []api.Capability{
 				{Method: "send", Description: "Send message"},
 				{Method: "history", Description: "Get history"},
@@ -101,7 +101,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "ai",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/ai.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/ai.wasm"),
 			caps: []api.Capability{
 				{Method: "query", Description: "Query AI"},
 				{Method: "config:get", Description: "Get AI config"},
@@ -110,7 +110,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "project",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/project.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/project.wasm"),
 			caps: []api.Capability{
 				{Method: "create", Description: "Create project"},
 				{Method: "list", Description: "List projects"},
@@ -119,7 +119,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "iam",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/iam.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/iam.wasm"),
 			caps: []api.Capability{
 				{Method: "check", Description: "Check authorization"},
 			},
@@ -127,7 +127,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "secrets",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/secrets.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/secrets.wasm"),
 			caps: []api.Capability{
 				{Method: "store_secret", Description: "Store secret"},
 				{Method: "get_secret", Description: "Get secret"},
@@ -136,7 +136,7 @@ func TestWITPlugins(t *testing.T) {
 		},
 		{
 			name:     "tasks",
-			wasmFile: "build/dist/usr/lib/alloy/plugins/tasks.wasm",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/tasks.wasm"),
 			caps: []api.Capability{
 				{Method: "create", Description: "Create task"},
 				{Method: "list", Description: "List tasks"},
@@ -193,7 +193,7 @@ func testHealthPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-health-response" {
+	if resp.ID != "test-health-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 
@@ -227,7 +227,7 @@ func testBufferPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-buffer-create-response" {
+	if resp.ID != "test-buffer-create-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 
@@ -263,7 +263,7 @@ func testChatPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-chat-send-response" {
+	if resp.ID != "test-chat-send-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 }
@@ -288,7 +288,7 @@ func testAIPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-ai-config-response" {
+	if resp.ID != "test-ai-config-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 
@@ -324,7 +324,7 @@ func testProjectPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-project-create-response" {
+	if resp.ID != "test-project-create-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 
@@ -360,7 +360,7 @@ func testIAMPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-iam-check-response" {
+	if resp.ID != "test-iam-check-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 
@@ -397,7 +397,7 @@ func testSecretsPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-secrets-store-response" {
+	if resp.ID != "test-secrets-store-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 }
@@ -422,7 +422,7 @@ func testTasksPlugin(t *testing.T, manager *wasm.Manager) {
 		t.Fatal(err)
 	}
 
-	if resp.ID != "test-tasks-create-response" {
+	if resp.ID != "test-tasks-create-resp" {
 		t.Errorf("unexpected response ID: %s", resp.ID)
 	}
 
