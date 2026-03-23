@@ -30,7 +30,7 @@ To build the entire project (Core, Plugins, GUIs, CLI):
 ```bash
 # 1. Install prerequisites (Go 1.25+, TinyGo 0.33+, wit-bindgen-cli, just)
 # 2. Build everything
-just all
+just build-all
 ```
 
 The primary entry point is the `alloy` tool:
@@ -59,7 +59,7 @@ Alloy uses a `justfile` for orchestration. Key commands include:
 
 | Command | Description |
 |---------|-------------|
-| `just all` | Build both the Core and all Plugins |
+| `just build-all` | Build both the Core and all Plugins |
 | `just build-core` | Build the Go backend binary |
 | `just build-plugins` | Build all WASM-based plugins |
 | `just setup-dev` | Configure Go workspace and replacements |

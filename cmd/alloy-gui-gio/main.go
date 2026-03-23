@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"gioui.org/app"
-	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -69,22 +68,33 @@ type aiQueryState struct {
 	cancel widget.Clickable
 }
 
+type DashboardTile struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Content   []string `json:"content"`
+	Status    string   `json:"status"`
+	Actions   []string `json:"actions"`
+	Timestamp int64    `json:"timestamp"`
+}
+
 type guiState struct {
-	mode          int
-	isLeader      bool
-	breadcrumbs   []string
-	targets       []frontend.Registration
-	commandTree   *frontend.CommandNode
-	recency       map[string]int
-	activeProject *Project
-	projects      []Project
-	showProjects  bool
-	subscriptions map[string]bool
-	projectCreate projectCreateState
-	aiSwitch      aiSwitchState
-	aiQuery       aiQueryState
-	selectedIdx   int
-	filtered      []frontend.SearchItem
+	mode           int
+	isLeader       bool
+	breadcrumbs    []string
+	targets        []frontend.Registration
+	commandTree    *frontend.CommandNode
+	recency        map[string]int
+	activeProject  *Project
+	projects       []Project
+	showProjects   bool
+	subscriptions  map[string]bool
+	projectCreate  projectCreateState
+	aiSwitch       aiSwitchState
+	aiQuery        aiQueryState
+	selectedIdx    int
+	filtered       []frontend.SearchItem
+	dashboardTiles map[string]DashboardTile
+	tileOrder      []string
 }
 
 func main() {
@@ -134,6 +144,25 @@ func run(w *app.Window, client *frontend.Client) error {
 	projList.Axis = layout.Vertical
 	gui.subscriptions = make(map[string]bool)
 	gui.recency = make(map[string]int)
+	gui.dashboardTiles = make(map[string]DashboardTile)
+	// Initial mock tiles to verify layout
+	gui.dashboardTiles["team"] = DashboardTile{
+		Title:   "Team Presence",
+		Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
+		Status:  "Active",
+		Actions: []string{"Invite", "Call"},
+	}
+	gui.dashboardTiles["ai"] = DashboardTile{
+		Title:   "AI Assistant",
+		Content: []string{"Last Task: refactor TUI layout", "Status: Ready"},
+		Actions: []string{"Ask", "Reset Context"},
+	}
+	gui.dashboardTiles["project"] = DashboardTile{
+		Title:   "Current Project",
+		Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-dashboards", "Health: Stable"},
+		Status:  "OK",
+	}
+	gui.tileOrder = []string{"team", "ai", "project"}
 
 	// Discovery Loop
 	go func() {
@@ -217,6 +246,27 @@ func run(w *app.Window, client *frontend.Client) error {
 				gui.activeProject = &ev.Data
 			}
 		}
+
+		if msg.Method == "dashboard-update" {
+			var tile DashboardTile
+			if err := json.Unmarshal(msg.Payload, &tile); err == nil {
+				if gui.dashboardTiles == nil {
+					gui.dashboardTiles = make(map[string]DashboardTile)
+				}
+				gui.dashboardTiles[msg.Sender] = tile
+
+				found := false
+				for _, id := range gui.tileOrder {
+					if id == msg.Sender {
+						found = true
+						break
+					}
+				}
+				if !found {
+					gui.tileOrder = append(gui.tileOrder, msg.Sender)
+				}
+			}
+		}
 		w.Invalidate()
 	})
 
@@ -228,8 +278,7 @@ func run(w *app.Window, client *frontend.Client) error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
-			// Declare interest in events for the 'gui' tag
-			event.Op(gtx.Ops, &gui)
+			// Declare interest in events
 
 			// Initial focus at startup
 			if gui.mode == ModeNormal && !gtx.Focused(&gui) && !gtx.Focused(&input) {
@@ -251,8 +300,8 @@ func run(w *app.Window, client *frontend.Client) error {
 			// Capture keyboard events
 			for {
 				ev, ok := gtx.Event(
-					key.Filter{Focus: &gui, Name: key.NameDownArrow + "|" + key.NameUpArrow},
-					key.Filter{Focus: &input, Name: key.NameEnter + "|" + key.NameEscape + "|" + key.NameDownArrow + "|" + key.NameUpArrow + "|" + key.NameDeleteBackward + "|" + key.NameSpace},
+					key.Filter{Focus: &gui},
+					key.Filter{Focus: &input},
 				)
 				if !ok {
 					break
@@ -265,6 +314,25 @@ func run(w *app.Window, client *frontend.Client) error {
 						gui.breadcrumbs = nil
 						gui.selectedIdx = 0
 						gtx.Execute(key.FocusCmd{Tag: &gui})
+					case ":":
+						if gui.mode == ModeNormal {
+							gui.mode = ModeCommand
+							gui.isLeader = false
+							gui.breadcrumbs = nil
+							input.SetText(":")
+							gui.selectedIdx = 0
+							gtx.Execute(key.FocusCmd{Tag: &input})
+							goto skipInput
+						}
+					case key.NameSpace, " ":
+						if gui.mode == ModeNormal {
+							gui.mode = ModeCommand
+							gui.isLeader = true
+							gui.breadcrumbs = nil
+							gui.selectedIdx = 0
+							gtx.Execute(key.FocusCmd{Tag: &input})
+							goto skipInput
+						}
 					case key.NameDownArrow:
 						if len(gui.filtered) > 0 {
 							gui.selectedIdx = (gui.selectedIdx + 1) % len(gui.filtered)
@@ -309,15 +377,6 @@ func run(w *app.Window, client *frontend.Client) error {
 									gtx.Execute(key.FocusCmd{Tag: &gui})
 								}
 							}
-						}
-					case key.NameSpace:
-						if gui.mode == ModeNormal {
-							gui.mode = ModeCommand
-							gui.isLeader = true
-							gui.breadcrumbs = nil
-							gui.selectedIdx = 0
-							gtx.Execute(key.FocusCmd{Tag: &input})
-							goto skipInput
 						}
 					default:
 						// Handle leader sequence (runes only if input is empty)
@@ -456,17 +515,25 @@ func run(w *app.Window, client *frontend.Client) error {
 						}),
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							msgs := client.Messages()
-							return material.List(th, &list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
-								msg := msgs[i]
-								return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									formatted := formatMessage(msg)
-									label := material.Body1(th, formatted)
-									if msg.Method == "plugin:crashed" || msg.Method == "plugin:load_failed" {
-										label.Color = color.NRGBA{R: 255, G: 0, B: 0, A: 255}
-									}
-									return label.Layout(gtx)
-								})
-							})
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return drawDashboard(gtx, th, &gui)
+								}),
+								layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									return material.List(th, &list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
+										msg := msgs[i]
+										return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											formatted := formatMessage(msg)
+											label := material.Body1(th, formatted)
+											if msg.Method == "plugin:crashed" || msg.Method == "plugin:load_failed" {
+												label.Color = color.NRGBA{R: 255, G: 0, B: 0, A: 255}
+											}
+											return label.Layout(gtx)
+										})
+									})
+								}),
+							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if gui.mode != ModeCommand {
@@ -827,6 +894,72 @@ func formatMessage(msg api.Message) string {
 		}
 	}
 	return fmt.Sprintf("[%s] %s: %s", ts, msg.Sender, string(msg.Payload))
+}
+
+func drawDashboard(gtx layout.Context, th *material.Theme, gui *guiState) layout.Dimensions {
+	if len(gui.tileOrder) == 0 {
+		return layout.Dimensions{}
+	}
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			title := material.H6(th, "Project Dashboard")
+			title.Color = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
+			return layout.UniformInset(unit.Dp(8)).Layout(gtx, title.Layout)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			var rows []layout.FlexChild
+			for i := 0; i < len(gui.tileOrder); i += 2 {
+				end := i + 2
+				if end > len(gui.tileOrder) {
+					end = len(gui.tileOrder)
+				}
+				rowTiles := gui.tileOrder[i:end]
+
+				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					var cols []layout.FlexChild
+					for _, id := range rowTiles {
+						tile := gui.dashboardTiles[id]
+						cols = append(cols, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return widget.Border{
+									Color: color.NRGBA{R: 100, G: 100, B: 100, A: 255},
+									Width: unit.Dp(1),
+									CornerRadius: unit.Dp(4),
+								}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+													layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+														t := material.Body1(th, tile.Title)
+														t.Font.Weight = 700
+														return t.Layout(gtx)
+													}),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														s := material.Caption(th, tile.Status)
+														s.Color = color.NRGBA{R: 150, G: 150, B: 150, A: 255}
+														return s.Layout(gtx)
+													}),
+												)
+											}),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												content := strings.Join(tile.Content, "\n")
+												return material.Caption(th, content).Layout(gtx)
+											}),
+										)
+									})
+								})
+							})
+						}))
+					}
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, cols...)
+				}))
+			}
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+		}),
+	)
 }
 
 func executeCommand(client *frontend.Client, gui *guiState, content string, w *app.Window) {

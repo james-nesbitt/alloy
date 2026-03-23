@@ -29,7 +29,7 @@ help:
 # --- FLATPAK ---
 
 # Build everything and then build a flatpak for the GUI
-flatpak: all
+flatpak: build-all
     flatpak-builder --force-clean --user --install build/flatpak com.james_nesbitt.AlloyGui.yaml
     @echo "Alloy GUI Flatpak (com.james-nesbitt.AlloyGui) built and installed."
 
@@ -106,7 +106,7 @@ build-plugins: generate
 	@echo ">> WASM plugins built successfully."
 
 # Build everything
-all: setup-dev build-plugins build-binaries pack-config
+build-all: setup-dev build-plugins build-binaries pack-config
     @echo ">> Build complete. Optimized layout in {{DIST_ROOT}}"
 
 # Package default configuration

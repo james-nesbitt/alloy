@@ -62,6 +62,8 @@ type model struct {
 	// Dashboard state
 	dashboardTiles map[string]DashboardTile
 	tileOrder      []string
+
+	lastMainMode int
 }
 
 const (
@@ -128,243 +130,220 @@ func (m model) listenForMessages() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var (
-		tiCmd tea.Cmd
-		vpCmd tea.Cmd
-		ciCmd tea.Cmd
-	)
-
-	// In Command mode, only update the command input.
-	if m.mode == ModeCommand {
-		// skip manual update here as it's handled in handleCommandMode specifically
-	} else if m.mode == ModeInsert {
-		m.textarea, tiCmd = m.textarea.Update(msg)
-	}
-
-	m.viewport, vpCmd = m.viewport.Update(msg)
+	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height - 3 // Adjust for status and command line
+		m.viewport.Height = msg.Height - 3
 		m.textarea.SetWidth(msg.Width)
 		m.commandInput.SetWidth(msg.Width)
-
 		if !m.ready {
 			m.ready = true
 		}
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(
+		cmds = append(cmds,
 			tea.Tick(time.Minute, func(t time.Time) tea.Msg { return tickMsg(t) }),
 			m.doDiscovery,
 			m.sendPresenceHeartbeat(),
 		)
 
+	case tea.KeyMsg:
+		// Global quit
+		if msg.Type == tea.KeyCtrlC {
+			return m, tea.Quit
+		}
+
+		// Handle keys based on mode
+		switch m.mode {
+		case ModeNormal, ModeDashboard:
+			newM, cmd := m.handleNormalMode(msg)
+			if cmd != nil { cmds = append(cmds, cmd) }
+			m = newM.(model)
+			var vpCmd tea.Cmd
+			m.viewport, vpCmd = m.viewport.Update(msg)
+			if vpCmd != nil { cmds = append(cmds, vpCmd) }
+
+		case ModeInsert:
+			newM, cmd := m.handleInsertMode(msg, nil)
+			if cmd != nil { cmds = append(cmds, cmd) }
+			m = newM.(model)
+			var taCmd tea.Cmd
+			m.textarea, taCmd = m.textarea.Update(msg)
+			if taCmd != nil { cmds = append(cmds, taCmd) }
+
+		case ModeChat:
+			newM, cmd := m.handleChatMode(msg, nil)
+			if cmd != nil { cmds = append(cmds, cmd) }
+			m = newM.(model)
+			var taCmd tea.Cmd
+			m.textarea, taCmd = m.textarea.Update(msg)
+			if taCmd != nil { cmds = append(cmds, taCmd) }
+
+		case ModeCommand:
+			newM, cmd := m.handleCommandMode(msg, nil)
+			if cmd != nil { cmds = append(cmds, cmd) }
+			m = newM.(model)
+
+		case ModeForm:
+			newM, cmd := m.handleFormMode(msg, nil)
+			if cmd != nil { cmds = append(cmds, cmd) }
+			m = newM.(model)
+		}
+
 	case discoveryMsg:
 		m.targets = msg.Targets
-		if m.statuses == nil {
-			m.statuses = make(map[string]string)
-		}
+		if m.statuses == nil { m.statuses = make(map[string]string) }
 		for _, t := range m.targets {
-			if t.Status != "" {
-				m.statuses[t.ID] = t.Status
-			}
+			if t.Status != "" { m.statuses[t.ID] = t.Status }
 		}
 		m.commandTree = frontend.BuildCommandTree(m.targets)
-		var cmds []tea.Cmd
 		for _, t := range m.targets {
 			if t.ID == "events" && !m.subscriptions["chat:message"] {
-				cmds = append(cmds, m.subscribe("chat:message"))
-				cmds = append(cmds, m.subscribe("chat:direct"))
-				cmds = append(cmds, m.subscribe("chat:presence"))
-				cmds = append(cmds, m.subscribe("project:opened"))
+				cmds = append(cmds, m.subscribe("chat:message"), m.subscribe("chat:direct"), 
+					m.subscribe("chat:presence"), m.subscribe("project:opened"), 
+					m.subscribe("plugin:crashed"), m.subscribe("plugin:load_failed"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true
 				m.subscriptions["chat:presence"] = true
 				m.subscriptions["project:opened"] = true
-				cmds = append(cmds, m.subscribe("plugin:crashed"))
-				cmds = append(cmds, m.subscribe("plugin:load_failed"))
 			}
 			if t.ID == "project" && m.activeProject == nil {
 				cmds = append(cmds, m.fetchActiveProject())
 			}
 		}
-		return m, tea.Batch(cmds...)
-
-	case tea.KeyMsg:
-		// Top-level key handling based on mode
-		switch m.mode {
-		case ModeNormal:
-			return m.handleNormalMode(msg)
-		case ModeInsert:
-			return m.handleInsertMode(msg, tiCmd)
-		case ModeChat:
-			return m.handleChatMode(msg, tiCmd)
-		case ModeCommand:
-			return m.handleCommandMode(msg, ciCmd)
-		case ModeForm:
-			return m.handleFormMode(msg, ciCmd)
-		}
 
 	case messageMsg:
-		var displayMsg string
-		if msg.Sender == "events" && msg.Method == "project:opened" {
-			var event struct {
-				Topic string  `json:"topic"`
-				Data  Project `json:"data"`
-			}
-			if err := json.Unmarshal(msg.Payload, &event); err == nil {
-				m.activeProject = &event.Data
-				displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.activeProject.Name)
-				
-				// Handle layout switch
-				if m.activeProject.Layout.DefaultMode == "dashboard" {
-					m.mode = ModeDashboard
-				} else if m.activeProject.Layout.DefaultMode == "chat" {
-					m.mode = ModeChat
-				}
-			}
-		}
-
-		if msg.Method == "dashboard-update" {
-			var tile DashboardTile
-			if err := json.Unmarshal(msg.Payload, &tile); err == nil {
-				if m.dashboardTiles == nil {
-					m.dashboardTiles = make(map[string]DashboardTile)
-				}
-				m.dashboardTiles[msg.Sender] = tile
-				
-				found := false
-				for _, id := range m.tileOrder {
-					if id == msg.Sender { 
-						found = true 
-						break 
-					}
-				}
-				if !found {
-					m.tileOrder = append(m.tileOrder, msg.Sender)
-				}
-				return m, m.listenForMessages()
-			}
-		}
-
-		if displayMsg == "" && msg.Sender == "project" && msg.Method == "active-resp" {
-			var p Project
-			if err := json.Unmarshal(msg.Payload, &p); err == nil {
-				m.activeProject = &p
-			}
-		}
-
-		if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-resp" {
-			var resp struct {
-				Projects []Project `json:"projects"`
-			}
-			if err := json.Unmarshal(msg.Payload, &resp); err == nil {
-				m.projects = resp.Projects
-				// If we were waiting for projects, don't display the raw JSON
-				return m, m.listenForMessages()
-			}
-		}
-
-		if displayMsg == "" && msg.Sender == "events" {
-			switch msg.Method {
-			case "plugin:crashed":
-				var ev struct {
-					Topic string `json:"topic"`
-					Data  struct {
-						ID    string `json:"id"`
-						Error string `json:"error"`
-					} `json:"data"`
-				}
-				if err := json.Unmarshal(msg.Payload, &ev); err == nil {
-					if m.statuses == nil {
-						m.statuses = make(map[string]string)
-					}
-					m.statuses[ev.Data.ID] = "crashed"
-					displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render(
-						fmt.Sprintf("[%s] !!! Plugin %s CRASHED: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
-				}
-			case "plugin:load_failed":
-				var ev struct {
-					Topic string `json:"topic"`
-					Data  struct {
-						ID    string `json:"id"`
-						Error string `json:"error"`
-					} `json:"data"`
-				}
-				if err := json.Unmarshal(msg.Payload, &ev); err == nil {
-					displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(
-						fmt.Sprintf("[%s] !!! Plugin %s Load Failed: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
-				}
-			case "chat:message":
-				var chatMsg struct {
-					Sender  string `json:"sender"`
-					Channel string `json:"channel"`
-					Content string `json:"content"`
-				}
-				if err := json.Unmarshal(msg.Payload, &chatMsg); err == nil {
-					displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
-						time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
-				}
-			case "chat:direct":
-				var dm struct {
-					From    string `json:"from"`
-					To      string `json:"to"`
-					Content string `json:"content"`
-				}
-				if err := json.Unmarshal(msg.Payload, &dm); err == nil {
-					displayMsg = fmt.Sprintf("[%s] DM (%s > %s) %s",
-						time.Now().Format("15:04:05"), dm.From, dm.To, dm.Content)
-				}
-			case "chat:presence":
-				var pres struct {
-					User   string `json:"user"`
-					Status string `json:"status"`
-				}
-				if err := json.Unmarshal(msg.Payload, &pres); err == nil {
-					displayMsg = fmt.Sprintf("[%s] * %s is now %s",
-						time.Now().Format("15:04:05"), pres.User, pres.Status)
-				}
-			}
-		}
-
-		if displayMsg == "" {
-			if msg.Type == api.TypeResponse {
-				displayMsg = fmt.Sprintf("[%s] < %s", time.Now().Format("15:04:05"), string(msg.Payload))
-			} else {
-				displayMsg = fmt.Sprintf("[%s] %s: %s",
-					time.Now().Format("15:04:05"), msg.Sender, string(msg.Payload))
-			}
-		}
-
-		m.messages = append(m.messages, displayMsg)
-		m.viewport.SetContent(strings.Join(m.messages, "\n"))
-		m.viewport.GotoBottom()
-		return m, m.listenForMessages()
+		cmds = append(cmds, m.processMessage(api.Message(msg)))
 
 	case errMsg:
 		m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("!! "+msg.Error()))
 		m.viewport.SetContent(strings.Join(m.messages, "\n"))
 		m.viewport.GotoBottom()
-		return m, nil
 	}
 
-	return m, tea.Batch(tiCmd, vpCmd, ciCmd)
+	return m, tea.Batch(cmds...)
+}
+
+func (m model) processMessage(msg api.Message) tea.Cmd {
+	var displayMsg string
+	if msg.Sender == "events" && msg.Method == "project:opened" {
+		var event struct {
+			Topic string  `json:"topic"`
+			Data  Project `json:"data"`
+		}
+		if err := json.Unmarshal(msg.Payload, &event); err == nil {
+			m.activeProject = &event.Data
+			displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.activeProject.Name)
+			if m.activeProject.Layout.DefaultMode == "dashboard" {
+				m.mode = ModeDashboard
+			} else if m.activeProject.Layout.DefaultMode == "chat" {
+				m.mode = ModeChat
+			}
+		}
+	}
+
+	if msg.Method == "dashboard-update" {
+		var tile DashboardTile
+		if err := json.Unmarshal(msg.Payload, &tile); err == nil {
+			if m.dashboardTiles == nil { m.dashboardTiles = make(map[string]DashboardTile) }
+			m.dashboardTiles[msg.Sender] = tile
+			found := false
+			for _, id := range m.tileOrder {
+				if id == msg.Sender { found = true; break }
+			}
+			if !found { m.tileOrder = append(m.tileOrder, msg.Sender) }
+		}
+		return m.listenForMessages()
+	}
+
+	if displayMsg == "" && msg.Sender == "project" && msg.Method == "active-resp" {
+		var p Project
+		if err := json.Unmarshal(msg.Payload, &p); err == nil {
+			m.activeProject = &p
+		}
+	}
+
+	if displayMsg == "" && msg.Sender == "project" && msg.Method == "list-resp" {
+		var resp struct {
+			Projects []Project `json:"projects"`
+		}
+		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
+			m.projects = resp.Projects
+			return m.listenForMessages()
+		}
+	}
+
+	if displayMsg == "" && msg.Sender == "events" {
+		switch msg.Method {
+		case "plugin:crashed":
+			var ev struct {
+				Topic string `json:"topic"`
+				Data  struct {
+					ID    string `json:"id"`
+					Error string `json:"error"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+				if m.statuses == nil { m.statuses = make(map[string]string) }
+				m.statuses[ev.Data.ID] = "crashed"
+				displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render(
+					fmt.Sprintf("[%s] !!! Plugin %s CRASHED: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
+			}
+		case "plugin:load_failed":
+			var ev struct {
+				Topic string `json:"topic"`
+				Data  struct {
+					ID    string `json:"id"`
+					Error string `json:"error"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
+				displayMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(
+					fmt.Sprintf("[%s] !!! Plugin %s Load Failed: %s", time.Now().Format("15:04:05"), ev.Data.ID, ev.Data.Error))
+			}
+		case "chat:message":
+			var chatMsg struct {
+				Sender  string `json:"sender"`
+				Channel string `json:"channel"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(msg.Payload, &chatMsg); err == nil {
+				displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
+					time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
+			}
+		}
+	}
+
+	if displayMsg == "" {
+		if msg.Type == api.TypeResponse {
+			displayMsg = fmt.Sprintf("[%s] < %s", time.Now().Format("15:04:05"), string(msg.Payload))
+		} else {
+			displayMsg = fmt.Sprintf("[%s] %s: %s", time.Now().Format("15:04:05"), msg.Sender, string(msg.Payload))
+		}
+	}
+
+	m.messages = append(m.messages, displayMsg)
+	m.viewport.SetContent(strings.Join(m.messages, "\n"))
+	m.viewport.GotoBottom()
+	return m.listenForMessages()
 }
 
 func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case ":", "alt+x":
+		m.lastMainMode = m.mode
 		m.mode = ModeCommand
 		m.isLeader = false
 		m.commandInput.SetValue(":")
 		m.commandInput.Focus()
 		return m, nil
 	case " ":
+		m.lastMainMode = m.mode
 		m.mode = ModeCommand
 		m.isLeader = true
 		m.commandInput.SetValue("")
@@ -510,7 +489,8 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlG:
-		m.mode = ModeNormal
+		m.mode = m.lastMainMode
+		if m.mode == ModeCommand { m.mode = ModeNormal } // Failsafe
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		m.breadcrumbs = nil
@@ -531,7 +511,8 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		if filteredCount > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
 			opt := filtered[m.selectedCmdIdx]
 			if m.selectType == SelectProject {
-				m.mode = ModeNormal
+				m.mode = m.lastMainMode
+				if m.mode == ModeCommand { m.mode = ModeNormal } // Failsafe
 				m.commandInput.Blur()
 				m.selectType = SelectNone
 				m.commandInput.SetValue("")
@@ -547,7 +528,8 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					// Find the node to execute it properly
 					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
 					if node != nil {
-						m.mode = ModeNormal
+						m.mode = m.lastMainMode
+						if m.mode == ModeCommand { m.mode = ModeNormal } // Failsafe
 						m.commandInput.Blur()
 						m.commandInput.SetValue("")
 						m.breadcrumbs = nil
@@ -556,7 +538,8 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					}
 				}
 			} else {
-				m.mode = ModeNormal
+				m.mode = m.lastMainMode
+				if m.mode == ModeCommand { m.mode = ModeNormal } // Failsafe
 				m.commandInput.Blur()
 				m.commandInput.SetValue("")
 				m.breadcrumbs = nil
@@ -566,7 +549,8 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		}
 
 		cmd := m.commandInput.Value()
-		m.mode = ModeNormal
+		m.mode = m.lastMainMode
+		if m.mode == ModeCommand { m.mode = ModeNormal } // Failsafe
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		m.breadcrumbs = nil
@@ -601,7 +585,8 @@ func (m model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		if node != nil {
 			if child, ok := node.Children[char]; ok {
 				if len(child.Children) == 0 {
-					m.mode = ModeNormal
+					m.mode = m.lastMainMode
+					if m.mode == ModeCommand { m.mode = ModeNormal } // Failsafe
 					m.isLeader = false
 					m.breadcrumbs = nil
 					m.selectedCmdIdx = 0
@@ -1152,11 +1137,24 @@ func (m model) View() string {
 	)
 
 	var mainView string
-	if m.mode == ModeInsert || m.mode == ModeChat {
+	renderMode := m.mode
+	workingHeight := m.height - 3
+	if m.mode == ModeCommand || m.mode == ModeForm {
+		renderMode = m.lastMainMode
+		workingHeight = (m.height * 2) / 3
+	}
+
+	if renderMode == ModeInsert || renderMode == ModeChat {
+		m.textarea.SetHeight(workingHeight)
 		mainView = m.textarea.View()
-	} else if m.mode == ModeDashboard {
+	} else if renderMode == ModeDashboard {
+		// Temporarily adjust m.height for dashboardView logic
+		oldHeight := m.height
+		m.height = workingHeight + 3
 		mainView = m.dashboardView()
+		m.height = oldHeight
 	} else {
+		m.viewport.Height = workingHeight
 		mainView = m.viewport.View()
 	}
 

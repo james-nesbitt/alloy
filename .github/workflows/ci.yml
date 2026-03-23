@@ -37,7 +37,7 @@ jobs:
           sudo dpkg -i tinygo_0.35.0_amd64.deb
 
       - name: Build Everything (Standard FHS Layout)
-        run: just all
+        run: just build-all
 
       - name: Verify Build Layout
         run: |

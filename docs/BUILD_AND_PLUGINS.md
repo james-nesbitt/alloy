@@ -19,7 +19,7 @@ Alloy uses a `justfile` (via [just](https://github.com/casey/just)) to manage it
 
 | Target | Description | Command |
 |--------|-------------|---------|
-| `all` | Build everything (Core, Plugins, GUIs, CLI) | `just all` |
+| `build-all` | Build everything (Core, Plugins, GUIs, CLI) | `just build-all` |
 | `build-core` | Build the Alloy Core (Backend) | `just build-core` |
 | `build-plugins`| Build all WASM plugins | `just build-plugins` |
 | `build-binaries`| Build all host binaries (Core, TUI, GUI, CLI) | `just build-binaries` |
