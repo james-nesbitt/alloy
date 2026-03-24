@@ -1,0 +1,77 @@
+/* Alloy Web CSS Framework */
+:root {
+  --alloy-bg: #000;
+  --alloy-zinc-950: #09090b;
+  --alloy-zinc-900: #18181b;
+  --alloy-zinc-800: #27272a;
+}
+
+body {
+  margin: 0;
+  background: var(--alloy-bg);
+  padding: 0;
+  overflow: hidden;
+}
+
+header {
+  height: 40px;
+}
+
+#viewport {
+  height: calc(100vh - 40px - 32px);
+}
+
+.text-gold {
+  color: #ffde59;
+}
+
+/* Scrollbar hardening */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--alloy-zinc-950);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--alloy-zinc-800);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+[class*="flex"] { display: flex; }
+[class*="flex-col"] { flex-direction: column; }
+[class*="items-center"] { align-items: center; }
+[class*="justify-between"] { justify-content: space-between; }
+[class*="px-4"] { padding-left: 1rem; padding-right: 1rem; }
+[class*="py-2"] { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+[class*="border-b"] { border-bottom: 1px solid #18181b; }
+[class*="border-t"] { border-top: 1px solid #18181b; }
+[class*="bg-black"] { background-color: #000; }
+[class*="bg-zinc-950"] { background-color: #09090b; }
+[class*="bg-zinc-900"] { background-color: #18181b; }
+[class*="bg-zinc-800"] { background-color: #27272a; }
+[class*="h-screen"] { height: 100vh; }
+[class*="overflow-hidden"] { overflow: hidden; }
+[class*="text-zinc-500"] { color: #71717a; }
+[class*="text-zinc-300"] { color: #d4d4d8; }
+[class*="text-white"] { color: #fff; }
+[class*="font-mono"] { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+[class*="antialiased"] { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+#command-overlay.flex { display: flex; }
+#command-overlay.hidden { display: none; }
+.fixed { position: fixed; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.z-50 { z-index: 50; }
+.bg-black\/60 { background-color: rgba(0,0,0,0.6); }
+.backdrop-blur-sm { backdrop-filter: blur(4px); }
+.max-w-2xl { max-width: 42rem; }
+.w-full { width: 100%; }
+.rounded-xl { border-radius: 0.75rem; }
+.shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
