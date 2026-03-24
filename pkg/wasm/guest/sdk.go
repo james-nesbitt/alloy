@@ -104,6 +104,21 @@ func (p *Plugin) WithShortcut(shortcut string) *Plugin {
 	return p
 }
 
+// WithAnnotations adds annotations to the last added capability.
+func (p *Plugin) WithAnnotations(method string, annotations map[string]string) *Plugin {
+	for i, cap := range p.capabilities {
+		if cap.Method == method {
+			annots := make([]guest.AlloyTuple2StringStringT, 0, len(annotations))
+			for k, v := range annotations {
+				annots = append(annots, guest.AlloyTuple2StringStringT{F0: k, F1: v})
+			}
+			p.capabilities[i].Annotations = guest.Some(annots)
+			break
+		}
+	}
+	return p
+}
+
 // RegisterMethod registers a handler for a specific message method.
 func (p *Plugin) RegisterMethod(method string, description string, handler Handler) *Plugin {
 	p.handlers[method] = handler

@@ -590,6 +590,20 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 	return tea.Batch(append(cmds, m.listenForMessages())...)
 }
 
+func (m Model) hasCapability(cap string) bool {
+	if m.commandTree == nil {
+		return false
+	}
+	// We check if any node in the tree provides this method
+	flattened := m.commandTree.Flatten("")
+	for _, item := range flattened {
+		if item.Method == cap {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case ":", "alt+x":
@@ -607,6 +621,10 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.commandInput.Focus()
 		return m, nil
 	case "i":
+		if !m.hasCapability("buffer:write") && !m.hasCapability("ui:view:editor") {
+			m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("!! Editor service (buffer) not available."))
+			return m, nil
+		}
 		m.Mode = ModeInsert
 		m.textarea.Focus()
 		return m, nil
@@ -619,6 +637,10 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.isLeader = false
 		return m, nil
 	case "c":
+		if !m.hasCapability("chat:send") && !m.hasCapability("ui:view:chat") {
+			m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("!! Chat service not available."))
+			return m, nil
+		}
 		m.Mode = ModeChat
 		m.textarea.Placeholder = "Type message to #" + m.ActiveChannel + "..."
 		m.textarea.Focus()

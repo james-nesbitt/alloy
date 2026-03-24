@@ -52,7 +52,9 @@ func main() {
 		WithCapability("chat:direct:send", "Send a direct message").
 		WithCapability("chat:direct:history", "Get direct message history").
 		WithCapability("chat:presence:update", "Update user presence status").
-		WithCapability("chat:presence:list", "List online users")
+		WithCapability("chat:presence:list", "List online users").
+		WithCapability("ui:view:chat", "Open the chat view").
+		WithAnnotations("ui:view:chat", map[string]string{"type": "chat", "title": "Team Chat"})
 
 	// Set up message handlers
 	plugin.Handle("chat:send", handleSendMessage)
@@ -61,6 +63,7 @@ func main() {
 	plugin.Handle("chat:presence:list", handlePresenceList)
 	plugin.Handle("chat:direct:history", handleDirectHistory)
 	plugin.Handle("chat:history", handleHistory)
+	plugin.Handle("ui:view:chat", func(msg AlloyMessage) AlloyMessage { return plugin.Reply(msg, "ok") })
 
 	// Backward compatibility handlers
 	plugin.Handle("send", handleSendMessage)

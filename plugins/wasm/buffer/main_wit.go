@@ -68,7 +68,9 @@ func main() {
 		WithCapability("buffer:unload", "Remove a buffer from memory only").
 		WithCapability("buffer:save", "Save buffer to persistent storage").WithShortcut("b s").
 		WithCapability("buffer:load", "Load buffers from persistent storage").WithShortcut("b o").
-		WithCapability("buffer:update-cursor", "Update user cursor position")
+		WithCapability("buffer:update-cursor", "Update user cursor position").
+		WithCapability("ui:view:editor", "Open the code editor view").
+		WithAnnotations("ui:view:editor", map[string]string{"type": "editor", "title": "Code Editor"})
 
 	// Set up message handlers
 	plugin.Handle("buffer:create", handleCreate)
@@ -84,6 +86,7 @@ func main() {
 	plugin.Handle("buffer:load", handleLoad)
 	plugin.Handle("buffer:set_metadata", handleSetMetadata)
 	plugin.Handle("buffer:update_cursor", handleUpdateCursor)
+	plugin.Handle("ui:view:editor", func(msg AlloyMessage) AlloyMessage { return plugin.Reply(msg, "ok") })
 
 	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
