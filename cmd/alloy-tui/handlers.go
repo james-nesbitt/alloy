@@ -522,6 +522,16 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 				} else {
 					node := m.commandTree.Find(append(m.breadcrumbs, opt.Display))
 					if node != nil {
+						if len(node.Params) > 0 {
+							m.Mode = tui.ModeForm
+							m.formTitle = node.Target + " " + node.Method
+							m.formFields = node.Params
+							m.formValues = make([]string, len(node.Params))
+							m.formIdx = 0
+							m.commandInput.SetValue("")
+							m.commandInput.Focus()
+							return m, nil
+						}
 						m.Mode = m.lastMainMode
 						m.commandInput.Blur()
 						m.commandInput.SetValue("")
@@ -531,6 +541,17 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 					}
 				}
 			} else {
+				// Omni mode
+				if len(opt.Params) > 0 {
+					m.Mode = tui.ModeForm
+					m.formTitle = opt.Raw
+					m.formFields = opt.Params
+					m.formValues = make([]string, len(opt.Params))
+					m.formIdx = 0
+					m.commandInput.SetValue("")
+					m.commandInput.Focus()
+					return m, nil
+				}
 				m.Mode = m.lastMainMode
 				m.commandInput.Blur()
 				m.commandInput.SetValue("")
@@ -578,7 +599,7 @@ func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 			m.Mode = tui.ModeNormal
 			m.commandInput.Blur()
 			m.commandInput.SetValue("")
-			return m.executeCommand(m.formTitle)
+			return m.executeFormCommand()
 		}
 		m.commandInput.SetValue("")
 		return m, nil

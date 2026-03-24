@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
-	"sort"
 	"strings"
 	"time"
 
@@ -202,49 +201,7 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 			}
 
 			content := input.Text()
-			if strings.HasPrefix(content, ":") {
-				content = content[1:]
-			}
-
-			if gui.isLeader && content == "" {
-				node := gui.commandTree.Find(gui.breadcrumbs)
-				if node != nil {
-					gui.filtered = nil
-					keys := make([]string, 0, len(node.Children))
-					for k := range node.Children {
-						keys = append(keys, k)
-					}
-					sort.Strings(keys)
-					for _, k := range keys {
-						child := node.Children[k]
-						gui.filtered = append(gui.filtered, frontend.SearchItem{
-							FullTitle:   k,
-							Description: child.Description,
-							Target:      child.Target,
-							Method:      child.Method,
-							Shortcut:    child.Shortcut,
-						})
-					}
-				}
-			} else {
-				flattened := gui.commandTree.Flatten("")
-				var scored []frontend.SearchItem
-				for _, item := range flattened {
-					if frontend.FuzzyMatch(item.FullTitle, content) {
-						item.Weight = gui.recency[item.Target+" "+item.Method]
-						scored = append(scored, item)
-					}
-				}
-				frontend.SortItems(scored)
-				if len(scored) > 10 {
-					scored = scored[:10]
-				}
-				gui.filtered = scored
-			}
-
-			if gui.selectedIdx >= len(gui.filtered) {
-				gui.selectedIdx = 0
-			}
+			gui.updateFiltered(content)
 
 			return widget.Border{
 				Color: color.NRGBA{A: 255},
@@ -284,7 +241,28 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 									}),
 									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 										return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+											return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if item.Group == "" {
+														return layout.Dimensions{}
+													}
+													return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return layout.Stack{}.Layout(gtx,
+															layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+																paint.FillShape(gtx.Ops, color.NRGBA{R: 80, G: 80, B: 100, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+																return layout.Dimensions{Size: gtx.Constraints.Min}
+															}),
+															layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+																c := material.Caption(th, strings.ToUpper(item.Group))
+																c.Font.Weight = 700
+																c.TextSize = unit.Sp(10)
+																c.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+																return layout.UniformInset(unit.Dp(3)).Layout(gtx, c.Layout)
+															}),
+														)
+													})
+												}),
+												layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													c := material.Caption(th, item.FullTitle)
 													c.Font.Weight = 700
@@ -360,7 +338,7 @@ func renderModals(gtx layout.Context, th *material.Theme, client *frontend.Clien
 	paintOverlay(gtx, color.NRGBA{A: 150})
 
 	switch gui.mode {
-	case ModeProjectCreate:
+	case ModeForm:
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return widget.Border{
@@ -378,47 +356,47 @@ func renderModals(gtx layout.Context, th *material.Theme, client *frontend.Clien
 						}),
 						layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-									layout.Rigid(material.H6(th, "Create New Project").Layout),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								var children []layout.FlexChild
+								children = append(children, layout.Rigid(material.H6(th, strings.ToUpper(gui.form.title)).Layout))
+
+								for i, field := range gui.form.fields {
+									idx := i
+									children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 										return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.projectCreate.name, "Name").Layout(gtx)
+											return material.Editor(th, &gui.form.editors[idx], field).Layout(gtx)
 										})
-									}),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.projectCreate.description, "Description").Layout(gtx)
-										})
-									}),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEvenly}.Layout(gtx,
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												if gui.projectCreate.submit.Clicked(gtx) {
-													name := gui.projectCreate.name.Text()
-													description := gui.projectCreate.description.Text()
-													if name != "" {
-														payload, _ := json.Marshal(map[string]string{
-															"name":        name,
-															"description": description,
-														})
-														go client.Send(context.Background(), "project", "create", payload)
-														gui.mode = ModeNormal
-														gui.projectCreate.name.SetText("")
-														gui.projectCreate.description.SetText("")
-													}
+									}))
+								}
+
+								children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEvenly}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if gui.form.submit.Clicked(gtx) {
+												payloadMap := make(map[string]string)
+												for i, field := range gui.form.fields {
+													payloadMap[field] = gui.form.editors[i].Text()
 												}
-												return material.Button(th, &gui.projectCreate.submit, "Create").Layout(gtx)
-											}),
-											layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												if gui.projectCreate.cancel.Clicked(gtx) {
-													gui.mode = ModeNormal
+												payload, _ := json.Marshal(payloadMap)
+
+												parts := strings.Fields(gui.form.title)
+												if len(parts) >= 2 {
+													go client.Send(context.Background(), parts[0], parts[1], payload)
 												}
-												return material.Button(th, &gui.projectCreate.cancel, "Cancel").Layout(gtx)
-											}),
-										)
-									}),
-								)
+												gui.mode = ModeNormal
+											}
+											return material.Button(th, &gui.form.submit, "Submit").Layout(gtx)
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if gui.form.cancel.Clicked(gtx) {
+												gui.mode = ModeNormal
+											}
+											return material.Button(th, &gui.form.cancel, "Cancel").Layout(gtx)
+										}),
+									)
+								}))
+
+								return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, children...)
 							})
 						}),
 					)

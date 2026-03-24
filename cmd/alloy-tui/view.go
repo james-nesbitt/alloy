@@ -152,14 +152,22 @@ func (m Model) View() string {
 				marginaliaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Italic(true)
 
 				var rows []string
-				lastTarget := ""
+				lastGroup := ""
 				for i, opt := range filtered {
-					// Grouping
-					target := strings.Split(opt.Raw, " ")[0]
-					if !m.isLeader && target != lastTarget {
-						groupHeader := lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Bold(true).Render(" ── " + strings.ToUpper(target) + " ")
+					// Grouping by Annotation (Group)
+					group := opt.Annotation
+					if group == "" {
+						target := opt.Raw
+						if idx := strings.Index(opt.Raw, " "); idx != -1 {
+							target = opt.Raw[:idx]
+						}
+						group = target
+					}
+
+					if group != lastGroup {
+						groupHeader := lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Bold(true).Render(" ── " + strings.ToUpper(group) + " ")
 						rows = append(rows, groupHeader)
-						lastTarget = target
+						lastGroup = group
 					}
 
 					label := opt.Display

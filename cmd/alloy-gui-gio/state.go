@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,14 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
+
+type formState struct {
+	title       string
+	fields      []string
+	editors     []widget.Editor
+	submit      widget.Clickable
+	cancel      widget.Clickable
+}
 
 type guiState struct {
 	mode            int
@@ -28,7 +37,7 @@ type guiState struct {
 	showProjects    bool
 	showWorkspaces  bool
 	subscriptions   map[string]bool
-	projectCreate   projectCreateState
+	form            formState
 	aiSwitch        aiSwitchState
 	aiQuery         aiQueryState
 	menuBtn         widget.Clickable
@@ -36,13 +45,7 @@ type guiState struct {
 	filtered        []frontend.SearchItem
 	dashboardTiles  map[string]frontend.DashboardTile
 	tileOrder       []string
-}
-
-type projectCreateState struct {
-	name        widget.Editor
-	description widget.Editor
-	submit      widget.Clickable
-	cancel      widget.Clickable
+	frequencies     map[string]int
 }
 
 type aiSwitchState struct {
@@ -128,6 +131,14 @@ func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *front
 		if g.mode == ModeCommand {
 			if len(g.filtered) > 0 && g.selectedIdx >= 0 && g.selectedIdx < len(g.filtered) {
 				item := g.filtered[g.selectedIdx]
+				if len(item.Params) > 0 {
+					g.form.title = item.Target + " " + item.Method
+					g.form.fields = item.Params
+					g.form.editors = make([]widget.Editor, len(item.Params))
+					g.mode = ModeForm
+					w.Invalidate()
+					return
+				}
 				executeCommand(client, g, fmt.Sprintf("%s %s", item.Target, item.Method), w)
 				input.SetText("")
 				g.mode = ModeNormal
@@ -173,6 +184,15 @@ func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *front
 				if nodeAt != nil {
 					if child, ok := nodeAt.Children[keyLow]; ok {
 						if len(child.Children) == 0 {
+							if len(child.Params) > 0 {
+								g.form.title = child.Target + " " + child.Method
+								g.form.fields = child.Params
+								g.form.editors = make([]widget.Editor, len(child.Params))
+								g.mode = ModeForm
+								w.Invalidate()
+								return
+							}
+
 							executeCommand(client, g, fmt.Sprintf("%s %s", child.Target, child.Method), w)
 							g.mode = ModeNormal
 							g.isLeader = false
@@ -194,6 +214,72 @@ func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *front
 	}
 }
 
+func (g *guiState) updateFiltered(content string) {
+	if strings.HasPrefix(content, ":") {
+		content = content[1:]
+	}
+
+	if g.isLeader && content == "" {
+		node := g.commandTree.Find(g.breadcrumbs)
+		if node != nil {
+			g.filtered = nil
+			keys := make([]string, 0, len(node.Children))
+			for k := range node.Children {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				child := node.Children[k]
+				g.filtered = append(g.filtered, frontend.SearchItem{
+					FullTitle:   k,
+					Description: child.Description,
+					Target:      child.Target,
+					Method:      child.Method,
+					Shortcut:    child.Shortcut,
+					Group:       child.Annotation,
+				})
+			}
+		}
+	} else {
+		flattened := g.commandTree.Flatten("")
+		var scored []frontend.SearchItem
+		for _, item := range flattened {
+			score := frontend.FuzzyScore(item.FullTitle, content)
+			if score > 0 {
+				item.Weight = score
+
+				// Frequency & Recency boost
+				key := item.Target + " " + item.Method
+				if freq, ok := g.frequencies[key]; ok {
+					item.Frequency = freq
+				}
+				if lastUsed, ok := g.recency[key]; ok {
+					item.Recency = lastUsed
+				}
+
+				// Contextual boost
+				if (g.mode == ModeAiSwitch || g.mode == ModeAiQuery) && (item.Target == "ai" || item.Target == "chat") {
+					item.Weight += 200
+				}
+				if (g.activeProject != nil) && (item.Target == "project") {
+					item.Weight += 50
+				}
+
+				scored = append(scored, item)
+			}
+		}
+		frontend.SortItems(scored)
+		if len(scored) > 10 {
+			scored = scored[:10]
+		}
+		g.filtered = scored
+	}
+
+	if g.selectedIdx >= len(g.filtered) {
+		g.selectedIdx = 0
+	}
+}
+
 func executeCommand(client *frontend.Client, gui *guiState, content string, w *app.Window) {
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, ":") {
@@ -203,6 +289,16 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 	if len(parts) >= 2 {
 		target := parts[0]
 		method := parts[1]
+		key := target + " " + method
+
+		if gui.recency == nil {
+			gui.recency = make(map[string]int)
+		}
+		if gui.frequencies == nil {
+			gui.frequencies = make(map[string]int)
+		}
+		gui.recency[key] = int(time.Now().Unix())
+		gui.frequencies[key]++
 
 		// Normalized method for internal checks (strip prefix if it matches target)
 		cleanMethod := method
@@ -211,11 +307,6 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 				cleanMethod = method[idx+1:]
 			}
 		}
-
-		if gui.recency == nil {
-			gui.recency = make(map[string]int)
-		}
-		gui.recency[target+" "+method] = int(time.Now().Unix())
 
 		payload := ""
 		if len(parts) > 2 {
@@ -230,34 +321,9 @@ func executeCommand(client *frontend.Client, gui *guiState, content string, w *a
 			return
 		}
 
-		if target == "project" && cleanMethod == "list-workspaces" && payload == "" {
+		if (target == "project") && (cleanMethod == "set-workspace" || cleanMethod == "list-workspaces") && payload == "" {
 			gui.showWorkspaces = !gui.showWorkspaces
 			gui.showProjects = false
-			w.Invalidate()
-			return
-		}
-
-		if (target == "project") && (cleanMethod == "set-workspace") && payload == "" {
-			gui.showWorkspaces = !gui.showWorkspaces
-			gui.showProjects = false
-			w.Invalidate()
-			return
-		}
-
-		if target == "project" && cleanMethod == "create" && payload == "" {
-			gui.mode = ModeProjectCreate
-			w.Invalidate()
-			return
-		}
-
-		if (target == "ai") && (cleanMethod == "switch" || cleanMethod == "provider:set") && payload == "" {
-			gui.mode = ModeAiSwitch
-			w.Invalidate()
-			return
-		}
-
-		if (target == "ai") && cleanMethod == "query" && payload == "" {
-			gui.mode = ModeAiQuery
 			w.Invalidate()
 			return
 		}

@@ -15,6 +15,7 @@ type CommandNode struct {
 	Children    map[string]*CommandNode
 	Annotation  string
 	Shortcut    string
+	Params      []string // Param names (e.g. ["name", "description"])
 }
 
 // BuildCommandTree constructs a tree from a list of plugin registrations.
@@ -45,6 +46,9 @@ func BuildCommandTree(regs []api.Registration) *CommandNode {
 						curr.Shortcut = cap.Shortcut
 						if group, ok := cap.Annotations["group"]; ok {
 							curr.Annotation = group
+						}
+						if params, ok := cap.Annotations["params"]; ok {
+							curr.Params = strings.Split(params, ",")
 						}
 					}
 				}
@@ -78,6 +82,12 @@ func BuildCommandTree(regs []api.Registration) *CommandNode {
 					Shortcut:    cap.Shortcut,
 					Children:    make(map[string]*CommandNode),
 				}
+				if group, ok := cap.Annotations["group"]; ok {
+					targetNode.Children[methodKey].Annotation = group
+				}
+				if params, ok := cap.Annotations["params"]; ok {
+					targetNode.Children[methodKey].Params = strings.Split(params, ",")
+				}
 			}
 		}
 	}
@@ -107,10 +117,12 @@ type SearchItem struct {
 	Shortcut    string
 	Target      string
 	Method      string
-	Weight      int
-	Frequency   int
+	Weight      int    // Fuzzy match score
+	Frequency   int    // Usage count
+	Recency     int    // Last use timestamp (offset)
 	Status      string // "running", "crashed", etc.
 	Group       string // For visual categorization
+	Params      []string // Param names
 }
 
 // Flatten extracts all leaf commands from the tree.
@@ -127,13 +139,18 @@ func (n *CommandNode) Flatten(prefix string) []SearchItem {
 		}
 
 		if child.Method != "" {
+			group := child.Annotation
+			if group == "" {
+				group = child.Target
+			}
 			results = append(results, SearchItem{
 				FullTitle:   newPrefix,
 				Description: child.Description,
 				Shortcut:    child.Shortcut,
 				Target:      child.Target,
 				Method:      child.Method,
-				Group:       child.Annotation,
+				Group:       group,
+				Params:      child.Params,
 			})
 		}
 
@@ -145,9 +162,19 @@ func (n *CommandNode) Flatten(prefix string) []SearchItem {
 // SortItems orders search results by weight (descending) and then lexicographically.
 func SortItems(items []SearchItem) {
 	sort.Slice(items, func(i, j int) bool {
+		// 1. Weight (Fuzzy Score)
 		if items[i].Weight != items[j].Weight {
 			return items[i].Weight > items[j].Weight
 		}
+		// 2. Frequency (Popularity)
+		if items[i].Frequency != items[j].Frequency {
+			return items[i].Frequency > items[j].Frequency
+		}
+		// 3. Recency (Last used)
+		if items[i].Recency != items[j].Recency {
+			return items[i].Recency > items[j].Recency
+		}
+		// 4. Alphabetical
 		return items[i].FullTitle < items[j].FullTitle
 	})
 }

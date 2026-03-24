@@ -12,6 +12,40 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
+func (m Model) executeFormCommand() (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	payloadMap := make(map[string]string)
+	for i, field := range m.formFields {
+		payloadMap[strings.ToLower(field)] = m.formValues[i]
+	}
+	payload, _ := json.Marshal(payloadMap)
+
+	parts := strings.Fields(m.formTitle)
+	if len(parts) < 2 {
+		return m, nil
+	}
+	target := parts[0]
+	method := parts[1]
+
+	cmds = append(cmds, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := m.client.Send(ctx, target, method, payload)
+		if err != nil {
+			return errMsg(err)
+		}
+		return messageMsg(resp)
+	})
+
+	// Reset form
+	m.formFields = nil
+	m.formValues = nil
+	m.formTitle = ""
+	m.formIdx = 0
+
+	return m, tea.Batch(cmds...)
+}
+
 func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	cmdStr = strings.TrimSpace(cmdStr)
@@ -59,28 +93,7 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 				m.commandInput.Focus()
 				return m, m.fetchWorkspaces()
 			}
-		case "create":
-			m.Mode = tui.ModeForm
-			m.formTitle = "project creation"
-			m.formFields = []string{"Name", "Description"}
-			m.formValues = make([]string, 2)
-			m.formIdx = 0
-			m.commandInput.Focus()
-			return m, nil
 		}
-	case "project creation": // Handler for form submission
-		payload, _ := json.Marshal(map[string]string{
-			"name":        m.formValues[0],
-			"description": m.formValues[1],
-		})
-		cmds = append(cmds, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			resp, _ := m.client.Send(ctx, "project", "create", payload)
-			return messageMsg(resp)
-		})
-		return m, tea.Batch(cmds...)
-
 	case "buffer":
 		switch method {
 		case "open", "read":
@@ -157,6 +170,14 @@ func (m Model) filteredCommands() []CommandOption {
 					status = s
 				}
 
+				// Boost contextual commands
+				if m.Mode == tui.ModeChat && (item.Target == "chat" || item.Target == "ai") {
+					score += 200
+				}
+				if m.ActiveProject != nil && (item.Target == "project") {
+					score += 50
+				}
+
 				results = append(results, CommandOption{
 					Raw:         item.Target + " " + item.Method,
 					Display:     item.FullTitle,
@@ -165,6 +186,7 @@ func (m Model) filteredCommands() []CommandOption {
 					Frequency:   m.frequency[item.Target+" "+item.Method],
 					Score:       score,
 					Annotation:  item.Group,
+					Params:      item.Params,
 				})
 			}
 		}

@@ -77,6 +77,7 @@ type CommandOption struct {
 	Status      string
 	Frequency   int
 	Score       int
+	Params      []string
 }
 
 type discoveryMsg struct {
@@ -124,6 +125,8 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 		Mode:          tui.ModeDashboard,
 		subscriptions: make(map[string]bool),
 		recency:       make(map[string]int),
+		frequency:     make(map[string]int),
+		statuses:      make(map[string]string),
 		DashboardTiles: make(map[string]frontend.DashboardTile),
 		TileOrder:      nil,
 		width:         80,

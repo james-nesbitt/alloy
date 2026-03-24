@@ -26,7 +26,7 @@ import (
 const (
 	ModeNormal = iota
 	ModeCommand
-	ModeProjectCreate
+	ModeForm
 	ModeAiSwitch
 	ModeAiQuery
 )
@@ -80,6 +80,7 @@ func run(w *app.Window, client *frontend.Client) error {
 	wsList.Axis = layout.Vertical
 	gui.subscriptions = make(map[string]bool)
 	gui.recency = make(map[string]int)
+	gui.frequencies = make(map[string]int)
 	gui.dashboardTiles = make(map[string]frontend.DashboardTile)
 
 	discoverCh := make(chan bool, 1)

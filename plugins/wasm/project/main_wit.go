@@ -139,16 +139,28 @@ func main() {
 		).
 		WithTags("project", "management", "organization").
 		WithCapability("project:create", "Create a new project").
+		WithAnnotations("project:create", map[string]string{
+			"group":  "project",
+			"params": "name,description",
+		}).
 		WithCapability("project:list", "List all projects").WithShortcut("p l").
 		WithCapability("project:get_active", "Get current active project").
 		WithCapability("project:add-buffer", "Add a buffer to a project").
 		WithCapability("project:add-channel", "Add a chat channel to a project").
 		WithCapability("project:import", "Import a workspace from a path").
 		WithCapability("project:open", "Open a project").WithShortcut("p o").
+		WithAnnotations("project:open", map[string]string{
+			"group":  "project",
+			"params": "id",
+		}).
 		WithCapability("project:save", "Save projects to durable store").
 		WithCapability("project:discover", "Automatically detect and register workspaces").WithShortcut("p d").
 		WithCapability("project:list-workspaces", "List all workspaces").WithShortcut("p p").
-		WithCapability("project:set-workspace", "Switch active workspace")
+		WithCapability("project:set-workspace", "Switch active workspace").
+		WithAnnotations("project:set-workspace", map[string]string{
+			"group":  "project",
+			"params": "id",
+		})
 
 	// Set up message handlers
 	plugin.Handle("project:create", handleCreate)
