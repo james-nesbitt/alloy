@@ -59,6 +59,35 @@ type Instance struct {
 	// pending responses: msgID -> channel
 	pmu     sync.Mutex
 	pending map[string]chan api.Message
+
+	// Resource limits
+	maxMemoryBytes uint32
+	msgPerSecond   int
+	msgCount       int
+	lastMsgReset   time.Time
+	rmu            sync.Mutex
+}
+
+func (i *Instance) checkMessageThrottle() error {
+	if i.msgPerSecond <= 0 {
+		return nil
+	}
+
+	i.rmu.Lock()
+	defer i.rmu.Unlock()
+
+	now := time.Now()
+	if now.Sub(i.lastMsgReset) > time.Second {
+		i.msgCount = 0
+		i.lastMsgReset = now
+	}
+
+	if i.msgCount >= i.msgPerSecond {
+		return fmt.Errorf("message rate limit exceeded (max %d/sec)", i.msgPerSecond)
+	}
+
+	i.msgCount++
+	return nil
 }
 
 // Metadata returns the plugin's metadata.
@@ -249,6 +278,19 @@ func (r *Runtime) internalLog(ctx context.Context, mod wazeroapi.Module, levelPt
 }
 
 func (r *Runtime) internalKVSet(ctx context.Context, mod wazeroapi.Module, keyPtr, keyLen, valuePtr, valueLen uint32) uint32 {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	// Check if this plugin has a storage limit (simple heuristic based on maxMemory)
+	if ok && instance.maxMemoryBytes > 0 {
+		// Just a simple safety check: don't allow items larger than 1/4 of total memory
+		if valueLen > instance.maxMemoryBytes / 4 {
+			r.logger.Error("kv-set size limit exceeded", "id", mod.Name(), "size", valueLen)
+			return 0
+		}
+	}
+
 	keyData, _ := mod.Memory().Read(keyPtr, keyLen)
 	valueData, _ := mod.Memory().Read(valuePtr, valueLen)
 	if err := r.kv.Set(mod.Name(), string(keyData), valueData); err != nil {
@@ -425,6 +467,17 @@ func (r *Runtime) internalRouteMessage(
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64,
 ) {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	if ok {
+		if err := instance.checkMessageThrottle(); err != nil {
+			r.logger.Warn("plugin message throttled", "id", mod.Name(), "error", err)
+			return
+		}
+	}
+
 	msg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
 	r.routerFn(ctx, msg)
 }
@@ -435,6 +488,23 @@ func (r *Runtime) internalCall(
 	targetSet, targetPtr, targetLen, payloadPtr, payloadLen uint32,
 	timestamp int64, resultPtr uint32,
 ) {
+	r.mu.RLock()
+	instance, ok := r.plugins[mod.Name()]
+	r.mu.RUnlock()
+
+	if ok {
+		if err := instance.checkMessageThrottle(); err != nil {
+			r.logger.Warn("plugin call throttled", "id", mod.Name(), "error", err)
+			r.writeMessage(ctx, mod, resultPtr, api.Message{
+				ID:      "throttle-err",
+				Type:    api.TypeResponse,
+				Sender:  "kernel",
+				Payload: []byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+			})
+			return
+		}
+	}
+
 	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
 	resp, err := r.callFn(ctx, apiMsg)
 	if err != nil {
@@ -518,7 +588,8 @@ func (r *Runtime) LoadPlugin(
 	ctx context.Context,
 	id string,
 	wasmBytes []byte,
-	fuelLimit uint64,
+	maxMemoryMB uint32,
+	msgPerSec int,
 	caps []api.Capability,
 ) (*Instance, error) {
 	pluginDir := filepath.Join(r.dataDir, id)
@@ -543,6 +614,10 @@ func (r *Runtime) LoadPlugin(
 		},
 		startedCh: startedCh,
 		pending:   make(map[string]chan api.Message),
+		
+		maxMemoryBytes: maxMemoryMB * 1024 * 1024,
+		msgPerSecond:   msgPerSec,
+		lastMsgReset:   time.Now(),
 	}
 
 	r.mu.Lock()

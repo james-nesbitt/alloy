@@ -446,8 +446,8 @@ func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 	})
 }
 
-// RegisterWASMPlugin registers a WASM plugin with the kernel.
-func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
+// RegisterWASMPluginAtScale registers a WASM plugin with explicit resource limits.
+func (k *WITKernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability) error {
 	plugin := &witPluginWrapper{
 		id:      pluginID,
 		manager: k.wasmManager,
@@ -456,7 +456,7 @@ func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps [
 
 	k.RegisterPlugin(plugin)
 
-	if err := k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, caps); err != nil {
+	if err := k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps); err != nil {
 		return err
 	}
 
@@ -468,6 +468,11 @@ func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps [
 	k.mu.Unlock()
 
 	return nil
+}
+
+// RegisterWASMPlugin registers a WASM plugin with the kernel using default limits.
+func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
+	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 100, caps)
 }
 
 // RegisterFrontend registers a frontend connection.
@@ -606,6 +611,8 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 		var req struct {
 			ID           string           `json:"id"`
 			Path         string           `json:"path"`
+			MaxMemoryMB  uint32           `json:"max_memory_mb"`
+			MsgPerSecond int              `json:"msg_per_second"`
 			Capabilities []api.Capability `json:"capabilities"`
 		}
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -617,7 +624,15 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 			return api.Message{}, err
 		}
 
-		if err := w.kernel.RegisterWASMPlugin(req.ID, wasmBytes, req.Capabilities); err != nil {
+		// Defaults if not provided
+		if req.MaxMemoryMB == 0 {
+			req.MaxMemoryMB = 128
+		}
+		if req.MsgPerSecond == 0 {
+			req.MsgPerSecond = 100
+		}
+
+		if err := w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, req.MsgPerSecond, req.Capabilities); err != nil {
 			return api.Message{}, err
 		}
 

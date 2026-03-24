@@ -53,15 +53,17 @@ func NewManager(
 	}, nil
 }
 
-// LoadPlugin loads a WASM plugin.
+// LoadPlugin loads a WASM plugin with resource limits.
 func (m *Manager) LoadPlugin(
 	ctx context.Context,
 	id string,
 	wasmBytes []byte,
+	maxMemoryMB uint32,
+	msgPerSec int,
 	caps []api.Capability,
 ) error {
 	// Load the plugin in the runtime
-	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, 0, caps)
+	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps)
 	if err != nil {
 		return err
 	}
