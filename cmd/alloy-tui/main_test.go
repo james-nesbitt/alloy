@@ -16,7 +16,7 @@ func TestTuiLeaderModeNavigation(t *testing.T) {
 	m.height = 24
 
 	// Manually inject a command tree
-	m.commandTree = frontend.BuildCommandTree([]frontend.Registration{
+	m.commandTree = frontend.BuildCommandTree([]api.Registration{
 		{
 			ID: "project",
 			Capabilities: []api.Capability{
@@ -67,7 +67,7 @@ func TestTuiLeaderModeNavigation(t *testing.T) {
 
 func TestTuiFuzzyMatching(t *testing.T) {
 	m := NewModel(nil, nil)
-	m.commandTree = frontend.BuildCommandTree([]frontend.Registration{
+	m.commandTree = frontend.BuildCommandTree([]api.Registration{
 		{
 			ID: "project",
 			Capabilities: []api.Capability{

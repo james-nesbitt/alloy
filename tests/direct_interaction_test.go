@@ -33,7 +33,7 @@ func TestAIDirectBufferInteraction(t *testing.T) {
 	}
 
 	// Create WIT kernel
-	k, err := kernel.NewWITKernel(logger, kv, tempDir)
+	k, err := kernel.NewWITKernel(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

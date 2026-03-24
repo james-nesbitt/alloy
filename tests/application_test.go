@@ -27,10 +27,32 @@ func TestApplicationPlugins(t *testing.T) {
 		"plugins": []map[string]any{
 			{"id": "kv", "type": "native"},
 			{"id": "logger", "type": "native"},
-			{"id": "buffer", "type": "wasm", "path": filepath.Join(buildDir, "buffer.wasm")},
-			{"id": "project", "type": "wasm", "path": filepath.Join(buildDir, "project.wasm")},
-			{"id": "chat", "type": "wasm", "path": filepath.Join(buildDir, "chat.wasm")},
-			{"id": "ai", "type": "wasm", "path": filepath.Join(buildDir, "ai.wasm"), "memory_limit_mb": 64},
+			{"id": "events", "type": "native"},
+			{
+				"id":           "buffer",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "buffer.wasm"),
+				"capabilities": []map[string]string{{"method": "buffer:create"}, {"method": "buffer:read"}},
+			},
+			{
+				"id":           "project",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "project.wasm"),
+				"capabilities": []map[string]string{{"method": "project:create"}, {"method": "project:open"}},
+			},
+			{
+				"id":           "chat",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "chat.wasm"),
+				"capabilities": []api.Capability{{Method: "chat:send"}},
+			},
+			{
+				"id":           "ai",
+				"type":         "wasm",
+				"path":         filepath.Join(buildDir, "ai.wasm"),
+				"max_memory_mb": 256,
+				"capabilities": []api.Capability{{Method: "ai:query"}},
+			},
 		},
 	}
 

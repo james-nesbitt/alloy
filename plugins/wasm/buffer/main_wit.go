@@ -95,6 +95,13 @@ func main() {
 	plugin.Handle("append", handleAppend)
 	plugin.Handle("list", handleList)
 	plugin.Handle("update_cursor", handleUpdateCursor)
+	plugin.Handle("clear", handleClear)
+	plugin.Handle("save", handleSave)
+	plugin.Handle("load", handleLoad)
+	plugin.Handle("delete", handleDelete)
+	plugin.Handle("unload", handleUnload)
+	plugin.Handle("subscribe", handleSubscribe)
+	plugin.Handle("set_metadata", handleSetMetadata)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -119,37 +126,6 @@ func main() {
 			RefreshIntervalMs: 5000,
 		})
 
-		// Periodically clean up stale cursors
-		go func() {
-			for {
-				time.Sleep(10 * time.Second) // Faster update during dev
-				now := time.Now().Unix()
-				for buffID, b := range buffers {
-					if b.UserCursors != nil {
-						changed := false
-						for userID, cursor := range b.UserCursors {
-							if now-cursor.LastSeen > 300 { // 5-minute timeout
-								delete(b.UserCursors, userID)
-								changed = true
-							}
-						}
-						if changed {
-							notifyAll(buffID, "cursors_updated")
-						}
-					}
-				}
-				
-				// Update Dashboard Widget
-				if len(buffers) > 0 {
-					var lines []string
-					for _, b := range buffers {
-						lines = append(lines, fmt.Sprintf("● %s (%s) - %d bytes", b.Name, b.MimeType, len(b.Data)))
-					}
-					plugin.UpdateWidget("buffer-summary", []byte(strings.Join(lines, "\n")))
-				}
-			}
-		}()
-		
 		return nil
 	})
 
@@ -332,7 +308,7 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	plugin.Log("info", fmt.Sprintf("Write: id=%s action=%s offset=%d", req.ID, req.Action, 0))
+	plugin.Log("info", fmt.Sprintf("Write: id=%s action=%s", req.ID, req.Action))
 	if req.Offset != nil {
 		plugin.Log("info", fmt.Sprintf("Write: has offset %d", *req.Offset))
 	}
@@ -348,6 +324,12 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 	}
 
 	if !req.Force && req.BaseVersion != root.Version {
+		// If it's a full replace (offset is nil), we don't transform, we conflict.
+		if req.Offset == nil {
+			plugin.Log("warn", "Full replace conflict detected")
+			return plugin.ErrorReply(msg, "conflict_detected")
+		}
+
 		// Attempt to transform the operation if we have history
 		if req.BaseVersion < root.Version && len(root.History) > 0 {
 			plugin.Log("info", fmt.Sprintf("Transforming write: base=%d current=%d", req.BaseVersion, root.Version))
@@ -380,7 +362,9 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 						}
 					}
 				}
-				plugin.Log("debug", fmt.Sprintf("Transformed offset: %d -> %d", *req.Offset, targetOffset))
+				if req.Offset != nil {
+					plugin.Log("debug", fmt.Sprintf("Transformed offset: %d -> %d", *req.Offset, targetOffset))
+				}
 			} else {
 				// History lost - fallback to conflict fail
 				plugin.Log("warn", "History too old, cannot transform")
@@ -389,6 +373,14 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 		} else if req.BaseVersion < root.Version {
 			return plugin.ErrorReply(msg, "conflict_detected")
 		}
+	}
+
+	// Bounds checking
+	if targetOffset < 0 {
+		targetOffset = 0
+	}
+	if targetOffset > len(root.Data) {
+		targetOffset = len(root.Data)
 	}
 
 	op := Operation{
@@ -408,12 +400,15 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 			root.Data = newData
 		} else if req.Action == "delete" {
 			// Remove data
-			if targetOffset+len(req.Content) <= len(root.Data) {
-				newData := make([]byte, len(root.Data)-len(req.Content))
-				copy(newData, root.Data[:targetOffset])
-				copy(newData[targetOffset:], root.Data[targetOffset+len(req.Content):])
-				root.Data = newData
+			endOffset := targetOffset + len(req.Content)
+			if endOffset > len(root.Data) {
+				endOffset = len(root.Data)
 			}
+			newData := make([]byte, len(root.Data)-(endOffset-targetOffset))
+			copy(newData, root.Data[:targetOffset])
+			copy(newData[targetOffset:], root.Data[endOffset:])
+			root.Data = newData
+			op.Length = endOffset - targetOffset
 		} else { // "replace" (default)
 			if targetOffset+len(req.Content) > len(root.Data) {
 				newData := make([]byte, targetOffset+len(req.Content))
@@ -537,12 +532,15 @@ func handleUnload(msg AlloyMessage) AlloyMessage {
 
 // handleClear handles buffer clear requests.
 func handleClear(msg AlloyMessage) AlloyMessage {
+	plugin.Log("info", "handleClear received")
 	var req struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
+
+	plugin.Log("info", "Clearing buffer "+req.ID)
 
 	root, ok := findRootBuffer(req.ID)
 	if !ok {

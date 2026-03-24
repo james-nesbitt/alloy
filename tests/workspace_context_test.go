@@ -80,7 +80,7 @@ func TestWorkspaceContext(t *testing.T) {
 		t.Skip("AI plugin not built, skipping")
 	}
 
-	err = manager.LoadPlugin(context.Background(), "ai", wasmBytes, nil)
+	err = manager.LoadPlugin(context.Background(), "ai", wasmBytes, 128, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

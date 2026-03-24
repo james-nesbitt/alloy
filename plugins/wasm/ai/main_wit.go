@@ -159,12 +159,6 @@ func main() {
 	plugin.OnInit(func() error {
 		plugin.Log("info", "AI Agent initializing")
 		
-		// Register in the component registry
-		plugin.RegisterCapability(AlloyCapability{
-			Method:      "ai:query",
-			Description: "Query the AI assistant",
-		})
-
 		// Register a dashboard widget
 		plugin.RegisterWidget(AlloyWidget{
 			Id:                "ai-status",

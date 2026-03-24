@@ -22,6 +22,7 @@ func StartCore(t *testing.T, corePath string, args []string) *exec.Cmd {
 	t.Helper()
 
 	cmd := exec.Command(corePath, args...)
+	cmd.Env = append(os.Environ(), "ALLOY_TEST_MODE=true")
 	// On Linux, we can ensure the child dies if the parent (the test) dies.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Pdeathsig: syscall.SIGKILL,

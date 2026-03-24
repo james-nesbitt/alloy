@@ -54,6 +54,11 @@ func main() {
 		}))
 	}
 
+	// Disable metrics for core tests if requested via env
+	if os.Getenv("ALLOY_TEST_MODE") == "true" {
+		*metricsAddr = ""
+	}
+
 	// Create data directory if it doesn't exist
 	if err := os.MkdirAll(*dataDir, 0755); err != nil {
 		logger.Error("failed to create data directory", "error", err)
@@ -179,6 +184,8 @@ type ProvisionPlugin struct {
 	Type         string           `json:"type"`
 	Path         string           `json:"path"`
 	LoadTime     string           `json:"load_time"`
+	MaxMemoryMB  uint32           `json:"max_memory_mb"`
+	MsgPerSecond int              `json:"msg_per_second"`
 	Capabilities []api.Capability `json:"capabilities"`
 }
 
@@ -244,6 +251,8 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 				pluginID:     p.ID,
 				path:         wasmPath,
 				logger:       logger,
+				maxMemoryMB:  p.MaxMemoryMB,
+				msgPerSecond: p.MsgPerSecond,
 				capabilities: p.Capabilities,
 			}, api.PluginMetadata{
 				ID:           p.ID,
@@ -259,7 +268,15 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 				continue
 			}
 
-			if err := k.RegisterWASMPlugin(p.ID, wasmBytes, p.Capabilities); err != nil {
+			// Defaults if not provided in manifest
+			if p.MaxMemoryMB == 0 {
+				p.MaxMemoryMB = 128
+			}
+			if p.MsgPerSecond == 0 {
+				p.MsgPerSecond = 1000
+			}
+
+			if err := k.RegisterWASMPluginAtScale(p.ID, wasmBytes, p.MaxMemoryMB, p.MsgPerSecond, p.Capabilities); err != nil {
 				logger.Error("failed to register boot-loaded plugin", "id", p.ID, "error", err)
 				continue
 			}
@@ -319,6 +336,8 @@ type wasmLoader struct {
 	pluginID     string
 	path         string
 	logger       *slog.Logger
+	maxMemoryMB  uint32
+	msgPerSecond int
 	capabilities []api.Capability
 }
 
@@ -330,7 +349,15 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 		return nil, fmt.Errorf("failed to read lazy-loaded WASM: %w", err)
 	}
 
-	if err := l.k.RegisterWASMPlugin(id, wasmBytes, l.capabilities); err != nil {
+	// Defaults if not provided in manifest
+	if l.maxMemoryMB == 0 {
+		l.maxMemoryMB = 128
+	}
+	if l.msgPerSecond == 0 {
+		l.msgPerSecond = 1000
+	}
+
+	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities); err != nil {
 		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
 	}
 

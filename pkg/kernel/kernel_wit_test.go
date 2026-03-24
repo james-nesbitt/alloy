@@ -33,7 +33,7 @@ func TestWITKernelBasicOperations(t *testing.T) {
 	}
 
 	// Test 1: Create WIT kernel
-	kernel, err := kernel.NewWITKernel(logger, kv, tempDir)
+	kernel, err := kernel.NewWITKernel(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 	}
 
 	// Create WIT kernel
-	kernel, err := kernel.NewWITKernel(logger, kv, tempDir)
+	kernel, err := kernel.NewWITKernel(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestWITKernelMessageRouting(t *testing.T) {
 	}
 
 	// Create WIT kernel
-	k, err := kernel.NewWITKernel(logger, kv, tempDir)
+	k, err := kernel.NewWITKernel(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

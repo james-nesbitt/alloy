@@ -72,7 +72,7 @@ func TestWITPluginIntegration(t *testing.T) {
 		{Method: "test:echo", Description: "Echoes back the input"},
 	}
 
-	err = manager.LoadPlugin(context.Background(), "test-plugin", wasmBytes, caps)
+	err = manager.LoadPlugin(context.Background(), "test-plugin", wasmBytes, 128, 100, caps)
 	if err != nil {
 		t.Fatal(err)
 	}

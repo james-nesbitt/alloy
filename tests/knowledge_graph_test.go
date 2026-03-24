@@ -37,14 +37,14 @@ func TestCollaborativeKnowledgeGraph(t *testing.T) {
 	var manager *wasm.Manager
 	router := func(ctx context.Context, msg api.Message) {}
 	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
-		if msg.Target == "index" {
+		if msg.Target == "index" || msg.Target == "knowledge:search" {
 			err := manager.RouteMessage(ctx, "index", msg)
 			if err != nil {
 				return api.Message{}, err
 			}
 			return manager.GetResponse(ctx, "index", msg.ID)
 		}
-		if msg.Target == "project" {
+		if msg.Target == "project" || msg.Target == "project:get_active" {
 			content, _ := json.Marshal(map[string]string{
 				"id":          "test-proj",
 				"name":        "Test Project",
@@ -74,7 +74,7 @@ func TestCollaborativeKnowledgeGraph(t *testing.T) {
 	if err != nil {
 		t.Skip("Index plugin not built, skipping")
 	}
-	err = manager.LoadPlugin(context.Background(), "index", indexBytes, nil)
+	err = manager.LoadPlugin(context.Background(), "index", indexBytes, 128, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestCollaborativeKnowledgeGraph(t *testing.T) {
 	if err != nil {
 		t.Skip("AI plugin not built, skipping")
 	}
-	err = manager.LoadPlugin(context.Background(), "ai", aiBytes, nil)
+	err = manager.LoadPlugin(context.Background(), "ai", aiBytes, 128, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

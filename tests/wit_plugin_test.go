@@ -155,7 +155,7 @@ func TestWITPlugins(t *testing.T) {
 			}
 
 			// Load the plugin
-			err = manager.LoadPlugin(context.Background(), tp.name, wasmBytes, tp.caps)
+			err = manager.LoadPlugin(context.Background(), tp.name, wasmBytes, 128, 100, tp.caps)
 			if err != nil {
 				t.Fatal(err)
 			}

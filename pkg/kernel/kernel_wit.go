@@ -178,6 +178,35 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 		return
 	}
 
+	// Update capability map if this is a registration message
+	if msg.Target == "command-manager" {
+		if msg.Method == "register" {
+			var reg api.Registration
+			if err := json.Unmarshal(msg.Payload, &reg); err == nil {
+				id := reg.ID
+				if id == "" {
+					id = msg.Sender
+				}
+				k.mu.Lock()
+				for _, cap := range reg.Capabilities {
+					if cap.Method != "" {
+						k.capabilityMap[cap.Method] = id
+					}
+				}
+				k.mu.Unlock()
+			}
+		} else if msg.Method == "register-capability" {
+			var cap api.Capability
+			if err := json.Unmarshal(msg.Payload, &cap); err != nil {
+				if cap.Method != "" && msg.Sender != "" {
+					k.mu.Lock()
+					k.capabilityMap[cap.Method] = msg.Sender
+					k.mu.Unlock()
+				}
+			}
+		}
+	}
+
 	k.logger.Debug("routing to specific target", "target", msg.Target, "msgID", msg.ID)
 
 	k.mu.RLock()
@@ -215,6 +244,19 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 			k.logger.Debug("plugin handle returned", "id", msg.Target, "respID", resp.ID)
 			if err != nil {
 				k.logger.Error("plugin handle failed", "id", msg.Target, "error", err)
+
+				// Report failure back to sender if it was a request
+				if msg.Type == api.TypeRequest || msg.Type == "" {
+					resp := api.Message{
+						ID:        msg.ID + "-resp",
+						Type:      api.TypeResponse,
+						Sender:    "system",
+						Target:    msg.Sender,
+						Payload:   []byte(fmt.Sprintf(`{"error": %q}`, err.Error())),
+						Timestamp: time.Now().Unix(),
+					}
+					k.RouteMessage(ctx, resp)
+				}
 				return
 			}
 			if resp.ID != "" && resp.Target != "" {
@@ -289,24 +331,23 @@ func (k *WITKernel) handleMessageSync(ctx context.Context, msg api.Message) (api
 	}
 
 	plugin, ok := k.plugins[msg.Target]
+	_, hasMeta := k.metadata[msg.Target]
 	k.mu.RUnlock()
 
-	if !ok {
-		// Check for lazy load
-		if _, exists := k.metadata[msg.Target]; exists {
-			if err := k.lazyLoadPlugin(ctx, msg.Target); err == nil {
-				k.mu.RLock()
-				plugin, ok = k.plugins[msg.Target]
-				k.mu.RUnlock()
-			}
+	if !ok && hasMeta {
+		// Check for lazy load - release RLock first to avoid deadlock during Lock()
+		if err := k.lazyLoadPlugin(ctx, msg.Target); err == nil {
+			k.mu.RLock()
+			plugin, ok = k.plugins[msg.Target]
+			k.mu.RUnlock()
 		}
 	}
 
-	if ok {
+	if ok && plugin != nil {
 		return plugin.HandleMessage(ctx, msg)
 	}
 
-	return api.Message{}, errors.New("plugin not found")
+	return api.Message{}, fmt.Errorf("plugin %s not found and lazy-load failed or no metadata", msg.Target)
 }
 
 // lazyLoadPlugin loads a plugin that was registered but not yet instantiated.
@@ -482,7 +523,7 @@ func (k *WITKernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte,
 
 // RegisterWASMPlugin registers a WASM plugin with the kernel using default limits.
 func (k *WITKernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
-	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 100, caps)
+	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps)
 }
 
 // RegisterFrontend registers a frontend connection.
@@ -639,7 +680,7 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 			req.MaxMemoryMB = 128
 		}
 		if req.MsgPerSecond == 0 {
-			req.MsgPerSecond = 100
+			req.MsgPerSecond = 1000
 		}
 
 		if err := w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, req.MsgPerSecond, req.Capabilities); err != nil {

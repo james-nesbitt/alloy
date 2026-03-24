@@ -52,7 +52,7 @@ func TestBufferConflictResolution(t *testing.T) {
 		t.Skip("Buffer plugin not built, skipping")
 	}
 
-	err = manager.LoadPlugin(context.Background(), "buffer", wasmBytes, nil)
+	err = manager.LoadPlugin(context.Background(), "buffer", wasmBytes, 128, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

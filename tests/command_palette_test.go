@@ -24,7 +24,7 @@ func TestDynamicCommandDiscovery(t *testing.T) {
 	kv := storage.NewMemoryStateStore()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	k, err := kernel.NewWITKernel(logger, kv, dataDir)
+	k, err := kernel.NewWITKernel(logger, kv, dataDir, "")
 	require.NoError(t, err)
 	defer k.Shutdown(ctx)
 
@@ -96,19 +96,19 @@ func TestDynamicCommandDiscovery(t *testing.T) {
 	// Verify specific capabilities and shortcuts we added
 	hasQuery := false
 	for _, cap := range aiCaps {
-		if cap.Method == "query" {
+		if cap.Method == "ai:query" {
 			hasQuery = true
 			assert.Equal(t, "a q", cap.Shortcut, "AI query should have shortcut 'a q'")
 		}
 	}
-	assert.True(t, hasQuery, "AI plugin should have 'query' capability in CommandManager")
+	assert.True(t, hasQuery, "AI plugin should have 'ai:query' capability in CommandManager")
 
 	hasList := false
 	for _, cap := range bufferCaps {
-		if cap.Method == "list" {
+		if cap.Method == "buffer:list" {
 			hasList = true
 			assert.Equal(t, "b l", cap.Shortcut, "Buffer list should have shortcut 'b l'")
 		}
 	}
-	assert.True(t, hasList, "Buffer plugin should have 'list' capability in CommandManager")
+	assert.True(t, hasList, "Buffer plugin should have 'buffer:list' capability in CommandManager")
 }

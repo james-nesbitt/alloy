@@ -42,22 +42,21 @@ func TestWasmLoadBulk(t *testing.T) {
 	for _, p := range plugins {
 		path := filepath.Join(buildDir, p+".wasm")
 		if _, err := os.Stat(path); err == nil {
-			id := "plugin-" + p
-			if p == "ai" {
-				id = "ai"
-			}
+			id := p
+			caps := []map[string]string{}
 			if p == "chat" {
-				id = "chat"
+				caps = append(caps, map[string]string{"method": "chat:send", "description": "Send chat"})
 			}
-			if p == "buffer" {
-				id = "buffer"
+			if p == "ai" {
+				caps = append(caps, map[string]string{"method": "ai:query", "description": "Query AI"})
 			}
 
 			wasmPlugins = append(wasmPlugins, map[string]any{
-				"id":        id,
-				"type":      "wasm",
-				"path":      path,
-				"load_time": "boot",
+				"id":           id,
+				"type":         "wasm",
+				"path":         path,
+				"load_time":    "boot",
+				"capabilities": caps,
 			})
 			expectedIDs = append(expectedIDs, id)
 		}
@@ -179,14 +178,14 @@ func TestWasmFunctionalSuite(t *testing.T) {
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "chat.wasm"),
 				"load_time":    "lazy",
-				"capabilities": []map[string]string{{"method": "send"}},
+				"capabilities": []map[string]string{{"method": "chat:send"}},
 			},
 			{
 				"id":           "ai",
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "ai.wasm"),
 				"load_time":    "boot",
-				"capabilities": []map[string]string{{"method": "query"}},
+				"capabilities": []map[string]string{{"method": "ai:query"}},
 			},
 			{
 				"id":           "secrets",
@@ -200,14 +199,14 @@ func TestWasmFunctionalSuite(t *testing.T) {
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "health.wasm"),
 				"load_time":    "lazy",
-				"capabilities": []map[string]string{{"method": "status"}},
+				"capabilities": []map[string]string{{"method": "health:status"}},
 			},
 			{
 				"id":           "buffer",
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "buffer.wasm"),
 				"load_time":    "lazy",
-				"capabilities": []map[string]string{{"method": "open"}},
+				"capabilities": []map[string]string{{"method": "buffer:create"}},
 			},
 		},
 	}
