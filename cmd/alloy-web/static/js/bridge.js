@@ -14,13 +14,13 @@ const bridge = {
     // Initialize the web frontend
     init: async () => {
         console.log("Alloy: Initializing Web Bridge...");
-        this.setupKeyboard();
-        this.setupSSE();
+        bridge.setupKeyboard();
+        bridge.setupSSE();
 
         // Check for WASM availability
         if (typeof Go === 'undefined') {
             console.error("Alloy: Go WASM support missing/not loaded.");
-            this.updateStatus('KERNEL', 'crashed');
+            bridge.updateStatus('KERNEL', 'crashed');
             return;
         }
 
@@ -32,10 +32,13 @@ const bridge = {
             );
             go.run(result.instance);
             console.log("Alloy: WASM Frontend Initialized.");
-            this.updateStatus('KERNEL', 'online');
+            bridge.updateStatus('KERNEL', 'online');
+            
+            // Initial empty search to populate results
+            bridge.filterResults();
         } catch (err) {
             console.error("Alloy: Failed to load WASM frontend:", err);
-            this.updateStatus('KERNEL', 'offline');
+            bridge.updateStatus('KERNEL', 'offline');
         }
     },
 
@@ -46,8 +49,10 @@ const bridge = {
             const data = JSON.parse(event.data);
             if (data.type === 'keepalive') return;
             
-            // Dispatch to WASM or handle in JS
-            console.log("Kernel Event:", data);
+            // Dispatch to WASM
+            if (window.alloy && window.alloy.handleEvent) {
+                window.alloy.handleEvent(event.data);
+            }
         };
         eventSource.onerror = (e) => {
             console.error("SSE Connection Lost:", e);
@@ -63,32 +68,32 @@ const bridge = {
             // Toggle Omni-palette with F1 or ':'
             if (e.key === 'F1' || (e.key === ':' && document.activeElement !== omniInput)) {
                 e.preventDefault();
-                this.toggleOmni();
+                bridge.toggleOmni();
             }
 
             // Dismiss with Escape
-            if (e.key === 'Escape' && this.state.mode === 'Command') {
-                this.toggleOmni(false);
+            if (e.key === 'Escape' && bridge.state.mode === 'Command') {
+                bridge.toggleOmni(false);
             }
 
             // Navigate results with Arrow Keys
-            if (this.state.mode === 'Command') {
+            if (bridge.state.mode === 'Command') {
                 if (e.key === 'ArrowDown') {
                     e.preventDefault();
-                    this.navigateResults(1);
+                    bridge.navigateResults(1);
                 } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
-                    this.navigateResults(-1);
+                    bridge.navigateResults(-1);
                 } else if (e.key === 'Enter') {
                     e.preventDefault();
-                    this.selectResult();
+                    bridge.selectResult();
                 }
             }
         });
 
         omniInput.addEventListener('input', (e) => {
-            this.state.query = e.target.value;
-            this.filterResults();
+            bridge.state.query = e.target.value;
+            bridge.filterResults();
         });
     },
 
@@ -102,11 +107,11 @@ const bridge = {
             overlay.classList.remove('hidden');
             overlay.classList.add('flex');
             input.focus();
-            this.state.mode = 'Command';
+            bridge.state.mode = 'Command';
         } else {
             overlay.classList.add('hidden');
             overlay.classList.remove('flex');
-            this.state.mode = 'Normal';
+            bridge.state.mode = 'Normal';
         }
     },
 
@@ -123,10 +128,56 @@ const bridge = {
         }
     },
 
-    // Dummy logic for prototype rendering - eventually handled via WASM bridge
-    filterResults: () => {
+    navigateResults: (dir) => {
+        bridge.state.selectedIndex += dir;
+        const max = bridge.state.results.length - 1;
+        if (bridge.state.selectedIndex < 0) bridge.state.selectedIndex = max;
+        if (bridge.state.selectedIndex > max) bridge.state.selectedIndex = 0;
+        bridge.renderResults(bridge.state.results);
+    },
+
+    selectResult: () => {
+        const res = bridge.state.results[bridge.state.selectedIndex];
+        if (!res) return;
+        
+        console.log("Selecting result:", res);
+        if (window.alloy && window.alloy.send) {
+            window.alloy.send(res.target, res.method);
+        }
+        bridge.toggleOmni(false);
+    },
+
+    // Use the WASM bridge to search
+    renderResults: (results) => {
         const list = document.getElementById('omni-results');
-        list.innerHTML = `<li class="px-4 py-2 text-zinc-500 italic">Searching for "${this.state.query}"...</li>`;
+        if (!results || results.length === 0) {
+            list.innerHTML = `<li class="px-4 py-2 text-zinc-500 italic">No matches found for "${bridge.state.query}".</li>`;
+            return;
+        }
+
+        list.innerHTML = results.map((res, i) => `
+            <li class="px-4 py-2 hover:bg-zinc-800 flex items-center justify-between group cursor-pointer ${i === bridge.state.selectedIndex ? 'bg-zinc-800' : ''}">
+                <div class="flex items-center space-x-3">
+                    <span class="px-2 py-0.5 bg-zinc-700 text-zinc-400 text-[10px] rounded uppercase font-bold tracking-tight">${res.group || res.target}</span>
+                    <span class="text-zinc-100">${res.full_title}</span>
+                </div>
+                <div class="flex items-center space-x-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span class="text-zinc-500 text-xs italic">${res.description}</span>
+                </div>
+            </li>
+        `).join('');
+    },
+
+    filterResults: () => {
+        if (!window.alloy || !window.alloy.search) return;
+        
+        try {
+            const resJson = window.alloy.search(bridge.state.query);
+            bridge.state.results = JSON.parse(resJson);
+            bridge.renderResults(bridge.state.results);
+        } catch (err) {
+            console.error("Search error:", err);
+        }
     }
 };
 

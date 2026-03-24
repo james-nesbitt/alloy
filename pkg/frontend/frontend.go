@@ -88,11 +88,13 @@ func (c *Client) readLoop() {
 	async := c.ipc.Async()
 	for {
 		msg := <-async
-		c.mu.Lock()
+		c.mu.RLock()
 		c.messages = append(c.messages, msg)
-		c.mu.Unlock()
+		handlers := make([]func(api.Message), len(c.onMsg))
+		copy(handlers, c.onMsg)
+		c.mu.RUnlock()
 
-		for _, handler := range c.onMsg {
+		for _, handler := range handlers {
 			handler(msg)
 		}
 	}

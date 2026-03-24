@@ -8,21 +8,21 @@ import (
 )
 
 type ParamInfo struct {
-	Name     string
-	Type     string // string, int, bool
-	Required bool
-	Choices  []string // For enum-like selection
+	Name     string   `json:"name"`
+	Type     string   `json:"type"` // string, int, bool
+	Required bool     `json:"required"`
+	Choices  []string `json:"choices,omitempty"` // For enum-like selection
 }
 
 type CommandNode struct {
-	Key         string
-	Description string
-	Target      string
-	Method      string
-	Children    map[string]*CommandNode
-	Annotation  string
-	Shortcut    string
-	Params      []ParamInfo // Structured parameters
+	Key         string                 `json:"key"`
+	Description string                 `json:"description"`
+	Target      string                 `json:"target"`
+	Method      string                 `json:"method"`
+	Children    map[string]*CommandNode `json:"children,omitempty"`
+	Annotation  string                 `json:"annotation,omitempty"`
+	Shortcut    string                 `json:"shortcut,omitempty"`
+	Params      []ParamInfo            `json:"params,omitempty"` // Structured parameters
 }
 
 func parseParams(raw string) []ParamInfo {
@@ -149,17 +149,17 @@ func (n *CommandNode) Find(path []string) *CommandNode {
 
 // SearchItem is a flattened representation of a command for fuzzy searching.
 type SearchItem struct {
-	FullTitle   string // e.g., "project open"
-	Description string
-	Shortcut    string
-	Target      string
-	Method      string
-	Weight      int    // Fuzzy match score
-	Frequency   int    // Usage count
-	Recency     int    // Last use timestamp (offset)
-	Status      string // "running", "crashed", etc.
-	Group       string // For visual categorization
-	Params      []ParamInfo // Structured parameters
+	FullTitle   string      `json:"full_title"`   // e.g., "project open"
+	Description string      `json:"description"`
+	Shortcut    string      `json:"shortcut,omitempty"`
+	Target      string      `json:"target"`
+	Method      string      `json:"method"`
+	Weight      int         `json:"weight"`       // Fuzzy match score
+	Frequency   int         `json:"frequency"`    // Usage count
+	Recency     int         `json:"recency"`      // Last use timestamp (offset)
+	Status      string      `json:"status"`       // "running", "crashed", etc.
+	Group       string      `json:"group,omitempty"` // For visual categorization
+	Params      []ParamInfo `json:"params,omitempty"` // Structured parameters
 }
 
 // Flatten extracts all leaf commands from the tree.
