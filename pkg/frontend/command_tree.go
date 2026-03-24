@@ -110,6 +110,7 @@ type SearchItem struct {
 	Weight      int
 	Frequency   int
 	Status      string // "running", "crashed", etc.
+	Group       string // For visual categorization
 }
 
 // Flatten extracts all leaf commands from the tree.
@@ -132,6 +133,7 @@ func (n *CommandNode) Flatten(prefix string) []SearchItem {
 				Shortcut:    child.Shortcut,
 				Target:      child.Target,
 				Method:      child.Method,
+				Group:       child.Annotation,
 			})
 		}
 

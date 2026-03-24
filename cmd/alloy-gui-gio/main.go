@@ -6,11 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
-	"image/color"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -18,178 +15,13 @@ import (
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
-	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
 	"github.com/james-nesbitt/alloy/api"
-	"github.com/james-nesbitt/alloy/pkg/frontend"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
-
-type guiState struct {
-	mode            int
-	isLeader        bool
-	breadcrumbs     []string
-	targets         []api.Registration
-	commandTree     *frontend.CommandNode
-	recency         map[string]int
-	activeProject   *frontend.Project
-	activeWorkspace *frontend.Workspace
-	projects        []frontend.Project
-	workspaces      []frontend.Workspace
-	showProjects    bool
-	showWorkspaces  bool
-	subscriptions   map[string]bool
-	projectCreate   projectCreateState
-	aiSwitch        aiSwitchState
-	aiQuery         aiQueryState
-	menuBtn         widget.Clickable
-	selectedIdx     int
-	filtered        []frontend.SearchItem
-	dashboardTiles  map[string]frontend.DashboardTile
-	tileOrder       []string
-}
-
-func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *frontend.Client, w *app.Window, gtx layout.Context) {
-	if ev.State != key.Press {
-		return
-	}
-
-	// Logging keys for debugging if user says things don't work
-	// log.Printf("GUI Key: %s (Rune: %v)", ev.Name, ev.Rune)
-
-	switch ev.Name {
-	case key.NameF1:
-		if g.mode == ModeCommand {
-			g.mode = ModeNormal
-		} else {
-			g.mode = ModeCommand
-			g.isLeader = false
-			input.SetText(":")
-		}
-	case key.NameEscape:
-		g.mode = ModeNormal
-		g.isLeader = false
-		g.breadcrumbs = nil
-		g.selectedIdx = 0
-		if gtx.Ops != nil {
-			gtx.Execute(key.FocusCmd{Tag: g})
-		}
-	case ":", "·": // Some layouts or Gio versions might differ
-		if g.mode == ModeNormal {
-			g.mode = ModeCommand
-			g.isLeader = false
-			g.breadcrumbs = nil
-			input.SetText(":")
-			g.selectedIdx = 0
-			if gtx.Ops != nil {
-				gtx.Execute(key.FocusCmd{Tag: input})
-			}
-		}
-	case key.NameSpace, " ":
-		if g.mode == ModeNormal {
-			g.mode = ModeCommand
-			g.isLeader = true
-			g.breadcrumbs = nil
-			g.selectedIdx = 0
-			if gtx.Ops != nil {
-				gtx.Execute(key.FocusCmd{Tag: input})
-			}
-		}
-	case key.NameDownArrow:
-		if len(g.filtered) > 0 {
-			g.selectedIdx = (g.selectedIdx + 1) % len(g.filtered)
-		}
-	case key.NameUpArrow:
-		if len(g.filtered) > 0 {
-			g.selectedIdx = (g.selectedIdx - 1 + len(g.filtered)) % len(g.filtered)
-		}
-	case key.NameDeleteBackward:
-		if input.Text() == "" && g.isLeader {
-			if len(g.breadcrumbs) > 0 {
-				g.breadcrumbs = g.breadcrumbs[:len(g.breadcrumbs)-1]
-				g.selectedIdx = 0
-			} else {
-				g.isLeader = false
-				input.SetText(":")
-				g.selectedIdx = 0
-			}
-			if gtx.Ops != nil {
-				gtx.Execute(key.FocusCmd{Tag: input})
-			}
-		}
-	case key.NameReturn:
-		if g.mode == ModeCommand {
-			if len(g.filtered) > 0 && g.selectedIdx >= 0 && g.selectedIdx < len(g.filtered) {
-				item := g.filtered[g.selectedIdx]
-				executeCommand(client, g, fmt.Sprintf("%s %s", item.Target, item.Method), w)
-				input.SetText("")
-				g.mode = ModeNormal
-				g.isLeader = false
-				g.breadcrumbs = nil
-				g.selectedIdx = 0
-				if gtx.Ops != nil {
-					gtx.Execute(key.FocusCmd{Tag: g})
-				}
-			} else {
-				content := input.Text()
-				if content != "" {
-					executeCommand(client, g, content, w)
-					input.SetText("")
-					g.mode = ModeNormal
-					g.isLeader = false
-					g.breadcrumbs = nil
-					g.selectedIdx = 0
-					if gtx.Ops != nil {
-						gtx.Execute(key.FocusCmd{Tag: g})
-					}
-				}
-			}
-		}
-	default:
-		// Handle leader sequence (runes only if input is empty)
-		nameStr := string(ev.Name)
-		if g.isLeader && input.Text() == "" {
-			if nameStr == ":" {
-				g.isLeader = false
-				g.breadcrumbs = nil
-				input.SetText(":")
-				g.selectedIdx = 0
-				if gtx.Ops != nil {
-					gtx.Execute(key.FocusCmd{Tag: input})
-				}
-				return
-			}
-
-			if len(nameStr) == 1 {
-				keyLow := strings.ToLower(nameStr)
-				nodeAt := g.commandTree.Find(g.breadcrumbs)
-				if nodeAt != nil {
-					if child, ok := nodeAt.Children[keyLow]; ok {
-						if len(child.Children) == 0 {
-							executeCommand(client, g, fmt.Sprintf("%s %s", child.Target, child.Method), w)
-							g.mode = ModeNormal
-							g.isLeader = false
-							g.breadcrumbs = nil
-							input.SetText("")
-							g.selectedIdx = 0
-							if gtx.Ops != nil {
-								gtx.Execute(key.FocusCmd{Tag: g})
-							}
-						} else {
-							g.breadcrumbs = append(g.breadcrumbs, keyLow)
-							g.selectedIdx = 0
-						}
-						return
-					}
-				}
-			}
-		}
-	}
-}
 
 const (
 	ModeNormal = iota
@@ -199,54 +31,27 @@ const (
 	ModeAiQuery
 )
 
-type projectCreateState struct {
-	name        widget.Editor
-	description widget.Editor
-	submit      widget.Clickable
-	cancel      widget.Clickable
-}
-
-type aiSwitchState struct {
-	providerType widget.Editor
-	model        widget.Editor
-	url          widget.Editor
-	submit       widget.Clickable
-	cancel       widget.Clickable
-}
-
-type aiQueryState struct {
-	prompt widget.Editor
-	submit widget.Clickable
-	cancel widget.Clickable
-}
-
 type discoveryMsg struct {
 	Targets []api.Registration `json:"targets"`
 }
 
 func main() {
-	name := flag.String("name", "alloy-gui", "Frontend instance name")
-	actor := flag.String("actor", "", "Actor identity (defaults to name)")
-	socket := flag.String("socket", frontend.GetAlloyRuntimeDir()+"/default.sock", "Socket address")
+	socketAddr := flag.String("socket", frontend.GetAlloyRuntimeDir()+"/default.sock", "Alloy core IPC address")
+	actor := flag.String("actor", "alloy-gui", "Actor identity")
+	_ = flag.Bool("debug", false, "Enable debug logging")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
 
 	cmdutil.HandleSecurityError(sf.Validate())
 
-	if *actor == "" {
-		*actor = *name
-	}
-
-	client, err := frontend.NewClientWithActorAndSecurity(*name, *actor, *socket, *sf.Insecure, *sf.SecurityDir)
+	client, err := frontend.NewClientWithActorAndSecurity("alloy-gui", *actor, *socketAddr, *sf.Insecure, *sf.SecurityDir)
 	if err != nil {
-		fmt.Printf("Failed to connect: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to connect: %v", err)
 	}
 
 	go func() {
 		w := new(app.Window)
-		w.Option(app.Title("Alloy Wayland"))
-		w.Option(app.Size(800, 600))
+		w.Option(app.Title("Alloy Core"))
 		if err := run(w, client); err != nil {
 			log.Fatal(err)
 		}
@@ -261,14 +66,14 @@ func run(w *app.Window, client *frontend.Client) error {
 	var ops op.Ops
 
 	var (
-		input        widget.Editor
-		sendButton   widget.Clickable
-		list         widget.List
-		projList     widget.List
-		projClicks   []widget.Clickable
-		wsList       widget.List
-		wsClicks     []widget.Clickable
-		gui          guiState
+		input      widget.Editor
+		sendButton widget.Clickable
+		list       widget.List
+		projList   widget.List
+		projClicks []widget.Clickable
+		wsList     widget.List
+		wsClicks   []widget.Clickable
+		gui        guiState
 	)
 	list.Axis = layout.Vertical
 	projList.Axis = layout.Vertical
@@ -276,30 +81,10 @@ func run(w *app.Window, client *frontend.Client) error {
 	gui.subscriptions = make(map[string]bool)
 	gui.recency = make(map[string]int)
 	gui.dashboardTiles = make(map[string]frontend.DashboardTile)
-	// Initial mock tiles to verify layout
-	gui.dashboardTiles["team"] = frontend.DashboardTile{
-		Title:   "Team Presence",
-		Content: []string{"● You (Online)", "○ James (Away)", "● AI Worker (Idle)"},
-		Status:  "Active",
-		Actions: []string{"Invite", "Call"},
-	}
-	gui.dashboardTiles["ai"] = frontend.DashboardTile{
-		Title:   "AI Assistant",
-		Content: []string{"Last Task: refactor TUI layout", "Status: Ready"},
-		Actions: []string{"Ask", "Reset Context"},
-	}
-	gui.dashboardTiles["project"] = frontend.DashboardTile{
-		Title:   "Current Project",
-		Content: []string{"Phase: 5 (Team Collaboration)", "Branch: feature/phase-5-dashboards", "Health: Stable"},
-		Status:  "OK",
-	}
-	gui.tileOrder = []string{"team", "ai", "project"}
 
-	// Discovery Trigger
 	discoverCh := make(chan bool, 1)
 	discoverCh <- true
 
-	// Discovery Loop
 	go func() {
 		startupAttempts := 0
 		for {
@@ -320,7 +105,6 @@ func run(w *app.Window, client *frontend.Client) error {
 					gui.targets = dMsg.Targets
 					gui.commandTree = frontend.BuildCommandTree(gui.targets)
 
-					// Auto-subscribe to events and fetch active project
 					for _, t := range gui.targets {
 						if t.ID == "events" {
 							if !gui.subscriptions["project:opened"] {
@@ -331,15 +115,6 @@ func run(w *app.Window, client *frontend.Client) error {
 								_, _ = client.Send(subCtx, "events", "subscribe", subReq3)
 								subCancel()
 								gui.subscriptions["project:opened"] = true
-							}
-							if !gui.subscriptions["plugin:crashed"] {
-								subCtx, subCancel := context.WithTimeout(context.Background(), time.Second)
-								subReq, _ := json.Marshal(map[string]string{"topic": "plugin:crashed"})
-								_, _ = client.Send(subCtx, "events", "subscribe", subReq)
-								subReq2, _ := json.Marshal(map[string]string{"topic": "plugin:load_failed"})
-								_, _ = client.Send(subCtx, "events", "subscribe", subReq2)
-								subCancel()
-								gui.subscriptions["plugin:crashed"] = true
 							}
 						}
 						if t.ID == "project" {
@@ -354,26 +129,6 @@ func run(w *app.Window, client *frontend.Client) error {
 									}
 								}
 							}
-							pCtx, pCancel := context.WithTimeout(context.Background(), time.Second)
-							pResp, err := client.Send(pCtx, "project", "list", nil)
-							pCancel()
-							if err == nil {
-								var resp struct {
-									Projects []frontend.Project `json:"projects"`
-								}
-								if err := json.Unmarshal(pResp.Payload, &resp); err == nil {
-									gui.projects = resp.Projects
-								}
-							}
-							wCtx, wCancel := context.WithTimeout(context.Background(), time.Second)
-							wResp, err := client.Send(wCtx, "project", "list-workspaces", nil)
-							wCancel()
-							if err == nil {
-								var wsList []frontend.Workspace
-								if err := json.Unmarshal(wResp.Payload, &wsList); err == nil {
-									gui.workspaces = wsList
-								}
-							}
 						}
 					}
 					w.Invalidate()
@@ -383,7 +138,6 @@ func run(w *app.Window, client *frontend.Client) error {
 		}
 	}()
 
-	// Refresh UI on incoming messages
 	client.OnMessage(func(msg api.Message) {
 		if msg.Sender == "events" {
 			var ev struct {
@@ -437,7 +191,6 @@ func run(w *app.Window, client *frontend.Client) error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
-			// Capture keyboard events
 			for {
 				ev, ok := gtx.Event(
 					key.Filter{Focus: &gui},
@@ -451,7 +204,6 @@ func run(w *app.Window, client *frontend.Client) error {
 				}
 			}
 
-			// Failsafe: if editor has ":", force command mode
 			if gui.mode == ModeNormal && strings.HasPrefix(input.Text(), ":") {
 				gui.mode = ModeCommand
 				gui.isLeader = false
@@ -465,7 +217,6 @@ func run(w *app.Window, client *frontend.Client) error {
 				}
 			}
 
-			// Ensure we have enough clickables
 			if len(projClicks) < len(gui.projects) {
 				for i := len(projClicks); i < len(gui.projects); i++ {
 					projClicks = append(projClicks, widget.Clickable{})
@@ -477,14 +228,12 @@ func run(w *app.Window, client *frontend.Client) error {
 				}
 			}
 
-			// Handle project clicks
 			for i, p := range gui.projects {
 				if projClicks[i].Clicked(gtx) {
 					executeCommand(client, &gui, "project open "+p.ID, w)
 					gui.showProjects = false
 				}
 			}
-			// Handle workspace clicks
 			for i, ws := range gui.workspaces {
 				if wsClicks[i].Clicked(gtx) {
 					executeCommand(client, &gui, "project set-workspace "+ws.ID, w)
@@ -494,657 +243,13 @@ func run(w *app.Window, client *frontend.Client) error {
 
 			layout.Stack{Alignment: layout.Center}.Layout(gtx,
 				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{
-						Axis: layout.Vertical,
-					}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-											layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-												title := material.H4(th, "Alloy Core")
-												title.Color = color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
-												return title.Layout(gtx)
-											}),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												wsName := "No Workspace"
-												if gui.activeWorkspace != nil {
-													wsName = gui.activeWorkspace.Name
-												}
-												return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-													return layout.Stack{}.Layout(gtx,
-														layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-															paint.FillShape(gtx.Ops, color.NRGBA{R: 0, G: 120, B: 215, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-															return layout.Dimensions{Size: gtx.Constraints.Min}
-														}),
-														layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-															p := material.Body2(th, "WS: "+wsName)
-															p.Font.Weight = 700
-															p.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-															return layout.UniformInset(unit.Dp(6)).Layout(gtx, p.Layout)
-														}),
-													)
-												})
-											}),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												projectName := "No Project"
-												if gui.activeProject != nil {
-													projectName = gui.activeProject.Name
-												}
-												return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-													return layout.Stack{}.Layout(gtx,
-														layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-															paint.FillShape(gtx.Ops, color.NRGBA{R: 0, G: 150, B: 0, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-															return layout.Dimensions{Size: gtx.Constraints.Min}
-														}),
-														layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-															p := material.Body2(th, "Project: "+projectName)
-															p.Font.Weight = 700
-															p.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-															return layout.UniformInset(unit.Dp(6)).Layout(gtx, p.Layout)
-														}),
-													)
-												})
-											}),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-													btn := material.Button(th, &gui.menuBtn, "MENU (F1)")
-													btn.TextSize = unit.Sp(14)
-													btn.Background = color.NRGBA{R: 150, G: 0, B: 150, A: 255}
-													if gui.menuBtn.Clicked(gtx) {
-														if gui.mode == ModeCommand {
-															gui.mode = ModeNormal
-														} else {
-															gui.mode = ModeCommand
-															gui.isLeader = false
-															input.SetText(":")
-														}
-													}
-													return btn.Layout(gtx)
-												})
-											}),
-										)
-									}),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										modeStr := "NORMAL"
-										modeColor := color.NRGBA{R: 0x44, G: 0x88, B: 0xff, A: 0xff}
-										if gui.mode == ModeCommand {
-											if gui.isLeader {
-												modeStr = "LEADER"
-												if len(gui.breadcrumbs) > 0 {
-													modeStr += ": " + strings.Join(gui.breadcrumbs, " > ")
-												}
-												modeColor = color.NRGBA{R: 150, G: 50, B: 0, A: 255}
-											} else {
-												modeStr = "COMMAND"
-												modeColor = color.NRGBA{R: 200, G: 0, B: 200, A: 255}
-											}
-										}
-										return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											d := material.Caption(th, modeStr)
-											d.Color = modeColor
-											return d.Layout(gtx)
-										})
-									}),
-								)
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if !gui.showProjects {
-								return layout.Dimensions{}
-							}
-							return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.List(th, &projList).Layout(gtx, len(gui.projects), func(gtx layout.Context, i int) layout.Dimensions {
-									p := gui.projects[i]
-									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return material.Button(th, &projClicks[i], "Project: "+p.Name).Layout(gtx)
-									})
-								})
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if !gui.showWorkspaces {
-								return layout.Dimensions{}
-							}
-							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.List(th, &wsList).Layout(gtx, len(gui.workspaces), func(gtx layout.Context, i int) layout.Dimensions {
-									ws := gui.workspaces[i]
-									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return material.Button(th, &wsClicks[i], "Workspace: "+ws.Name).Layout(gtx)
-									})
-								})
-							})
-						}),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							msgs := client.Messages()
-							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return drawDashboard(gtx, th, &gui)
-								}),
-								layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-									return material.List(th, &list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
-										msg := msgs[i]
-										return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											formatted := formatMessage(msg)
-											label := material.Body1(th, formatted)
-											label.TextSize = unit.Sp(16)
-											if msg.Method == "plugin:crashed" || msg.Method == "plugin:load_failed" {
-												label.Color = color.NRGBA{R: 255, G: 50, B: 50, A: 255}
-											} else {
-												label.Color = th.Fg
-											}
-											return label.Layout(gtx)
-										})
-									})
-								}),
-							)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if gui.mode != ModeCommand {
-								return layout.Dimensions{}
-							}
-
-							content := input.Text()
-							if strings.HasPrefix(content, ":") {
-								content = content[1:]
-							}
-
-							// Update filtered list
-							if gui.isLeader && content == "" {
-								node := gui.commandTree.Find(gui.breadcrumbs)
-								if node != nil {
-									gui.filtered = nil
-									keys := make([]string, 0, len(node.Children))
-									for k := range node.Children {
-										keys = append(keys, k)
-									}
-									sort.Strings(keys)
-									for _, k := range keys {
-										child := node.Children[k]
-										gui.filtered = append(gui.filtered, frontend.SearchItem{
-											FullTitle:   k,
-											Description: child.Description,
-											Target:      child.Target,
-											Method:      child.Method,
-											Shortcut:    child.Shortcut,
-										})
-									}
-								}
-							} else {
-								// Fuzzy search
-								flattened := gui.commandTree.Flatten("")
-								var scored []frontend.SearchItem
-								for _, item := range flattened {
-									if frontend.FuzzyMatch(item.FullTitle, content) {
-										item.Weight = gui.recency[item.Target+" "+item.Method]
-										scored = append(scored, item)
-									}
-								}
-								frontend.SortItems(scored)
-								if len(scored) > 10 {
-									scored = scored[:10]
-								}
-								gui.filtered = scored
-							}
-
-							if gui.selectedIdx >= len(gui.filtered) {
-								gui.selectedIdx = 0
-							}
-
-							// Draw the command results in a panel above the editor
-							return widget.Border{
-								Color: color.NRGBA{A: 255},
-								Width: unit.Dp(2),
-							}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Stack{}.Layout(gtx,
-									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-										bg := th.Bg
-										bg.A = 245
-										paint.FillShape(gtx.Ops, bg, clip.Rect{Max: gtx.Constraints.Min}.Op())
-										return layout.Dimensions{Size: gtx.Constraints.Min}
-									}),
-									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-										var hints []layout.FlexChild
-										if gui.isLeader && content == "" {
-											hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												txt := "LEADER MODE"
-												if len(gui.breadcrumbs) > 0 {
-													txt += " > " + strings.Join(gui.breadcrumbs, " > ")
-												}
-												c := material.H6(th, txt)
-												c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
-												return layout.UniformInset(unit.Dp(12)).Layout(gtx, c.Layout)
-											}))
-										}
-
-										for i, item := range gui.filtered {
-											isSelected := i == gui.selectedIdx
-											hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												return layout.Stack{}.Layout(gtx,
-													layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-														if !isSelected {
-															return layout.Dimensions{}
-														}
-														paint.FillShape(gtx.Ops, color.NRGBA{R: 60, G: 60, B: 60, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-														return layout.Dimensions{Size: gtx.Constraints.Min}
-													}),
-													layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-														return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-															return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-																layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-																	c := material.Caption(th, item.FullTitle)
-																	c.Font.Weight = 700
-																	if isSelected {
-																		c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
-																	}
-																	return c.Layout(gtx)
-																}),
-																layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-																layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-																	c := material.Caption(th, item.Description)
-																	c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
-																	return c.Layout(gtx)
-																}),
-															)
-														})
-													}),
-												)
-											}))
-										}
-
-										if len(hints) == 0 {
-											hints = append(hints, layout.Rigid(material.Caption(th, " No results...").Layout))
-										}
-
-										return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Vertical}.Layout(gtx, hints...)
-										})
-									}),
-								)
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Stack{}.Layout(gtx,
-								layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-									// Background box for the input field to make it pop against the black theme
-									paint.FillShape(gtx.Ops, color.NRGBA{R: 30, G: 30, B: 35, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-									return layout.Dimensions{Size: gtx.Constraints.Min}
-								}),
-								layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(16).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-											layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-												ed := material.Editor(th, &input, "Type ':' or hit Space for commands...")
-												ed.TextSize = unit.Sp(16)
-												ed.HintColor = color.NRGBA{R: 150, G: 150, B: 150, A: 255}
-												return ed.Layout(gtx)
-											}),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-													btn := material.Button(th, &sendButton, "SEND")
-													btn.TextSize = unit.Sp(14)
-													return btn.Layout(gtx)
-												})
-											}),
-										)
-									})
-								}),
-							)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							// Status bar at bottom
-							return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.Caption(th, "Alloy GUI | F1: help | "+fmt.Sprintf("%d messages", len(client.Messages()))).Layout(gtx)
-							})
-						}),
-					)
+					return renderMainLayout(gtx, th, client, &gui, &input, &sendButton, &list, &projList, projClicks, &wsList, wsClicks)
 				}),
 				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					if gui.mode != ModeProjectCreate {
-						return layout.Dimensions{}
-					}
-					// Background dimming
-					paintOverlay(gtx, color.NRGBA{A: 150})
-
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return widget.Border{
-								Color: color.NRGBA{R: 0, G: 0, B: 0, A: 255},
-								Width: unit.Dp(2),
-							}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Stack{}.Layout(gtx,
-									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-										return widget.Border{
-											Color: color.NRGBA{R: 255, G: 255, B: 255, A: 255},
-											Width: unit.Dp(1),
-										}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Dimensions{Size: gtx.Constraints.Min}
-										})
-									}),
-									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-										return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return material.H6(th, "Create New Project").Layout(gtx)
-												}),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-														return material.Editor(th, &gui.projectCreate.name, "Name").Layout(gtx)
-													})
-												}),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-														return material.Editor(th, &gui.projectCreate.description, "Description").Layout(gtx)
-													})
-												}),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEvenly}.Layout(gtx,
-														layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-															if gui.projectCreate.submit.Clicked(gtx) {
-																name := gui.projectCreate.name.Text()
-																description := gui.projectCreate.description.Text()
-																if name != "" {
-																	payload, _ := json.Marshal(map[string]string{
-																		"name":        name,
-																		"description": description,
-																	})
-																	go client.Send(context.Background(), "project", "create", payload)
-																	gui.mode = ModeNormal
-																	gui.projectCreate.name.SetText("")
-																	gui.projectCreate.description.SetText("")
-																}
-															}
-															return material.Button(th, &gui.projectCreate.submit, "Create").Layout(gtx)
-														}),
-														layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-														layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-															if gui.projectCreate.cancel.Clicked(gtx) {
-																gui.mode = ModeNormal
-															}
-															return material.Button(th, &gui.projectCreate.cancel, "Cancel").Layout(gtx)
-														}),
-													)
-												}),
-											)
-										})
-									}),
-								)
-							})
-						})
-					})
-				}),
-				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					if gui.mode != ModeAiSwitch {
-						return layout.Dimensions{}
-					}
-					paintOverlay(gtx, color.NRGBA{A: 150})
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return widget.Border{Color: color.NRGBA{A: 255}, Width: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-										layout.Rigid(material.H6(th, "Switch AI Provider").Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.aiSwitch.providerType, "Type (ollama|openai|anthropic)").Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.aiSwitch.model, "Model").Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.aiSwitch.url, "URL (e.g. for ollama)").Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if gui.aiSwitch.submit.Clicked(gtx) {
-												t := gui.aiSwitch.providerType.Text()
-												m := gui.aiSwitch.model.Text()
-												u := gui.aiSwitch.url.Text()
-												payload, _ := json.Marshal(map[string]string{"type": t, "model": m, "url": u})
-												go client.Send(context.Background(), "ai", "provider:set", payload)
-												gui.mode = ModeNormal
-											}
-											return material.Button(th, &gui.aiSwitch.submit, "Switch").Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if gui.aiSwitch.cancel.Clicked(gtx) { gui.mode = ModeNormal }
-											return material.Button(th, &gui.aiSwitch.cancel, "Cancel").Layout(gtx)
-										}),
-									)
-								})
-							})
-						})
-					})
-				}),
-				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					if gui.mode != ModeAiQuery {
-						return layout.Dimensions{}
-					}
-					paintOverlay(gtx, color.NRGBA{A: 150})
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return widget.Border{Color: color.NRGBA{A: 255}, Width: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-										layout.Rigid(material.H6(th, "AI Query").Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.aiQuery.prompt, "Ask the AI...").Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if gui.aiQuery.submit.Clicked(gtx) {
-												p := gui.aiQuery.prompt.Text()
-												payload, _ := json.Marshal(map[string]string{"prompt": p})
-												go client.Send(context.Background(), "ai", "query", payload)
-												gui.mode = ModeNormal
-											}
-											return material.Button(th, &gui.aiQuery.submit, "Ask").Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if gui.aiQuery.cancel.Clicked(gtx) { gui.mode = ModeNormal }
-											return material.Button(th, &gui.aiQuery.cancel, "Cancel").Layout(gtx)
-										}),
-									)
-								})
-							})
-						})
-					})
+					return renderModals(gtx, th, client, &gui)
 				}),
 			)
 			e.Frame(gtx.Ops)
 		}
-	}
-}
-
-func paintOverlay(gtx layout.Context, c color.NRGBA) {
-	paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Max}.Op())
-}
-
-func formatMessage(msg api.Message) string {
-	ts := time.Unix(msg.Timestamp, 0).Format("15:04:05")
-	if msg.Sender == "events" {
-		switch msg.Method {
-		case "plugin:crashed", "plugin:load_failed":
-			var ev struct {
-				Topic string `json:"topic"`
-				Data  struct {
-					ID    string `json:"id"`
-					Error string `json:"error"`
-				} `json:"data"`
-			}
-			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
-				return fmt.Sprintf("[%s] !!! %s (%s): %s", ts, strings.ToUpper(msg.Method[7:]), ev.Data.ID, ev.Data.Error)
-			}
-		case "chat:message":
-			var chatMsg struct {
-				Sender  string `json:"sender"`
-				Channel string `json:"channel"`
-				Content string `json:"content"`
-			}
-			if err := json.Unmarshal(msg.Payload, &chatMsg); err == nil {
-				return fmt.Sprintf("[%s] #%s <%s> %s", ts, chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
-			}
-		case "project:opened":
-			var ev struct {
-				Topic string           `json:"topic"`
-				Data  frontend.Project `json:"data"`
-			}
-			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
-				return fmt.Sprintf("[%s] Project opened: %s", ts, ev.Data.Name)
-			}
-		}
-	}
-	return fmt.Sprintf("[%s] %s: %s", ts, msg.Sender, string(msg.Payload))
-}
-
-func drawDashboard(gtx layout.Context, th *material.Theme, gui *guiState) layout.Dimensions {
-	if len(gui.tileOrder) == 0 {
-		return layout.Dimensions{}
-	}
-
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			title := material.H6(th, "Project Dashboard")
-			title.Color = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
-			return layout.UniformInset(unit.Dp(8)).Layout(gtx, title.Layout)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			var rows []layout.FlexChild
-			for i := 0; i < len(gui.tileOrder); i += 2 {
-				end := i + 2
-				if end > len(gui.tileOrder) {
-					end = len(gui.tileOrder)
-				}
-				rowTiles := gui.tileOrder[i:end]
-
-				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					var cols []layout.FlexChild
-					for _, id := range rowTiles {
-						tile := gui.dashboardTiles[id]
-						cols = append(cols, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return widget.Border{
-									Color: color.NRGBA{R: 100, G: 100, B: 100, A: 255},
-									Width: unit.Dp(1),
-									CornerRadius: unit.Dp(4),
-								}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-													layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-														t := material.Body1(th, tile.Title)
-														t.Font.Weight = 700
-														return t.Layout(gtx)
-													}),
-													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-														s := material.Caption(th, tile.Status)
-														s.Color = color.NRGBA{R: 150, G: 150, B: 150, A: 255}
-														return s.Layout(gtx)
-													}),
-												)
-											}),
-											layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												content := strings.Join(tile.Content, "\n")
-												return material.Caption(th, content).Layout(gtx)
-											}),
-										)
-									})
-								})
-							})
-						}))
-					}
-					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, cols...)
-				}))
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
-		}),
-	)
-}
-
-func executeCommand(client *frontend.Client, gui *guiState, content string, w *app.Window) {
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, ":") {
-		content = content[1:]
-	}
-	parts := strings.Fields(content)
-	if len(parts) >= 2 {
-		target := parts[0]
-		method := parts[1]
-
-		// Normalized method for internal checks (strip prefix if it matches target)
-		cleanMethod := method
-		if idx := strings.Index(method, ":"); idx != -1 {
-			if method[:idx] == target {
-				cleanMethod = method[idx+1:]
-			}
-		}
-
-		if gui.recency == nil {
-			gui.recency = make(map[string]int)
-		}
-		gui.recency[target+" "+method] = int(time.Now().Unix())
-
-		payload := ""
-		if len(parts) > 2 {
-			payload = strings.Join(parts[2:], " ")
-		}
-
-		// Specialized handlers
-		if target == "project" && cleanMethod == "open" && payload == "" {
-			gui.showProjects = !gui.showProjects
-			gui.showWorkspaces = false
-			w.Invalidate()
-			return
-		}
-
-		if target == "project" && cleanMethod == "list-workspaces" && payload == "" {
-			gui.showWorkspaces = !gui.showWorkspaces
-			gui.showProjects = false
-			w.Invalidate()
-			return
-		}
-
-		if (target == "project") && (cleanMethod == "set-workspace") && payload == "" {
-			gui.showWorkspaces = !gui.showWorkspaces
-			gui.showProjects = false
-			w.Invalidate()
-			return
-		}
-
-		if target == "project" && cleanMethod == "create" && payload == "" {
-			gui.mode = ModeProjectCreate
-			w.Invalidate()
-			return
-		}
-
-		if (target == "ai") && (cleanMethod == "switch" || cleanMethod == "provider:set") && payload == "" {
-			gui.mode = ModeAiSwitch
-			w.Invalidate()
-			return
-		}
-
-		if (target == "ai") && cleanMethod == "query" && payload == "" {
-			gui.mode = ModeAiQuery
-			w.Invalidate()
-			return
-		}
-
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_, _ = client.Send(ctx, target, method, []byte(payload))
-			w.Invalidate()
-		}()
-	}
-}
-
-func applySystemTheme(th *material.Theme) {
-	// High-contrast Dark Mode (XDG Generic Dark)
-	th.Palette = material.Palette{
-		Fg:         color.NRGBA{R: 255, G: 255, B: 255, A: 255}, // White text
-		Bg:         color.NRGBA{R: 15, G: 15, B: 15, A: 255},    // Deep black bg
-		ContrastFg: color.NRGBA{R: 255, G: 255, B: 255, A: 255}, // White text on buttons
-		ContrastBg: color.NRGBA{R: 0, G: 100, B: 200, A: 255},   // Strong Blue accents
 	}
 }
