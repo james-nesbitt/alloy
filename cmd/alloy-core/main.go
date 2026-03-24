@@ -26,8 +26,12 @@ func getAlloyRuntimeDir() string {
 	if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
 		return filepath.Join(run, "alloy")
 	}
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "unknown"
+	}
 	// Fallback to /tmp if XDG_RUNTIME_DIR is not available
-	return filepath.Join(os.TempDir(), "alloy")
+	return filepath.Join(os.TempDir(), "alloy-"+user)
 }
 
 func main() {

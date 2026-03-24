@@ -26,7 +26,11 @@ func GetAlloyRuntimeDir() string {
 	if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
 		return filepath.Join(run, "alloy")
 	}
-	return filepath.Join(os.TempDir(), "alloy")
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "unknown"
+	}
+	return filepath.Join(os.TempDir(), "alloy-"+user)
 }
 
 // Client represents a standardized frontend client for Alloy.

@@ -35,7 +35,7 @@ var Registry = map[string]PluginConstructor{
 	"health":    NewHealthManagerPlugin,
 	"telemetry": NewTelemetryManagerPlugin,
 	"command-manager": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
-		return NewCommandManager(logger), nil
+		return NewCommandManager(logger, nil), nil
 	},
 	"logger": func(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
 		auditDir := state.BaseDir()

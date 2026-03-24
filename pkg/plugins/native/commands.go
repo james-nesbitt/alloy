@@ -16,12 +16,14 @@ type CommandManager struct {
 	registry map[string]api.Registration
 	logger   *slog.Logger
 	route    func(context.Context, api.Message)
+	provider func() []api.Registration
 }
 
-func NewCommandManager(logger *slog.Logger) *CommandManager {
+func NewCommandManager(logger *slog.Logger, provider func() []api.Registration) *CommandManager {
 	return &CommandManager{
 		registry: make(map[string]api.Registration),
 		logger:   logger,
+		provider: provider,
 	}
 }
 
@@ -134,12 +136,16 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		return api.Message{}, nil
 
 	case "list", "discover", "service:discovery", "command-manager:discover":
-		c.mu.RLock()
 		var targets []api.Registration
-		for _, reg := range c.registry {
-			targets = append(targets, reg)
+		if c.provider != nil {
+			targets = c.provider()
+		} else {
+			c.mu.RLock()
+			for _, reg := range c.registry {
+				targets = append(targets, reg)
+			}
+			c.mu.RUnlock()
 		}
-		c.mu.RUnlock()
 
 		payload, _ := json.Marshal(map[string]any{
 			"targets": targets,

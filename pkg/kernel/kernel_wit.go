@@ -86,7 +86,32 @@ func NewWITKernel(
 	kernel.events = native.NewEventManager(logger)
 	kernel.RegisterPlugin(kernel.events)
 
-	kernel.commands = native.NewCommandManager(logger)
+	kernel.commands = native.NewCommandManager(logger, func() []api.Registration {
+		kernel.mu.RLock()
+		defer kernel.mu.RUnlock()
+		var regs []api.Registration
+		// Convert metadata to registrations
+		for id, meta := range kernel.metadata {
+			regs = append(regs, api.Registration{
+				ID:           id,
+				Type:         "plugin",
+				Status:       "active",
+				Capabilities: meta.Capabilities,
+			})
+		}
+		// Also include internal plugins
+		for id, plugin := range kernel.plugins {
+			if _, ok := kernel.metadata[id]; !ok {
+				regs = append(regs, api.Registration{
+					ID:           id,
+					Type:         "plugin",
+					Status:       "active",
+					Capabilities: plugin.Capabilities(),
+				})
+			}
+		}
+		return regs
+	})
 	kernel.RegisterPlugin(kernel.commands)
 
 	// Back-fill existing registrations into the command manager
@@ -197,10 +222,25 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 			}
 		} else if msg.Method == "register-capability" {
 			var cap api.Capability
-			if err := json.Unmarshal(msg.Payload, &cap); err != nil {
-				if cap.Method != "" && msg.Sender != "" {
+			if err := json.Unmarshal(msg.Payload, &cap); err == nil {
+				if cap.Method != "" {
+					id := msg.Sender
 					k.mu.Lock()
-					k.capabilityMap[cap.Method] = msg.Sender
+					k.capabilityMap[cap.Method] = id
+					// Update metadata as well
+					if md, ok := k.metadata[id]; ok {
+						found := false
+						for _, existing := range md.Capabilities {
+							if existing.Method == cap.Method {
+								found = true
+								break
+							}
+						}
+						if !found {
+							md.Capabilities = append(md.Capabilities, cap)
+							k.metadata[id] = md
+						}
+					}
 					k.mu.Unlock()
 				}
 			}
@@ -318,6 +358,10 @@ func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 		}
 		k.RouteMessage(ctx, resp)
 	}
+}
+
+func (k *WITKernel) HandleMessageSync(ctx context.Context, msg api.Message) (api.Message, error) {
+	return k.handleMessageSync(ctx, msg)
 }
 
 // handleMessageSync handles a synchronous message call.

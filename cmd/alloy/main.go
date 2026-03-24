@@ -22,7 +22,11 @@ func getAlloyRuntimeDir() string {
 	if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
 		return filepath.Join(run, "alloy")
 	}
-	return filepath.Join(os.TempDir(), "alloy")
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "unknown"
+	}
+	return filepath.Join(os.TempDir(), "alloy-"+user)
 }
 
 func main() {
@@ -63,10 +67,11 @@ func usage() {
 	fmt.Println("  alloy tui [options]           Launch TUI frontend (optionally with dedicated core)")
 	fmt.Println("  alloy gui [options]           Launch GUI frontend (optionally with dedicated core)")
 	fmt.Println("  alloy version                 Show version info")
-	fmt.Println("\nCore Options:")
-	fmt.Println("  --listen ADDR                 Listen address (default: unix://./alloy.sock)")
+	fmt.Println("\nCommon Options:")
 	fmt.Println("  --data-dir DIR                Plugin data directory (default: ./data)")
 	fmt.Println("  --provision FILE              Initial provisioning manifest")
+	fmt.Println("\nCore Options:")
+	fmt.Println("  --listen ADDR                 Listen address (default: unix://./alloy.sock)")
 	fmt.Println("\nFrontend Options:")
 	fmt.Println("  --socket ADDR                 Connect to existing core at ADDR")
 	fmt.Println("  --dedicated                   Launch a dedicated protected core instance for this frontend")
@@ -184,6 +189,8 @@ func launchFrontend(name string, args []string) {
 	dedicated := fs.Bool("dedicated", false, "Launch dedicated core")
 	network := fs.Bool("network", false, "Use network socket for dedicated core")
 	debug := fs.Bool("debug", false, "Enable debug logging")
+	provision := fs.String("provision", "", "Initial provisioning manifest for dedicated core")
+	dataDir := fs.String("data-dir", "./data", "Data directory for dedicated core")
 	sf := cmdutil.RegisterSecurityFlags(fs)
 	fs.Parse(args)
 
@@ -216,7 +223,10 @@ func launchFrontend(name string, args []string) {
 		}
 		targetSocket = addr
 
-		coreArgs := []string{"--listen", addr}
+		coreArgs := []string{"--listen", addr, "--data-dir", *dataDir}
+		if *provision != "" {
+			coreArgs = append(coreArgs, "--provision", *provision)
+		}
 		if *debug {
 			coreArgs = append(coreArgs, "--debug")
 		}

@@ -18,6 +18,7 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
+	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
 // Model Layout components
@@ -67,39 +68,13 @@ type Model struct {
 	lastMainMode       int
 	localBufferVersion int
 	isLocalBufferDirty bool
-	remoteCursors      map[string]Cursor
+	remoteCursors      map[string]tui.Cursor
 
 	// Multi-pane state
-	Panes []Pane
+	Panes []tui.Pane
 	FocusIdx int
-}
 
-type Pane struct {
-	Type int // ModeNormal, ModeDashboard, ModeChat, ModeEdit
-	WidthPct float64 // 0.0 to 1.0
-}
-
-const (
-	SelectNone = iota
-	SelectProject
-	SelectWorkspace
-)
-
-const (
-	ModeNormal    = 0
-	ModeInsert    = 1
-	ModeCommand   = 2
-	ModeChat      = 3
-	ModeForm      = 4
-	ModeDashboard = 5
-	ModeEdit      = 6
-)
-
-type Cursor struct {
-	Row      int    `json:"row"`
-	Col      int    `json:"col"`
-	User     string `json:"user"`
-	LastSeen int64  `json:"last_seen"`
+	startupTicks int
 }
 
 type discoveryMsg struct {
@@ -114,13 +89,17 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		m.listenForMessages(),
-		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+		m.doDiscovery, // Immediate discovery
+		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }
 
 func (m Model) listenForMessages() tea.Cmd {
 	return func() tea.Msg {
-		msg := <-m.msgCh
+		msg, ok := <-m.msgCh
+		if !ok {
+			return errMsg(fmt.Errorf("message channel closed"))
+		}
 		return messageMsg(msg)
 	}
 }
@@ -142,8 +121,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		interval := time.Second * 5
+		if m.startupTicks < 10 {
+			interval = time.Millisecond * 500
+			m.startupTicks++
+		}
 		cmds = append(cmds,
-			tea.Tick(time.Minute, func(t time.Time) tea.Msg { return tickMsg(t) }),
+			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
 			m.doDiscovery,
 			m.sendPresenceHeartbeat(),
 		)
@@ -154,7 +138,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Pane switching
+		// tui.Pane switching
 		if msg.String() == "ctrl+w" {
 			// This is just a modifier prefix in many layouts, but let's make it a simple toggle for now
 			// Or wait for next key...
@@ -162,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle keys based on mode
 		switch m.Mode {
-		case ModeNormal, ModeDashboard:
+		case tui.ModeNormal, tui.ModeDashboard:
 			newM, cmd := m.handleNormalMode(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -174,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, vpCmd)
 			}
 
-		case ModeInsert:
+		case tui.ModeInsert:
 			newM, cmd := m.handleInsertMode(msg, nil)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -186,7 +170,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, taCmd)
 			}
 
-		case ModeChat:
+		case tui.ModeChat:
 			newM, cmd := m.handleChatMode(msg, nil)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -198,7 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, taCmd)
 			}
 
-		case ModeEdit:
+		case tui.ModeEdit:
 			newM, cmd := m.handleEditMode(msg, nil)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -219,14 +203,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
 			}
 
-		case ModeCommand:
+		case tui.ModeCommand:
 			newM, cmd := m.handleCommandMode(msg, nil)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			m = newM.(Model)
 
-		case ModeForm:
+		case tui.ModeForm:
 			newM, cmd := m.handleFormMode(msg, nil)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -245,6 +229,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.commandTree = frontend.BuildCommandTree(m.targets)
+
+		// Re-fetch widgets if we have the capability but no tiles
+		if len(m.DashboardTiles) == 0 && m.hasCapability("dashboard:list-widgets") {
+			cmds = append(cmds, m.fetchInitialWidgets())
+		}
+
 		for _, t := range m.targets {
 			if t.ID == "events" && !m.subscriptions["chat:message"] {
 				cmds = append(cmds, m.subscribe("chat:message"), m.subscribe("chat:direct"),
@@ -309,18 +299,18 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 
 			// Apply multi-pane layout if defined
 			if len(m.ActiveProject.Layout.Layout) > 0 {
-				newPanes := []Pane{}
+				newPanes := []tui.Pane{}
 				for _, lp := range m.ActiveProject.Layout.Layout {
-					p := Pane{WidthPct: lp.WidthPct}
+					p := tui.Pane{WidthPct: lp.WidthPct}
 					switch lp.Type {
 					case "dashboard":
-						p.Type = ModeDashboard
+						p.Type = tui.ModeDashboard
 					case "chat":
-						p.Type = ModeChat
+						p.Type = tui.ModeChat
 					case "editor":
-						p.Type = ModeEdit
+						p.Type = tui.ModeEdit
 					default:
-						p.Type = ModeNormal
+						p.Type = tui.ModeNormal
 					}
 					newPanes = append(newPanes, p)
 				}
@@ -329,11 +319,11 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				m.Mode = m.Panes[0].Type
 			} else {
 				if m.ActiveProject.Layout.DefaultMode == "dashboard" {
-					m.Mode = ModeDashboard
+					m.Mode = tui.ModeDashboard
 				} else if m.ActiveProject.Layout.DefaultMode == "chat" {
-					m.Mode = ModeChat
+					m.Mode = tui.ModeChat
 				}
-				m.Panes = []Pane{{Type: m.Mode, WidthPct: 1.0}}
+				m.Panes = []tui.Pane{{Type: m.Mode, WidthPct: 1.0}}
 				m.FocusIdx = 0
 			}
 		}
@@ -350,18 +340,18 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				var wCfg api.WorkspaceConfig
 				if err := json.Unmarshal([]byte(event.Data.Layout), &wCfg); err == nil {
 					if len(wCfg.Layout) > 0 {
-						newPanes := []Pane{}
+						newPanes := []tui.Pane{}
 						for _, lp := range wCfg.Layout {
-							p := Pane{WidthPct: lp.WidthPct}
+							p := tui.Pane{WidthPct: lp.WidthPct}
 							switch lp.Type {
 							case "dashboard":
-								p.Type = ModeDashboard
+								p.Type = tui.ModeDashboard
 							case "chat":
-								p.Type = ModeChat
+								p.Type = tui.ModeChat
 							case "editor":
-								p.Type = ModeEdit
+								p.Type = tui.ModeEdit
 							default:
-								p.Type = ModeNormal
+								p.Type = tui.ModeNormal
 							}
 							newPanes = append(newPanes, p)
 						}
@@ -400,7 +390,7 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 			ID      string            `json:"id"`
 			Content []byte            `json:"content"`
 			Version int               `json:"version"`
-			Cursors map[string]Cursor `json:"cursors,omitempty"`
+			Cursors map[string]tui.Cursor `json:"cursors,omitempty"`
 		}
 		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
 			m.textarea.SetValue(string(resp.Content))
@@ -519,6 +509,10 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
 					time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
 			}
+		case "component:registered":
+			// NEW: React to new components by updating discovery
+			cmds = append(cmds, m.doDiscovery)
+			displayMsg = "skip"
 		case "dashboard:widget-registered":
 			var w api.Widget
 			if err := json.Unmarshal(msg.Payload, &w); err == nil {
@@ -608,14 +602,14 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case ":", "alt+x":
 		m.lastMainMode = m.Mode
-		m.Mode = ModeCommand
+		m.Mode = tui.ModeCommand
 		m.isLeader = false
 		m.commandInput.SetValue(":")
 		m.commandInput.Focus()
 		return m, nil
 	case " ":
 		m.lastMainMode = m.Mode
-		m.Mode = ModeCommand
+		m.Mode = tui.ModeCommand
 		m.isLeader = true
 		m.commandInput.SetValue("")
 		m.commandInput.Focus()
@@ -625,15 +619,15 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("!! Editor service (buffer) not available."))
 			return m, nil
 		}
-		m.Mode = ModeInsert
+		m.Mode = tui.ModeInsert
 		m.textarea.Focus()
 		return m, nil
 	case "d":
-		m.Mode = ModeDashboard
+		m.Mode = tui.ModeDashboard
 		m.isLeader = false
 		return m, nil
 	case "v":
-		m.Mode = ModeNormal
+		m.Mode = tui.ModeNormal
 		m.isLeader = false
 		return m, nil
 	case "c":
@@ -641,7 +635,7 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("!! Chat service not available."))
 			return m, nil
 		}
-		m.Mode = ModeChat
+		m.Mode = tui.ModeChat
 		m.textarea.Placeholder = "Type message to #" + m.ActiveChannel + "..."
 		m.textarea.Focus()
 		return m, nil
@@ -653,7 +647,7 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleInsertMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
-		m.Mode = ModeNormal
+		m.Mode = tui.ModeNormal
 		m.textarea.Blur()
 		return m, nil
 	}
@@ -663,7 +657,7 @@ func (m Model) handleInsertMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.C
 func (m Model) handleChatMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.Mode = ModeNormal
+		m.Mode = tui.ModeNormal
 		m.textarea.Blur()
 		return m, nil
 	case tea.KeyEnter:
@@ -679,7 +673,7 @@ func (m Model) handleChatMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd
 func (m Model) handleEditMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.Mode = ModeNormal
+		m.Mode = tui.ModeNormal
 		m.textarea.Blur()
 		return m, nil
 	case tea.KeyCtrlS:
@@ -941,8 +935,8 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlG:
 		m.Mode = m.lastMainMode
-		if m.Mode == ModeCommand {
-			m.Mode = ModeNormal
+		if m.Mode == tui.ModeCommand {
+			m.Mode = tui.ModeNormal
 		} // Failsafe
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
@@ -966,18 +960,18 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 			opt := filtered[m.selectedCmdIdx]
 			
 			// Selection sub-modes
-			if m.selectType == SelectProject {
+			if m.selectType == tui.SelectProject {
 				m.Mode = m.lastMainMode
 				m.commandInput.Blur()
-				m.selectType = SelectNone
+				m.selectType = tui.SelectNone
 				m.commandInput.SetValue("")
 				m.isLeader = false
 				return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
 			}
-			if m.selectType == SelectWorkspace {
+			if m.selectType == tui.SelectWorkspace {
 				m.Mode = m.lastMainMode
 				m.commandInput.Blur()
-				m.selectType = SelectNone
+				m.selectType = tui.SelectNone
 				m.commandInput.SetValue("")
 				m.isLeader = false
 				return m.executeCommand(fmt.Sprintf("project set-workspace %s", opt.Raw))
@@ -1022,7 +1016,6 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 		m.breadcrumbs = nil
 		m.isLeader = false
 		return m.executeCommand(cmd)
-		return m.executeCommand(cmd)
 	case tea.KeyBackspace:
 		if m.commandInput.Value() == "" && m.isLeader {
 			if len(m.breadcrumbs) > 0 {
@@ -1043,7 +1036,7 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlG:
-		m.Mode = ModeNormal
+		m.Mode = tui.ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		return m, nil
@@ -1051,7 +1044,7 @@ func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 		m.formValues[m.formIdx] = m.commandInput.Value()
 		m.formIdx++
 		if m.formIdx >= len(m.formFields) {
-			m.Mode = ModeNormal
+			m.Mode = tui.ModeNormal
 			m.commandInput.Blur()
 			m.commandInput.SetValue("")
 
@@ -1116,11 +1109,11 @@ func (m Model) doDiscovery() tea.Msg {
 	defer cancel()
 	resp, err := m.client.Send(ctx, "command-manager", "discover", nil)
 	if err != nil {
-		return nil
+		return errMsg(fmt.Errorf("discovery failed: %w", err))
 	}
 	var dMsg discoveryMsg
 	if err := json.Unmarshal(resp.Payload, &dMsg); err != nil {
-		return nil
+		return errMsg(fmt.Errorf("discovery unmarshal failed: %w", err))
 	}
 	return dMsg
 }
@@ -1144,14 +1137,14 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 
 	// Reset state for new command
 	m.isLeader = false
-	m.selectType = SelectNone
+	m.selectType = tui.SelectNone
 	m.breadcrumbs = nil
 
 	verb := parts[0]
 	switch verb {
 	case "ai":
 		if len(parts) >= 2 && (parts[1] == "switch" || parts[1] == "provider:set") {
-			m.Mode = ModeForm
+			m.Mode = tui.ModeForm
 			m.formTitle = "Switch AI Provider"
 			m.formFields = []string{"Type (ollama|openai|anthropic)", "Model", "URL (optional)"}
 			m.formValues = make([]string, 3)
@@ -1163,7 +1156,7 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 		}
 		if len(parts) >= 2 && parts[1] == "query" {
 			if len(parts) == 2 {
-				m.Mode = ModeForm
+				m.Mode = tui.ModeForm
 				m.formTitle = "AI Query"
 				m.formFields = []string{"Prompt"}
 				m.formValues = make([]string, 1)
@@ -1177,22 +1170,22 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	case "p", "project":
 		if len(parts) >= 2 && parts[1] == "open" {
 			if len(parts) == 2 {
-				m.Mode = ModeCommand
-				m.selectType = SelectProject
+				m.Mode = tui.ModeCommand
+				m.selectType = tui.SelectProject
 				m.commandInput.Focus()
 				m.commandInput.SetValue("")
 				return m, m.fetchProjects()
 			}
 			// if len(parts) > 2, it falls through to the default plugin call
 		} else if len(parts) >= 2 && parts[1] == "list-workspaces" {
-			m.Mode = ModeCommand
-			m.selectType = SelectWorkspace
+			m.Mode = tui.ModeCommand
+			m.selectType = tui.SelectWorkspace
 			m.commandInput.Focus()
 			m.commandInput.SetValue("")
 			return m, m.fetchWorkspaces()
 		} else if len(parts) >= 2 && parts[1] == "create" {
 			if len(parts) == 2 {
-				m.Mode = ModeForm
+				m.Mode = tui.ModeForm
 				m.formTitle = "Create New Project"
 				m.formFields = []string{"Name", "Description"}
 				m.formValues = make([]string, 2)
@@ -1213,7 +1206,7 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 	case "e", "edit":
 		if len(parts) > 1 {
 			m.activeBuffer = parts[1]
-			m.Mode = ModeEdit
+			m.Mode = tui.ModeEdit
 			m.textarea.Focus()
 			cmds = append(cmds, m.fetchBufferContent(m.activeBuffer))
 		}
@@ -1231,7 +1224,7 @@ func (m Model) executeCommand(cmdStr string) (tea.Model, tea.Cmd) {
 		// List logic...
 	case "vsplit":
 		if len(m.Panes) < 3 {
-			m.Panes = append(m.Panes, Pane{Type: ModeChat, WidthPct: 0.5})
+			m.Panes = append(m.Panes, tui.Pane{Type: tui.ModeChat, WidthPct: 0.5})
 			// Adjust widths
 			for i := range m.Panes {
 				m.Panes[i].WidthPct = 1.0 / float64(len(m.Panes))
@@ -1302,7 +1295,7 @@ func (m Model) filteredCommands() []CommandOption {
 	var results []CommandOption
 	input := m.commandInput.Value()
 
-	if m.selectType == SelectProject {
+	if m.selectType == tui.SelectProject {
 		for _, p := range m.Projects {
 			score := frontend.FuzzyScore(p.Name, input)
 			if score > 0 {
@@ -1314,7 +1307,7 @@ func (m Model) filteredCommands() []CommandOption {
 				})
 			}
 		}
-	} else if m.selectType == SelectWorkspace {
+	} else if m.selectType == tui.SelectWorkspace {
 		for _, w := range m.Workspaces {
 			score := frontend.FuzzyScore(w.Name, input)
 			if score > 0 {
@@ -1506,11 +1499,16 @@ func max(a, b int) int {
 
 func (m Model) dashboardView() string {
 	if len(m.TileOrder) == 0 {
+		status := "Connecting to kernel..."
+		if len(m.targets) > 0 {
+			status = fmt.Sprintf("Connected. Discovered %d plugins. Waiting for dashboard widgets...", len(m.targets))
+		}
+		
 		return lipgloss.NewStyle().
 			Width(m.width).
 			Height(m.height-3).
 			Align(lipgloss.Center, lipgloss.Center).
-			Render("No dynamic dashboard widgets registered.\nWaiting for WASM plugins to initialize...")
+			Render(fmt.Sprintf("%s\n\nNo dynamic dashboard widgets registered.\nWaiting for WASM plugins to initialize...", status))
 	}
 
 	cols := 2
@@ -1580,11 +1578,11 @@ func (m Model) dashboardView() string {
 }
 
 func (m Model) renderPaneContent(paneType int, width int, height int) string {
-	if paneType == ModeInsert || paneType == ModeChat || paneType == ModeEdit {
+	if paneType == tui.ModeInsert || paneType == tui.ModeChat || paneType == tui.ModeEdit {
 		m.textarea.SetWidth(width)
 		m.textarea.SetHeight(height)
 		return m.textarea.View()
-	} else if paneType == ModeDashboard {
+	} else if paneType == tui.ModeDashboard {
 		// Dashboard needs careful handling of child widget widths
 		// Temporarily adjust m.width/height for dashboardView logic
 		oldW, oldH := m.width, m.height
@@ -1600,30 +1598,30 @@ func (m Model) renderPaneContent(paneType int, width int, height int) string {
 }
 
 func (m Model) View() string {
-	if !m.ready {
-		return "\n  Initializing..."
+	if m.width == 0 || m.height == 0 {
+		return "\n  Initializing screen size..."
 	}
 
 	modeStr := " NORMAL "
 	modeStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
 
 	switch m.Mode {
-	case ModeInsert:
+	case tui.ModeInsert:
 		modeStr = " INSERT "
 		modeStyle = modeStyle.Background(lipgloss.Color("2"))
-	case ModeChat:
+	case tui.ModeChat:
 		modeStr = " CHAT "
 		modeStyle = modeStyle.Background(lipgloss.Color("6"))
-	case ModeForm:
+	case tui.ModeForm:
 		modeStr = " FORM "
 		modeStyle = modeStyle.Background(lipgloss.Color("13"))
-	case ModeDashboard:
+	case tui.ModeDashboard:
 		modeStr = " DASHBOARD "
 		modeStyle = modeStyle.Background(lipgloss.Color("14"))
-	case ModeEdit:
+	case tui.ModeEdit:
 		modeStr = " EDIT "
 		modeStyle = modeStyle.Background(lipgloss.Color("2"))
-	case ModeCommand:
+	case tui.ModeCommand:
 		if m.isLeader {
 			modeStr = " LEADER "
 			modeStyle = modeStyle.Background(lipgloss.Color("3"))
@@ -1657,7 +1655,7 @@ func (m Model) View() string {
 
 	var mainView string
 	workingHeight := m.height - 3
-	if m.Mode == ModeCommand || m.Mode == ModeForm {
+	if m.Mode == tui.ModeCommand || m.Mode == tui.ModeForm {
 		workingHeight = (m.height * 2) / 3
 	}
 
@@ -1695,7 +1693,7 @@ func (m Model) View() string {
 		statusLine,
 	)
 
-	if m.Mode == ModeCommand {
+	if m.Mode == tui.ModeCommand {
 		prompt := ":"
 		if m.isLeader {
 			prompt = strings.Join(m.breadcrumbs, " > ")
@@ -1820,7 +1818,7 @@ func (m Model) View() string {
 			}
 		}
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
-	} else if m.Mode == ModeForm {
+	} else if m.Mode == tui.ModeForm {
 		formStyle := lipgloss.NewStyle().Background(lipgloss.Color("0")).Foreground(lipgloss.Color("7")).Width(m.width)
 		labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
 
@@ -1861,13 +1859,16 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 		commandInput:  ci,
 		msgCh:         msgCh,
 		ActiveChannel: "general",
-		Mode:          ModeDashboard,
+		Mode:          tui.ModeDashboard,
 		subscriptions: make(map[string]bool),
 		recency:       make(map[string]int),
 		DashboardTiles: make(map[string]frontend.DashboardTile),
 		TileOrder:      nil,
-		Panes: []Pane{
-			{Type: ModeDashboard, WidthPct: 1.0},
+		width:         80,
+		height:        24,
+		ready:         false,
+		Panes: []tui.Pane{
+			{Type: tui.ModeDashboard, WidthPct: 1.0},
 		},
 		FocusIdx: 0,
 	}

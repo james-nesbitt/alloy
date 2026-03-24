@@ -26,3 +26,24 @@ type DiscoveryMsg struct {
 type MessageMsg api.Message
 type ErrMsg error
 type TickMsg time.Time
+
+type Pane struct {
+	Type     int     // ModeNormal, ModeDashboard, ModeChat, ModeEdit
+	WidthPct float64 // 0.0 to 1.0
+}
+
+const (
+	SelectNone = iota
+	SelectProject
+	SelectWorkspace
+)
+
+const (
+	ModeNormal    = 0
+	ModeInsert    = 1
+	ModeCommand   = 2
+	ModeChat      = 3
+	ModeForm      = 4
+	ModeDashboard = 5
+	ModeEdit      = 6
+)
