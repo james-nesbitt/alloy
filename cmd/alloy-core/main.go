@@ -39,6 +39,7 @@ func main() {
 	// Parse command line flags
 	dataDir := flag.String("data-dir", "./data", "Directory for plugin data")
 	listenAddr := flag.String("listen", "unix://"+filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Address to listen on (unix:// or tcp://)")
+	metricsAddr := flag.String("metrics-addr", ":9090", "Address for Prometheus metrics")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
@@ -68,7 +69,7 @@ func main() {
 	}
 
 	// Create WIT-based kernel
-	k, err := kernel.NewWITKernel(logger, kv, *dataDir)
+	k, err := kernel.NewWITKernel(logger, kv, *dataDir, *metricsAddr)
 	if err != nil {
 		logger.Error("failed to create WIT kernel", "error", err)
 		os.Exit(1)

@@ -32,6 +32,8 @@ type WITKernel struct {
 	storage      storage.StateStore
 	dataDir      string
 
+	telemetry *Telemetry
+
 	// Internal core services
 	events   api.Plugin
 	commands api.Plugin
@@ -45,7 +47,10 @@ func NewWITKernel(
 	logger *slog.Logger,
 	storage storage.StateStore,
 	dataDir string,
+	metricsAddr string,
 ) (*WITKernel, error) {
+	tel, _ := initTelemetry(metricsAddr)
+
 	// Create the kernel
 	kernel := &WITKernel{
 		logger:    logger,
@@ -58,6 +63,7 @@ func NewWITKernel(
 		storage:   storage,
 		dataDir:   dataDir,
 		capabilityMap: make(map[string]string),
+		telemetry:     tel,
 	}
 
 	// Create the WASM manager
@@ -122,6 +128,7 @@ func NewWITKernel(
 // routeMessage routes messages to the appropriate destination.
 func (k *WITKernel) RouteMessage(ctx context.Context, msg api.Message) {
 	k.logger.Debug("kernel routing message", "id", msg.ID, "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
+	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
 
 	// Apply interceptors
 	k.mu.RLock()
@@ -339,6 +346,7 @@ func (k *WITKernel) lazyLoadPlugin(ctx context.Context, pluginID string) error {
 	k.plugins[pluginID] = plugin
 	delete(k.loading, pluginID)
 	close(ch)
+	// Track plugin count for WITKernel if it had telemetry (it doesn't yet)
 	k.mu.Unlock()
 
 	return nil
@@ -398,6 +406,8 @@ func (k *WITKernel) RegisterPlugin(plugin api.Plugin) {
 			k.logger.Debug("skipping re-registration of internal core plugin", "id", id)
 			return
 		}
+	} else {
+		k.telemetry.PluginCountChange(context.Background(), 1)
 	}
 
 	k.plugins[id] = plugin
