@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -14,9 +15,19 @@ import (
 
 func (m Model) executeFormCommand() (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	payloadMap := make(map[string]string)
-	for i, field := range m.formFields {
-		payloadMap[strings.ToLower(field)] = m.formValues[i]
+	payloadMap := make(map[string]any)
+	for i, param := range m.formParams {
+		val := m.formValues[i]
+		switch param.Type {
+		case "int":
+			var intVal int
+			fmt.Sscanf(val, "%d", &intVal)
+			payloadMap[strings.ToLower(param.Name)] = intVal
+		case "bool":
+			payloadMap[strings.ToLower(param.Name)] = (strings.ToLower(val) == "true" || val == "1" || strings.ToLower(val) == "y")
+		default:
+			payloadMap[strings.ToLower(param.Name)] = val
+		}
 	}
 	payload, _ := json.Marshal(payloadMap)
 
@@ -38,10 +49,11 @@ func (m Model) executeFormCommand() (tea.Model, tea.Cmd) {
 	})
 
 	// Reset form
-	m.formFields = nil
+	m.formParams = nil
 	m.formValues = nil
 	m.formTitle = ""
 	m.formIdx = 0
+	m.formError = ""
 
 	return m, tea.Batch(cmds...)
 }
@@ -136,6 +148,7 @@ func (m Model) filteredCommands() []CommandOption {
 					Display:     p.Name,
 					Description: p.Description,
 					Score:       score,
+					Params:      nil,
 				})
 			}
 		}
@@ -148,6 +161,7 @@ func (m Model) filteredCommands() []CommandOption {
 					Display:     w.Name,
 					Description: w.Path,
 					Score:       score,
+					Params:      nil,
 				})
 			}
 		}
@@ -216,6 +230,7 @@ func (m Model) filteredCommands() []CommandOption {
 					Status:      status,
 					Frequency:   m.frequency[child.Target+" "+child.Method],
 					Score:       1,
+					Params:      child.Params,
 				})
 			}
 		}

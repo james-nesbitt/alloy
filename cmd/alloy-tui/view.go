@@ -242,17 +242,39 @@ func (m Model) View() string {
 		labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
 
 		var rows []string
-		rows = append(rows, lipgloss.NewStyle().Bold(true).Underline(true).Render(m.formTitle))
+		rows = append(rows, lipgloss.NewStyle().Bold(true).Underline(true).Render(strings.ToUpper(m.formTitle)))
 
-		for i, field := range m.formFields {
-			val := m.formValues[i]
-			if i == m.formIdx {
-				rows = append(rows, labelStyle.Render("> "+field+": ")+m.commandInput.Value())
-			} else if i < m.formIdx {
-				rows = append(rows, "  "+field+": "+val)
-			} else {
-				rows = append(rows, "  "+field+": ")
+		for i, param := range m.formParams {
+			val := ""
+			if i < m.formIdx {
+				val = m.formValues[i]
 			}
+			
+			prefix := "  "
+			if i == m.formIdx {
+				prefix = "> "
+			}
+
+			reqStr := ""
+			if param.Required {
+				reqStr = "*"
+			}
+
+			typeStr := " (" + param.Type + ")"
+			if param.Type == "enum" {
+				typeStr = " [" + strings.Join(param.Choices, "|") + "]"
+			}
+
+			line := prefix + labelStyle.Render(param.Name+reqStr) + typeStr + ": "
+			if i == m.formIdx {
+				line += m.commandInput.Value()
+				if m.formError != "" {
+					line += " " + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("(!) "+m.formError)
+				}
+			} else {
+				line += val
+			}
+			rows = append(rows, line)
 		}
 
 		listStr := "\n" + strings.Join(rows, "\n")

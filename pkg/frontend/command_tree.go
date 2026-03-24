@@ -7,6 +7,13 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 )
 
+type ParamInfo struct {
+	Name     string
+	Type     string // string, int, bool
+	Required bool
+	Choices  []string // For enum-like selection
+}
+
 type CommandNode struct {
 	Key         string
 	Description string
@@ -15,7 +22,41 @@ type CommandNode struct {
 	Children    map[string]*CommandNode
 	Annotation  string
 	Shortcut    string
-	Params      []string // Param names (e.g. ["name", "description"])
+	Params      []ParamInfo // Structured parameters
+}
+
+func parseParams(raw string) []ParamInfo {
+	var params []ParamInfo
+	if raw == "" {
+		return params
+	}
+	parts := strings.Split(raw, ",")
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		
+		info := ParamInfo{Type: "string", Required: false}
+		subparts := strings.Split(p, ":")
+		info.Name = subparts[0]
+		
+		for i := 1; i < len(subparts); i++ {
+			switch subparts[i] {
+			case "string", "int", "bool":
+				info.Type = subparts[i]
+			case "required":
+				info.Required = true
+			default:
+				if strings.HasPrefix(subparts[i], "enum(") && strings.HasSuffix(subparts[i], ")") {
+					info.Type = "enum"
+					choices := subparts[i][5 : len(subparts[i])-1]
+					info.Choices = strings.Split(choices, "|")
+				}
+			}
+		}
+		params = append(params, info)
+	}
+	return params
 }
 
 // BuildCommandTree constructs a tree from a list of plugin registrations.
@@ -47,18 +88,14 @@ func BuildCommandTree(regs []api.Registration) *CommandNode {
 						if group, ok := cap.Annotations["group"]; ok {
 							curr.Annotation = group
 						}
-						if params, ok := cap.Annotations["params"]; ok {
-							curr.Params = strings.Split(params, ",")
+						if pStr, ok := cap.Annotations["params"]; ok {
+							curr.Params = parseParams(pStr)
 						}
 					}
 				}
 			}
 
 			// 2. Always add to the method-based lookup for fuzzy search (accessible via ':')
-			// We store these under a special hidden path or just ensure they are flattened.
-			// Actually, Flatten just traverses Children.
-			// Let's add them under the target ID if they don't have a shortcut.
-			
 			if _, ok := root.Children[r.ID]; !ok {
 				root.Children[r.ID] = &CommandNode{
 					Key:      r.ID,
@@ -85,8 +122,8 @@ func BuildCommandTree(regs []api.Registration) *CommandNode {
 				if group, ok := cap.Annotations["group"]; ok {
 					targetNode.Children[methodKey].Annotation = group
 				}
-				if params, ok := cap.Annotations["params"]; ok {
-					targetNode.Children[methodKey].Params = strings.Split(params, ",")
+				if pStr, ok := cap.Annotations["params"]; ok {
+					targetNode.Children[methodKey].Params = parseParams(pStr)
 				}
 			}
 		}
@@ -122,7 +159,7 @@ type SearchItem struct {
 	Recency     int    // Last use timestamp (offset)
 	Status      string // "running", "crashed", etc.
 	Group       string // For visual categorization
-	Params      []string // Param names
+	Params      []ParamInfo // Structured parameters
 }
 
 // Flatten extracts all leaf commands from the tree.

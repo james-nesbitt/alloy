@@ -46,10 +46,12 @@ type Model struct {
 	selectType    int
 
 	// Form state
-	formTitle  string
-	formFields []string
-	formValues []string
-	formIdx    int
+	formTitle      string
+	formParams     []frontend.ParamInfo
+	formValues     []string
+	formIdx        int
+	formError      string
+	formValidation func(index int, value string) error
 
 	// Dashboard state
 	DashboardTiles map[string]frontend.DashboardTile
@@ -77,7 +79,7 @@ type CommandOption struct {
 	Status      string
 	Frequency   int
 	Score       int
-	Params      []string
+	Params      []frontend.ParamInfo
 }
 
 type discoveryMsg struct {

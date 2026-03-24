@@ -525,9 +525,10 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 						if len(node.Params) > 0 {
 							m.Mode = tui.ModeForm
 							m.formTitle = node.Target + " " + node.Method
-							m.formFields = node.Params
+							m.formParams = node.Params
 							m.formValues = make([]string, len(node.Params))
 							m.formIdx = 0
+							m.formError = ""
 							m.commandInput.SetValue("")
 							m.commandInput.Focus()
 							return m, nil
@@ -545,9 +546,10 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 				if len(opt.Params) > 0 {
 					m.Mode = tui.ModeForm
 					m.formTitle = opt.Raw
-					m.formFields = opt.Params
+					m.formParams = opt.Params
 					m.formValues = make([]string, len(opt.Params))
 					m.formIdx = 0
+					m.formError = ""
 					m.commandInput.SetValue("")
 					m.commandInput.Focus()
 					return m, nil
@@ -585,17 +587,59 @@ func (m Model) handleCommandMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.
 	return m, ciCmd
 }
 
+func (m Model) validateFormValue(index int, val string) string {
+	param := m.formParams[index]
+	if param.Required && val == "" {
+		return "This field is required"
+	}
+
+	switch param.Type {
+	case "int":
+		var i int
+		_, err := fmt.Sscanf(val, "%d", &i)
+		if err != nil {
+			return "Must be an integer"
+		}
+	case "bool":
+		low := strings.ToLower(val)
+		if low != "true" && low != "false" && low != "1" && low != "0" && low != "y" && low != "n" {
+			return "Must be true/false, 1/0, or y/n"
+		}
+	case "enum":
+		found := false
+		for _, c := range param.Choices {
+			if val == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "Must be one of: " + strings.Join(param.Choices, ", ")
+		}
+	}
+	return ""
+}
+
 func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlG:
 		m.Mode = tui.ModeNormal
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
+		m.formError = ""
 		return m, nil
 	case tea.KeyEnter:
-		m.formValues[m.formIdx] = m.commandInput.Value()
+		val := m.commandInput.Value()
+		errStr := m.validateFormValue(m.formIdx, val)
+		if errStr != "" {
+			m.formError = errStr
+			return m, nil
+		}
+
+		m.formValues[m.formIdx] = val
 		m.formIdx++
-		if m.formIdx >= len(m.formFields) {
+		m.formError = ""
+		if m.formIdx >= len(m.formParams) {
 			m.Mode = tui.ModeNormal
 			m.commandInput.Blur()
 			m.commandInput.SetValue("")

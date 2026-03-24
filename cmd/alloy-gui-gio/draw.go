@@ -359,30 +359,97 @@ func renderModals(gtx layout.Context, th *material.Theme, client *frontend.Clien
 								var children []layout.FlexChild
 								children = append(children, layout.Rigid(material.H6(th, strings.ToUpper(gui.form.title)).Layout))
 
-								for i, field := range gui.form.fields {
+								for i, param := range gui.form.params {
 									idx := i
+									label := param.Name
+									if param.Required {
+										label += "*"
+									}
+									typeHint := " (" + param.Type + ")"
+									if param.Type == "enum" {
+										typeHint = " [" + strings.Join(param.Choices, "|") + "]"
+									}
+
 									children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 										return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return material.Editor(th, &gui.form.editors[idx], field).Layout(gtx)
+											ed := material.Editor(th, &gui.form.editors[idx], label+typeHint)
+											return ed.Layout(gtx)
 										})
 									}))
+
+									if len(gui.form.errors) > idx && gui.form.errors[idx] != "" {
+										children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											e := material.Caption(th, "(!) "+gui.form.errors[idx])
+											e.Color = color.NRGBA{R: 255, G: 0, B: 0, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, e.Layout)
+										}))
+									}
 								}
 
 								children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEvenly}.Layout(gtx,
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											if gui.form.submit.Clicked(gtx) {
-												payloadMap := make(map[string]string)
-												for i, field := range gui.form.fields {
-													payloadMap[field] = gui.form.editors[i].Text()
-												}
-												payload, _ := json.Marshal(payloadMap)
+												valid := true
+												gui.form.errors = make([]string, len(gui.form.params))
+												payloadMap := make(map[string]any)
 
-												parts := strings.Fields(gui.form.title)
-												if len(parts) >= 2 {
-													go client.Send(context.Background(), parts[0], parts[1], payload)
+												for i, param := range gui.form.params {
+													val := gui.form.editors[i].Text()
+
+													// Basic validation
+													if param.Required && val == "" {
+														gui.form.errors[i] = "Required"
+														valid = false
+														continue
+													}
+
+													switch param.Type {
+													case "int":
+														var v int
+														if n, _ := fmt.Sscanf(val, "%d", &v); n == 0 {
+															gui.form.errors[i] = "Must be integer"
+															valid = false
+														} else {
+															payloadMap[param.Name] = v
+														}
+													case "bool":
+														low := strings.ToLower(val)
+														if low == "true" || low == "1" || low == "y" {
+															payloadMap[param.Name] = true
+														} else if low == "false" || low == "0" || low == "n" {
+															payloadMap[param.Name] = false
+														} else {
+															gui.form.errors[i] = "Must be true/false"
+															valid = false
+														}
+													case "enum":
+														found := false
+														for _, c := range param.Choices {
+															if val == c {
+																found = true
+																break
+															}
+														}
+														if !found {
+															gui.form.errors[i] = "Invalid choice"
+															valid = false
+														} else {
+															payloadMap[param.Name] = val
+														}
+													default:
+														payloadMap[param.Name] = val
+													}
 												}
-												gui.mode = ModeNormal
+
+												if valid {
+													payload, _ := json.Marshal(payloadMap)
+													parts := strings.Fields(gui.form.title)
+													if len(parts) >= 2 {
+														go client.Send(context.Background(), parts[0], parts[1], payload)
+													}
+													gui.mode = ModeNormal
+												}
 											}
 											return material.Button(th, &gui.form.submit, "Submit").Layout(gtx)
 										}),

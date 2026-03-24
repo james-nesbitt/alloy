@@ -17,8 +17,9 @@ import (
 
 type formState struct {
 	title       string
-	fields      []string
+	params      []frontend.ParamInfo
 	editors     []widget.Editor
+	errors      []string
 	submit      widget.Clickable
 	cancel      widget.Clickable
 }
@@ -133,7 +134,7 @@ func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *front
 				item := g.filtered[g.selectedIdx]
 				if len(item.Params) > 0 {
 					g.form.title = item.Target + " " + item.Method
-					g.form.fields = item.Params
+					g.form.params = item.Params
 					g.form.editors = make([]widget.Editor, len(item.Params))
 					g.mode = ModeForm
 					w.Invalidate()
@@ -186,7 +187,7 @@ func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *front
 						if len(child.Children) == 0 {
 							if len(child.Params) > 0 {
 								g.form.title = child.Target + " " + child.Method
-								g.form.fields = child.Params
+								g.form.params = child.Params
 								g.form.editors = make([]widget.Editor, len(child.Params))
 								g.mode = ModeForm
 								w.Invalidate()
