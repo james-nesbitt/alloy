@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"log/slog"
+	"os"
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/storage"
@@ -19,9 +20,17 @@ type TelemetryManager struct {
 }
 
 func NewTelemetryManager(ctx context.Context, logger *slog.Logger) (*TelemetryManager, error) {
-	// For now, we use a simple STDOUT exporter.
-	// In the future, this can be swapped for OTLP/gRPC.
-	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	// If OTEL_EXPORTER_OTLP_ENDPOINT is set, we could use that.
+	// For now, let's keep STDOUT as default but check for a "silent" flag.
+	
+	var opts []stdouttrace.Option
+	if os.Getenv("ALLOY_TELEMETRY_SILENT") == "true" {
+		// No-op or very minimal output
+	} else {
+		opts = append(opts, stdouttrace.WithPrettyPrint())
+	}
+
+	exporter, err := stdouttrace.New(opts...)
 	if err != nil {
 		return nil, err
 	}
