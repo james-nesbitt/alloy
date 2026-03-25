@@ -436,6 +436,23 @@ func handleAppend(msg guest.AlloyMessage) guest.AlloyMessage {
 	}
 
 	root.Data = append(root.Data, req.Content...)
+	
+	// Enforce max_history if set (sliding window for streams)
+	if root.Metadata != nil {
+		if val, exists := root.Metadata["max_history"]; exists {
+			var limit int
+			switch v := val.(type) {
+			case float64:
+				limit = int(v)
+			case int:
+				limit = v
+			}
+			if limit > 0 && len(root.Data) > limit {
+				root.Data = root.Data[len(root.Data)-limit:]
+			}
+		}
+	}
+
 	root.Timestamp = time.Now().Unix()
 	notifyAll(req.ID, "append")
 
@@ -633,6 +650,18 @@ func notifyAll(id string, event string) {
 		Target:  guest.Some("events"),
 		Payload: publishPayload,
 	})
+
+	// Also notify internal subscribers directly
+	for _, sub := range subscribers[id] {
+		plugin.RouteMessage(guest.AlloyMessage{
+			Id:      fmt.Sprintf("evt-%s-%s-%d", id, event, time.Now().UnixNano()),
+			MsgType: "event",
+			Method:  "update",
+			Sender:  "buffer",
+			Target:  guest.Some(sub),
+			Payload: evtData,
+		})
+	}
 }
 
 // Direct interaction handlers (WIT interface implementation)
