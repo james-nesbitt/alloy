@@ -45,7 +45,8 @@ func (wf *WASMFrontend) fetchCommands() {
 	body, _ := io.ReadAll(resp.Body)
 	var regs []api.Registration
 	if err := json.Unmarshal(body, &regs); err != nil {
-		fmt.Printf("WASM Trace: Failed to unmarshal registrations: %v\n", err)
+		// Log error and body for debugging
+		fmt.Printf("WASM Trace: Failed to unmarshal registrations: %v. Body: %s\n", err, body)
 		return
 	}
 
