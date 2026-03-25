@@ -47,6 +47,7 @@ func (c *CommandManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "register", Description: "Register component capabilities"},
 		{Method: "list", Description: "List all registered commands"},
+		{Method: "discovery:list", Description: "Alias for list"},
 		{Method: "service:discovery", Description: "Unified service discovery"},
 		{Method: "command-manager:discover", Description: "Alias for service discovery"},
 		{Method: "discover", Description: "Unified service discovery (legacy)"},
@@ -135,7 +136,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		c.registry[msg.Sender] = reg
 		return api.Message{}, nil
 
-	case "list", "discover", "service:discovery", "command-manager:discover":
+	case "list", "discover", "service:discovery", "command-manager:discover", "discovery:list":
 		var targets []api.Registration
 		if c.provider != nil {
 			targets = c.provider()

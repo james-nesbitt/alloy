@@ -790,6 +790,11 @@ func (k *WITKernel) handleInternalMessage(ctx context.Context, msg api.Message) 
 			Timestamp: time.Now().Unix(),
 		}
 		k.RouteMessage(ctx, resp)
+	case "discovery:list":
+		// Proxy to command manager
+		msg.Target = "command-manager"
+		msg.Method = "list"
+		k.RouteMessage(ctx, msg)
 	case "dashboard:list-widgets":
 		widgets := k.ListWidgets()
 		payload, _ := json.Marshal(widgets)

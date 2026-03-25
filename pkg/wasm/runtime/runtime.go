@@ -241,8 +241,26 @@ func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr,
 				cap.Shortcut = r.readStringFromArgs(mod, shortPtr, shortLen)
 			}
 			
-			// We skip annotations for now in the bulk init to keep it simple, 
-			// or we could implement it if needed.
+			annoSet := i32le.Uint32(data[ptr+28:])
+			if annoSet != 0 {
+				annoPtr := i32le.Uint32(data[ptr+32:])
+				annoLen := i32le.Uint32(data[ptr+36:])
+				if annoLen > 0 {
+					cap.Annotations = make(map[string]string)
+					// metadata is a list of tuples, each tuple is 16 bytes
+					metaData, _ := mod.Memory().Read(annoPtr, annoLen*16)
+					for j := uint32(0); j < annoLen; j++ {
+						kPtr := i32le.Uint32(metaData[j*16:])
+						kLen := i32le.Uint32(metaData[j*16+4:])
+						vPtr := i32le.Uint32(metaData[j*16+8:])
+						vLen := i32le.Uint32(metaData[j*16+12:])
+
+						k := r.readStringFromArgs(mod, kPtr, kLen)
+						v := r.readStringFromArgs(mod, vPtr, vLen)
+						cap.Annotations[k] = v
+					}
+				}
+			}
 			
 			// Register in command-manager
 			payload, _ := json.Marshal(cap)

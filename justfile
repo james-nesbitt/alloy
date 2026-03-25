@@ -79,6 +79,15 @@ build-gui:
     mkdir -p {{BIN_DIR}}
     go build -tags gui -o {{BIN_DIR}}/alloy-gui ./cmd/alloy-gui-gio
 
+# Build Alloy Web (WASM + Host Proxy)
+build-web:
+    @echo ">> Building Web Frontend (WASM) into cmd/alloy-web/static/wasm/..."
+    mkdir -p cmd/alloy-web/static/wasm
+    GOOS=js GOARCH=wasm go build -o cmd/alloy-web/static/wasm/frontend.wasm ./cmd/alloy-web/internal/bridge/wasm_main.go
+    @echo ">> Building Web Host Proxy into {{BIN_DIR}}..."
+    mkdir -p {{BIN_DIR}}
+    go build -o {{BIN_DIR}}/alloy-web ./cmd/alloy-web
+
 # Build Alloy CLI
 build-alloy:
     @echo ">> Building Alloy Tool into {{BIN_DIR}}..."
@@ -86,7 +95,7 @@ build-alloy:
     go build -o {{BIN_DIR}}/alloy ./cmd/alloy
 
 # Build all binaries
-build-binaries: build-core build-tui build-gui build-alloy
+build-binaries: build-core build-tui build-gui build-web build-alloy
 
 # --- WASM PLUGIN BUILDS ---
 
@@ -122,12 +131,16 @@ run-core *args: build-core
     {{LIBEXEC_DIR}}/alloy-core {{args}}
 
 # Run TUI Frontend
-run-tui *args: build-binaries
-    {{BIN_DIR}}/alloy tui {{args}}
+run-tui *args: build-tui
+    {{BIN_DIR}}/alloy-tui {{args}}
 
 # Run Native GUI
-run-gui *args: build-binaries
-    {{BIN_DIR}}/alloy gui {{args}}
+run-gui *args: build-gui
+    {{BIN_DIR}}/alloy-gui {{args}}
+
+# Run Web Frontend (Host Proxy)
+run-web *args: build-web
+    {{BIN_DIR}}/alloy-web {{args}}
 
 # --- TESTING ---
 
@@ -142,3 +155,8 @@ test:
 test-wasm:
     @echo ">> Running WASM/WIT implementation tests..."
     go test -v -run "TestWIT" ./pkg/wasm/... ./pkg/kernel/...
+
+# Run unified sanity check (Kernel + Multiple simulated frontends)
+test-unified: build-plugins
+    @echo ">> Running Unified Sanity Check..."
+    go test -v ./tests/sanity_check_test.go
