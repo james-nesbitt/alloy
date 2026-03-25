@@ -23,7 +23,16 @@ Alloy features two distinct communication models:
 1. **Direct Go Calls (Internal)**: Internal kernel components communicate via direct method calls. This ensures high throughput and zero-latency for the "Zero-Latency Core."
 2. **WIT-based Async Messaging (Plugins/Frontends)**: All 3rd-party code and frontends interact via the Message Bus. The kernel converts internal Go results into the asynchronous, WIT-compatible response format.
 
-## 2. Application Logic (WASM Plugins)
+## 2. Platform Standards & Compliance
+
+- **XDG Compliance**: Respect platform standards for file locations. 
+    - Configuration: `~/.config/alloy` (or `XDG_CONFIG_HOME`).
+    - Data: `~/.local/share/alloy` (or `XDG_DATA_HOME`).
+    - Cache: `~/.cache/alloy` (or `XDG_CACHE_HOME`).
+    - Runtime: `XDG_RUNTIME_DIR/alloy` (for volatile files like sockets and PIDs).
+- **Audit Everything**: Ensure new features or communication paths are integrated into the audit logging system.
+
+## 3. Application Logic (WASM Plugins)
 
 While infrastructure is integrated, all **application-level logic** is offloaded to isolated WASM plugins. 
 
