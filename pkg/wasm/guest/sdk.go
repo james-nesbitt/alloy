@@ -1,78 +1,38 @@
-//go:build wasip1 || wasm
-
 package guest
 
 import (
 	"encoding/json"
 	"fmt"
-
-	guest "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
 )
-
-// Message is a high-level representation of an Alloy message.
-type Message struct {
-	ID        string
-	Type      string
-	Sender    string
-	Target    string
-	Method    string
-	Payload   []byte
-	Timestamp int64
-}
-
-// Handler is a function that processes a message and returns an optional response.
-type Handler func(msg Message) *Message
-
-// AlloyHandler is a handler that uses the raw WIT message type.
-type AlloyHandler func(msg guest.AlloyMessage) guest.AlloyMessage
-
-// Command is a high-level representation of a plugin command.
-type Command struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Handler     CommandHandler     `json:"-"`
-	Shortcut    string            `json:"shortcut,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-}
-
-// CommandContext provides context for command execution.
-type CommandContext struct {
-	Plugin *Plugin
-	Args   []string
-	Sender string
-}
-
-// CommandHandler is a function that handles a command.
-type CommandHandler func(ctx CommandContext) CommandResult
-
-// CommandResult is the outcome of a command execution.
-type CommandResult struct {
-	Success bool            `json:"success"`
-	Output  string          `json:"output"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
-}
 
 // Plugin represents an Alloy WASM plugin with ergonomic Go bindings.
 type Plugin struct {
 	id            string
-	capabilities  []guest.AlloyCapability
+	capabilities  []AlloyCapability
 	handlers      map[string]Handler
 	alloyHandlers map[string]AlloyHandler
 	commands      map[string]Command
 	onInit        func() error
 	onStart       func()
 	onShutdown    func()
+	host          HostInterface
 }
 
 // NewPlugin creates a new ergonomic Alloy plugin.
 func NewPlugin(id string) *Plugin {
-	return &Plugin{
+	p := &Plugin{
 		id:            id,
 		handlers:      make(map[string]Handler),
 		alloyHandlers: make(map[string]AlloyHandler),
 		commands:      make(map[string]Command),
 	}
+	p.host = createDefaultHost()
+	return p
+}
+
+// SetHost manually overrides the host interface. Useful for tests.
+func (p *Plugin) SetHost(h HostInterface) {
+	p.host = h
 }
 
 // WithMetadata sets metadata for the plugin.
@@ -87,11 +47,11 @@ func (p *Plugin) WithTags(tags ...string) *Plugin {
 
 // WithCapability adds a capability to the plugin.
 func (p *Plugin) WithCapability(method, description string) *Plugin {
-	p.capabilities = append(p.capabilities, guest.AlloyCapability{
+	p.capabilities = append(p.capabilities, AlloyCapability{
 		Method:      method,
 		Description: description,
-		Shortcut:    guest.None[string](),
-		Annotations: guest.None[[]guest.AlloyTuple2StringStringT](),
+		Shortcut:    None[string](),
+		Annotations: None[[]AlloyTuple2StringStringT](),
 	})
 	return p
 }
@@ -99,7 +59,7 @@ func (p *Plugin) WithCapability(method, description string) *Plugin {
 // WithShortcut adds a shortcut to the last added capability.
 func (p *Plugin) WithShortcut(shortcut string) *Plugin {
 	if len(p.capabilities) > 0 {
-		p.capabilities[len(p.capabilities)-1].Shortcut = guest.Some(shortcut)
+		p.capabilities[len(p.capabilities)-1].Shortcut = Some(shortcut)
 	}
 	return p
 }
@@ -108,11 +68,11 @@ func (p *Plugin) WithShortcut(shortcut string) *Plugin {
 func (p *Plugin) WithAnnotations(method string, annotations map[string]string) *Plugin {
 	for i, cap := range p.capabilities {
 		if cap.Method == method {
-			annots := make([]guest.AlloyTuple2StringStringT, 0, len(annotations))
+			annots := make([]AlloyTuple2StringStringT, 0, len(annotations))
 			for k, v := range annotations {
-				annots = append(annots, guest.AlloyTuple2StringStringT{F0: k, F1: v})
+				annots = append(annots, AlloyTuple2StringStringT{F0: k, F1: v})
 			}
-			p.capabilities[i].Annotations = guest.Some(annots)
+			p.capabilities[i].Annotations = Some(annots)
 			break
 		}
 	}
@@ -131,7 +91,7 @@ func (p *Plugin) Handle(method string, handler any) *Plugin {
 		p.handlers[method] = h
 	} else if ah, ok := handler.(AlloyHandler); ok {
 		p.alloyHandlers[method] = ah
-	} else if f, ok := handler.(func(guest.AlloyMessage) guest.AlloyMessage); ok {
+	} else if f, ok := handler.(func(AlloyMessage) AlloyMessage); ok {
 		p.alloyHandlers[method] = AlloyHandler(f)
 	}
 	return p
@@ -140,24 +100,24 @@ func (p *Plugin) Handle(method string, handler any) *Plugin {
 // RegisterCommand registers a command with its handler.
 func (p *Plugin) RegisterCommand(cmd Command) *Plugin {
 	p.commands[cmd.Name] = cmd
-	
+
 	// Register the command as a capability with "command:" prefix
 	method := "command:" + cmd.Name
-	annots := make([]guest.AlloyTuple2StringStringT, 0, len(cmd.Annotations))
+	annots := make([]AlloyTuple2StringStringT, 0, len(cmd.Annotations))
 	for k, v := range cmd.Annotations {
-		annots = append(annots, guest.AlloyTuple2StringStringT{F0: k, F1: v})
-	}
-	
-	shortcut := guest.None[string]()
-	if cmd.Shortcut != "" {
-		shortcut = guest.Some(cmd.Shortcut)
+		annots = append(annots, AlloyTuple2StringStringT{F0: k, F1: v})
 	}
 
-	p.capabilities = append(p.capabilities, guest.AlloyCapability{
+	shortcut := None[string]()
+	if cmd.Shortcut != "" {
+		shortcut = Some(cmd.Shortcut)
+	}
+
+	p.capabilities = append(p.capabilities, AlloyCapability{
 		Method:      method,
 		Description: cmd.Description,
 		Shortcut:    shortcut,
-		Annotations: guest.Some(annots),
+		Annotations: Some(annots),
 	})
 	return p
 }
@@ -183,7 +143,7 @@ func (p *Plugin) Run() error {
 // Serve starts the plugin's message loop.
 func (p *Plugin) Serve() {
 	// 1. Initialize with the host
-	guest.AlloyInit(p.id, p.capabilities)
+	p.host.Init(p.id, p.capabilities)
 
 	// 2. Run user initialization
 	if p.onInit != nil {
@@ -194,7 +154,7 @@ func (p *Plugin) Serve() {
 	}
 
 	// 3. Signal readiness
-	guest.AlloyStarted()
+	p.host.Started()
 
 	// 4. Run user onStart
 	if p.onStart != nil {
@@ -207,32 +167,23 @@ func (p *Plugin) Serve() {
 
 func (p *Plugin) messageLoop() {
 	for {
-		optMsg := guest.AlloyGetNextMessage()
+		optMsg := p.host.GetNextMessage()
 		if optMsg.IsNone() {
 			continue
 		}
 
-		rawMsg := optMsg.Unwrap()
-		
-		// Priority 1: Raw AlloyHandlers
-		if ah, ok := p.alloyHandlers[rawMsg.Method]; ok {
-			resp := ah(rawMsg)
+		msg := optMsg.Unwrap()
+
+		// Priority 1: AlloyHandlers
+		if ah, ok := p.alloyHandlers[msg.Method]; ok {
+			resp := ah(msg)
 			if resp.Id != "" {
-				guest.AlloySendResponse(resp)
+				p.host.SendResponse(resp)
 			}
 			continue
 		}
 
-		// Priority 2: SDK Handlers
-		msg := Message{
-			ID:      rawMsg.Id,
-			Type:    rawMsg.MsgType,
-			Method:  rawMsg.Method,
-			Sender:  rawMsg.Sender,
-			Payload: rawMsg.Payload,
-		}
-
-		var resp *Message
+		var resp *AlloyMessage
 
 		// Check if it's a command
 		if len(msg.Method) > 8 && msg.Method[:8] == "command:" {
@@ -242,19 +193,20 @@ func (p *Plugin) messageLoop() {
 		}
 
 		if resp != nil {
-			guest.AlloySendResponse(guest.AlloyMessage{
-				Id:      resp.ID,
-				MsgType: "response",
-				Method:  resp.Method,
-				Sender:  p.id,
-				Target:  guest.Some(msg.Sender),
-				Payload: resp.Payload,
+			p.host.SendResponse(AlloyMessage{
+				Id:        resp.Id,
+				MsgType:   "response",
+				Method:    resp.Method,
+				Sender:    p.id,
+				Target:    Some(msg.Sender),
+				Payload:   resp.Payload,
+				Timestamp: resp.Timestamp,
 			})
 		}
 	}
 }
 
-func (p *Plugin) handleCommand(msg Message) *Message {
+func (p *Plugin) handleCommand(msg AlloyMessage) *AlloyMessage {
 	cmdName := msg.Method[8:]
 	cmd, ok := p.commands[cmdName]
 	if !ok {
@@ -273,92 +225,71 @@ func (p *Plugin) handleCommand(msg Message) *Message {
 	})
 
 	payload, _ := json.Marshal(result)
-	return &Message{
-		ID:      msg.ID + "-resp",
+	return &AlloyMessage{
+		Id:      msg.Id + "-resp",
 		Method:  msg.Method,
 		Payload: payload,
 	}
 }
 
-// Log levels
-const (
-	LogLevelDebug = "debug"
-	LogLevelInfo  = "info"
-	LogLevelWarn  = "warn"
-	LogLevelError = "error"
-)
-
 // Log logs a message to the host.
 func (p *Plugin) Log(level string, msg string) {
-	guest.AlloyLog(level, msg)
+	p.host.Log(level, msg)
 }
 
 // RouteMessage sends a message to the host router.
-func (p *Plugin) RouteMessage(msg guest.AlloyMessage) {
-	guest.AlloyRouteMessage(msg)
+func (p *Plugin) RouteMessage(msg AlloyMessage) {
+	p.host.RouteMessage(msg)
 }
 
 // Call sends a message to the host and waits for a response.
-func (p *Plugin) Call(msg guest.AlloyMessage) guest.AlloyMessage {
-	return guest.AlloyCall(msg)
+func (p *Plugin) Call(msg AlloyMessage) AlloyMessage {
+	return p.host.Call(msg)
 }
 
 // Reply creates a response message for the given request.
-func (p *Plugin) Reply(req guest.AlloyMessage, payload any) guest.AlloyMessage {
+func (p *Plugin) Reply(req AlloyMessage, payload any) AlloyMessage {
 	data, _ := json.Marshal(payload)
-	return guest.AlloyMessage{
-		Id:      req.Id + "-resp",
-		MsgType: "response",
-		Method:  req.Method,
-		Sender:  p.id,
-		Target:  guest.Some(req.Sender),
-		Payload: data,
+	return AlloyMessage{
+		Id:        req.Id + "-resp",
+		MsgType:   "response",
+		Method:    req.Method,
+		Sender:    p.id,
+		Target:    Some(req.Sender),
+		Payload:   data,
+		Timestamp: req.Timestamp,
 	}
 }
 
 // ErrorReply creates an error response message.
-func (p *Plugin) ErrorReply(req guest.AlloyMessage, errMsg string) guest.AlloyMessage {
+func (p *Plugin) ErrorReply(req AlloyMessage, errMsg string) AlloyMessage {
 	result := CommandResult{Success: false, Error: errMsg}
 	data, _ := json.Marshal(result)
-	return guest.AlloyMessage{
+	return AlloyMessage{
+		Id:        req.Id + "-resp",
+		MsgType:   "response",
+		Method:    "error",
+		Sender:    p.id,
+		Target:    Some(req.Sender),
+		Payload:   data,
+		Timestamp: req.Timestamp,
+	}
+}
+
+// ReplyError creates an error response message (compatible with high-level msg types).
+func (p *Plugin) ReplyError(req AlloyMessage, errMsg string) *AlloyMessage {
+	result := CommandResult{Success: false, Error: errMsg}
+	data, _ := json.Marshal(result)
+	return &AlloyMessage{
 		Id:      req.Id + "-resp",
-		MsgType: "response",
 		Method:  "error",
-		Sender:  p.id,
-		Target:  guest.Some(req.Sender),
 		Payload: data,
 	}
 }
 
-// SDKReply creates a SDK response message for the given high-level request.
-func (p *Plugin) SDKReply(req Message, method string, payload any) *Message {
-	data, _ := json.Marshal(payload)
-	return &Message{
-		ID:      req.ID + "-resp",
-		Type:    "response",
-		Method:  method,
-		Target:  req.Sender,
-		Payload: data,
-	}
-}
-
-// ReplyError creates an error response message.
-func (p *Plugin) ReplyError(req Message, errMsg string) *Message {
-	result := CommandResult{Success: false, Error: errMsg}
-	data, _ := json.Marshal(result)
-	return &Message{
-		ID:      req.ID + "-resp",
-		Type:    "response",
-		Method:  "error",
-		Target:  req.Sender,
-		Payload: data,
-	}
-}
-
-// RequireService checks if a specific service (by plugin ID) is available
-// and logs an error and exits if not.
+// RequireService checks if a specific service is available.
 func (p *Plugin) RequireService(serviceID string) {
-	providers := p.FindProviders("*") // Get all providers
+	providers := p.FindProviders("*")
 	found := false
 	for _, provider := range providers {
 		if provider == serviceID {
@@ -378,8 +309,7 @@ func (p *Plugin) CheckCapability(method string) bool {
 	return len(providers) > 0
 }
 
-// RequireCapability checks if any plugin provides the specified method
-// and logs an error and exits if not.
+// RequireCapability checks if any plugin provides the specified method.
 func (p *Plugin) RequireCapability(method string) {
 	if !p.CheckCapability(method) {
 		p.Log(LogLevelError, fmt.Sprintf("Required capability '%s' not found. Plugin exiting.", method))
@@ -389,11 +319,11 @@ func (p *Plugin) RequireCapability(method string) {
 
 // KV Utils
 func (p *Plugin) KVSet(key string, val []byte) bool {
-	return guest.AlloyKvSet(key, val)
+	return p.host.KvSet(key, val)
 }
 
 func (p *Plugin) KVGet(key string) ([]byte, bool) {
-	res := guest.AlloyKvGet(key)
+	res := p.host.KvGet(key)
 	if res.IsSome() {
 		return res.Unwrap(), true
 	}
@@ -401,98 +331,85 @@ func (p *Plugin) KVGet(key string) ([]byte, bool) {
 }
 
 func (p *Plugin) KVDelete(key string) bool {
-	return guest.AlloyKvDelete(key)
+	return p.host.KvDelete(key)
 }
 
 func (p *Plugin) KVList(prefix string) []string {
-	return guest.AlloyKvList(prefix)
+	return p.host.KvList(prefix)
 }
 
 // Workspace Utils
-func (p *Plugin) GetActiveWorkspace() (guest.AlloyWorkspace, bool) {
-	res := guest.AlloyGetActiveWorkspace()
+func (p *Plugin) GetActiveWorkspace() (AlloyWorkspace, bool) {
+	res := p.host.GetActiveWorkspace()
 	if res.IsSome() {
 		return res.Unwrap(), true
 	}
-	return guest.AlloyWorkspace{}, false
+	return AlloyWorkspace{}, false
 }
 
 func (p *Plugin) SetActiveWorkspace(id string) {
-	guest.AlloySetActiveWorkspace(id)
+	p.host.SetActiveWorkspace(id)
 }
 
-func (p *Plugin) ListWorkspaces() []guest.AlloyWorkspace {
-	return guest.AlloyListWorkspaces()
+func (p *Plugin) ListWorkspaces() []AlloyWorkspace {
+	return p.host.ListWorkspaces()
 }
 
-func (p *Plugin) RegisterWorkspace(ws guest.AlloyWorkspace) {
-	guest.AlloyRegisterWorkspace(ws)
+func (p *Plugin) RegisterWorkspace(ws AlloyWorkspace) {
+	p.host.RegisterWorkspace(ws)
 }
 
 func (p *Plugin) UnregisterWorkspace(id string) {
-	guest.AlloyUnregisterWorkspace(id)
+	p.host.UnregisterWorkspace(id)
 }
 
-// RegisterCapability registers a capability with the registry.
-func (p *Plugin) RegisterCapability(cap guest.AlloyCapability) {
-	guest.AlloyRegisterCapability(cap)
+// Registry Utils
+func (p *Plugin) RegisterCapability(cap AlloyCapability) {
+	p.host.RegisterCapability(cap)
 }
 
-// UnregisterCapability unregisters a capability.
 func (p *Plugin) UnregisterCapability(method string) {
-	guest.AlloyUnregisterCapability(method)
+	p.host.UnregisterCapability(method)
 }
 
-// FindProviders finds plugins that provide a specific capability.
 func (p *Plugin) FindProviders(method string) []string {
-	return guest.AlloyFindProviders(method)
+	return p.host.FindProviders(method)
 }
 
-// GetAllCapabilities gets all registered capabilities.
-func (p *Plugin) GetAllCapabilities() []guest.AlloyCapability {
-	return guest.AlloyGetAllCapabilities()
+func (p *Plugin) GetAllCapabilities() []AlloyCapability {
+	return p.host.GetAllCapabilities()
 }
 
-// ReadBuffer reads a buffer directly.
-func (p *Plugin) ReadBuffer(id string) (guest.AlloyBuffer, bool) {
-	res := guest.AlloyReadBuffer(id)
+// Buffer Utils
+func (p *Plugin) ReadBuffer(id string) (AlloyBuffer, bool) {
+	res := p.host.ReadBuffer(id)
 	if res.IsSome() {
 		return res.Unwrap(), true
 	}
-	return guest.AlloyBuffer{}, false
+	return AlloyBuffer{}, false
 }
 
-// GetBufferView returns a direct memory hint (address, size) for the host-side buffer.
-func (p *Plugin) GetBufferView(id string) (ptr, size uint32, ok bool) {
-	// Internal shim to call the newly added WIT get-buffer-view
-	// This uses a raw guest call for now until bindings are re-generated
-	// In a real flow, you'd run 'just build-binaries' to trigger wit-bindgen
-	
-	// Stub until re-generation: always return false
-	return 0, 0, false
-}
-
-// WriteBuffer writes a buffer directly.
 func (p *Plugin) WriteBuffer(id string, content []byte) bool {
-	return guest.AlloyWriteBuffer(id, content)
+	return p.host.WriteBuffer(id, content)
 }
 
-// ListBuffers lists available buffers.
 func (p *Plugin) ListBuffers() []string {
-	return guest.AlloyListBuffers()
+	return p.host.ListBuffers()
 }
 
-// RegisterWidget registers a dashboard widget.
-func (p *Plugin) RegisterWidget(w guest.AlloyWidget) {
-	guest.AlloyRegisterWidget(w)
+func (p *Plugin) GetBufferView(id string) (ptr, size uint32, ok bool) {
+	return p.host.GetBufferView(id)
 }
 
-// UnregisterWidget unregisters a dashboard widget.
+// Dashboard Utils
+func (p *Plugin) RegisterWidget(w AlloyWidget) {
+	p.host.RegisterWidget(w)
+}
+
 func (p *Plugin) UnregisterWidget(id string) {
-	guest.AlloyUnregisterWidget(id)
+	p.host.UnregisterWidget(id)
 }
 
-// UpdateWidget updates a dashboard widget's content.
 func (p *Plugin) UpdateWidget(id string, content []byte) {
-	guest.AlloyUpdateWidget(id, content)
+	p.host.UpdateWidget(id, content)
 }

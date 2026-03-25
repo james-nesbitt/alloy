@@ -3,12 +3,12 @@
 package main
 
 import (
-	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
-	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
 
 // Operation represents a buffer modification.
@@ -19,7 +19,7 @@ type Operation struct {
 	Type    string `json:"t"` // "insert", "delete", "replace"
 }
 
-// Buffer represents a data buffer.
+// Buffer represents a data buffer internal to this plugin.
 type Buffer struct {
 	ID           string                 `json:"id"`
 	Name         string                 `json:"name"`
@@ -47,12 +47,12 @@ var (
 	buffers     = make(map[string]*Buffer)
 	subscribers = make(map[string][]string)
 	nextID      = 1
-	plugin      *Plugin
+	plugin      *guest.Plugin
 )
 
 func main() {
 	// Create a new WIT-based plugin
-	plugin = NewPlugin("buffer").
+	plugin = guest.NewPlugin("buffer").
 		WithMetadata(
 			"Buffer Manager", 
 			"Manages data buffers for the system",
@@ -86,7 +86,7 @@ func main() {
 	plugin.Handle("buffer:load", handleLoad)
 	plugin.Handle("buffer:set_metadata", handleSetMetadata)
 	plugin.Handle("buffer:update_cursor", handleUpdateCursor)
-	plugin.Handle("ui:view:editor", func(msg AlloyMessage) AlloyMessage { return plugin.Reply(msg, "ok") })
+	plugin.Handle("ui:view:editor", func(msg guest.AlloyMessage) guest.AlloyMessage { return plugin.Reply(msg, "ok") })
 
 	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
@@ -108,17 +108,17 @@ func main() {
 		plugin.Log("info", "Buffer manager initializing")
 		
 		// Register in the component registry
-		plugin.RegisterCapability(AlloyCapability{
+		plugin.RegisterCapability(guest.AlloyCapability{
 			Method:      "buffer:read",
 			Description: "Directly read buffer content",
 		})
-		plugin.RegisterCapability(AlloyCapability{
+		plugin.RegisterCapability(guest.AlloyCapability{
 			Method:      "buffer:write",
 			Description: "Directly write buffer content",
 		})
 
 		// Register a dashboard widget
-		plugin.RegisterWidget(AlloyWidget{
+		plugin.RegisterWidget(guest.AlloyWidget{
 			Id:                "buffer-summary",
 			Title:             "Active Buffers",
 			ContentType:       "text",
@@ -156,7 +156,7 @@ func findRootBuffer(id string) (*Buffer, bool) {
 }
 
 // handleSubscribe handles buffer subscription requests.
-func handleSubscribe(msg AlloyMessage) AlloyMessage {
+func handleSubscribe(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -176,7 +176,7 @@ func handleSubscribe(msg AlloyMessage) AlloyMessage {
 }
 
 // handleCreate handles buffer creation requests.
-func handleCreate(msg AlloyMessage) AlloyMessage {
+func handleCreate(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		Name         string                 `json:"name"`
 		Type         string                 `json:"type"`
@@ -219,7 +219,7 @@ func handleCreate(msg AlloyMessage) AlloyMessage {
 }
 
 // handleUpdateCursor updates the cursor position for a user.
-func handleUpdateCursor(msg AlloyMessage) AlloyMessage {
+func handleUpdateCursor(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID  string `json:"id"`
 		Row int    `json:"row"`
@@ -238,7 +238,7 @@ func handleUpdateCursor(msg AlloyMessage) AlloyMessage {
 		b.UserCursors = make(map[string]Cursor)
 	}
 
-	actor := msg.Sender // Defaulting to sender ID for now; in a real scenario, use authenticated actor ID
+	actor := msg.Sender // Defaulting to sender ID for now
 	b.UserCursors[actor] = Cursor{
 		Row:      req.Row,
 		Col:      req.Col,
@@ -254,7 +254,7 @@ func handleUpdateCursor(msg AlloyMessage) AlloyMessage {
 }
 
 // handleRead handles buffer read requests.
-func handleRead(msg AlloyMessage) AlloyMessage {
+func handleRead(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -287,14 +287,14 @@ func handleRead(msg AlloyMessage) AlloyMessage {
 }
 
 // handleWrite handles buffer write requests.
-func handleWrite(msg AlloyMessage) AlloyMessage {
+func handleWrite(msg guest.AlloyMessage) guest.AlloyMessage {
 	plugin.Log("info", "handleWrite received message")
 	var req struct {
 		ID          string `json:"id"`
 		BaseVersion int    `json:"base_version"`
 		Content     []byte `json:"content"`
 		Offset      *int   `json:"offset"`
-		Action      string `json:"action"` // "insert", "delete", "replace" (default "replace")
+		Action      string `json:"action"` // "insert", "delete", "replace"
 		Force       bool   `json:"force"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -308,34 +308,21 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	plugin.Log("info", fmt.Sprintf("Write: id=%s action=%s", req.ID, req.Action))
-	if req.Offset != nil {
-		plugin.Log("info", fmt.Sprintf("Write: has offset %d", *req.Offset))
-	}
-
 	if req.Action == "" {
 		req.Action = "replace"
 	}
 
-	// Conflict detection & Transformation
 	targetOffset := 0
 	if req.Offset != nil {
 		targetOffset = *req.Offset
 	}
 
 	if !req.Force && req.BaseVersion != root.Version {
-		// If it's a full replace (offset is nil), we don't transform, we conflict.
 		if req.Offset == nil {
-			plugin.Log("warn", "Full replace conflict detected")
 			return plugin.ErrorReply(msg, "conflict_detected")
 		}
 
-		// Attempt to transform the operation if we have history
 		if req.BaseVersion < root.Version && len(root.History) > 0 {
-			plugin.Log("info", fmt.Sprintf("Transforming write: base=%d current=%d", req.BaseVersion, root.Version))
-			
-			// Find first operation that the user hasn't seen
-			// (Operations with Version >= req.BaseVersion)
 			historyStartIdx := -1
 			for i, op := range root.History {
 				if op.Version >= req.BaseVersion {
@@ -356,18 +343,12 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 							if op.Offset + op.Length <= targetOffset {
 								targetOffset -= op.Length
 							} else {
-								// Partial overlap - complex resolve: for now, move to start of deletion
 								targetOffset = op.Offset
 							}
 						}
 					}
 				}
-				if req.Offset != nil {
-					plugin.Log("debug", fmt.Sprintf("Transformed offset: %d -> %d", *req.Offset, targetOffset))
-				}
 			} else {
-				// History lost - fallback to conflict fail
-				plugin.Log("warn", "History too old, cannot transform")
 				return plugin.ErrorReply(msg, "conflict_detected_history_lost")
 			}
 		} else if req.BaseVersion < root.Version {
@@ -375,7 +356,6 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 		}
 	}
 
-	// Bounds checking
 	if targetOffset < 0 {
 		targetOffset = 0
 	}
@@ -392,14 +372,12 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 
 	if req.Offset != nil && *req.Offset >= 0 {
 		if req.Action == "insert" {
-			// Shift existing data to the right
 			newData := make([]byte, len(root.Data)+len(req.Content))
 			copy(newData, root.Data[:targetOffset])
 			copy(newData[targetOffset:], req.Content)
 			copy(newData[targetOffset+len(req.Content):], root.Data[targetOffset:])
 			root.Data = newData
 		} else if req.Action == "delete" {
-			// Remove data
 			endOffset := targetOffset + len(req.Content)
 			if endOffset > len(root.Data) {
 				endOffset = len(root.Data)
@@ -409,7 +387,7 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 			copy(newData[targetOffset:], root.Data[endOffset:])
 			root.Data = newData
 			op.Length = endOffset - targetOffset
-		} else { // "replace" (default)
+		} else { // "replace"
 			if targetOffset+len(req.Content) > len(root.Data) {
 				newData := make([]byte, targetOffset+len(req.Content))
 				copy(newData, root.Data)
@@ -420,7 +398,6 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 			}
 		}
 	} else {
-		// Full replace
 		root.Data = req.Content
 		op.Offset = 0
 		op.Type = "replace"
@@ -430,7 +407,6 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 	root.Version++
 	root.Timestamp = time.Now().Unix()
 	
-	// Append to history and truncate
 	root.History = append(root.History, op)
 	if len(root.History) > 100 {
 		root.History = root.History[len(root.History)-100:]
@@ -445,7 +421,7 @@ func handleWrite(msg AlloyMessage) AlloyMessage {
 }
 
 // handleAppend handles buffer append requests.
-func handleAppend(msg AlloyMessage) AlloyMessage {
+func handleAppend(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID      string `json:"id"`
 		Content []byte `json:"content"`
@@ -459,17 +435,7 @@ func handleAppend(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	// Stream pruning logic
-	maxHistory := 0
-	if val, ok := root.Metadata["max_history"].(float64); ok {
-		maxHistory = int(val)
-	}
-
 	root.Data = append(root.Data, req.Content...)
-	if maxHistory > 0 && len(root.Data) > maxHistory {
-		root.Data = root.Data[len(root.Data)-maxHistory:]
-	}
-
 	root.Timestamp = time.Now().Unix()
 	notifyAll(req.ID, "append")
 
@@ -479,7 +445,7 @@ func handleAppend(msg AlloyMessage) AlloyMessage {
 }
 
 // handleList handles buffer list requests.
-func handleList(msg AlloyMessage) AlloyMessage {
+func handleList(msg guest.AlloyMessage) guest.AlloyMessage {
 	list := make([]*Buffer, 0, len(buffers))
 	for _, b := range buffers {
 		list = append(list, b)
@@ -491,7 +457,7 @@ func handleList(msg AlloyMessage) AlloyMessage {
 }
 
 // handleDelete handles buffer deletion requests.
-func handleDelete(msg AlloyMessage) AlloyMessage {
+func handleDelete(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -500,12 +466,8 @@ func handleDelete(msg AlloyMessage) AlloyMessage {
 	}
 
 	delete(buffers, req.ID)
-
-	// Also delete from persistent storage
 	plugin.KVDelete(fmt.Sprintf("buffer:%s:meta", req.ID))
 	plugin.KVDelete(fmt.Sprintf("buffer:%s:content", req.ID))
-
-	// Notify subscribers
 	notifyAll(req.ID, "delete")
 
 	return plugin.Reply(msg, map[string]string{
@@ -513,8 +475,8 @@ func handleDelete(msg AlloyMessage) AlloyMessage {
 	})
 }
 
-// handleUnload removes a buffer from memory without deleting it from disk.
-func handleUnload(msg AlloyMessage) AlloyMessage {
+// handleUnload removes a buffer from memory only.
+func handleUnload(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -531,16 +493,13 @@ func handleUnload(msg AlloyMessage) AlloyMessage {
 }
 
 // handleClear handles buffer clear requests.
-func handleClear(msg AlloyMessage) AlloyMessage {
-	plugin.Log("info", "handleClear received")
+func handleClear(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
-
-	plugin.Log("info", "Clearing buffer "+req.ID)
 
 	root, ok := findRootBuffer(req.ID)
 	if !ok {
@@ -556,7 +515,7 @@ func handleClear(msg AlloyMessage) AlloyMessage {
 }
 
 // handleSetMetadata handles metadata update requests.
-func handleSetMetadata(msg AlloyMessage) AlloyMessage {
+func handleSetMetadata(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID       string                 `json:"id"`
 		Metadata map[string]interface{} `json:"metadata"`
@@ -585,7 +544,7 @@ func handleSetMetadata(msg AlloyMessage) AlloyMessage {
 }
 
 // handleSave handles buffer save requests.
-func handleSave(msg AlloyMessage) AlloyMessage {
+func handleSave(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -598,25 +557,15 @@ func handleSave(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	plugin.Log("info", "Saving buffer "+b.ID)
-
-	// Persist metadata
 	metaKey := fmt.Sprintf("buffer:%s:meta", b.ID)
 	metaData, _ := json.Marshal(b)
-	if !plugin.KVSet(metaKey, metaData) {
-		return plugin.ErrorReply(msg, "failed_to_save_metadata")
-	}
+	plugin.KVSet(metaKey, metaData)
 
-	// Persist content (only for root buffers)
 	root, rootOk := findRootBuffer(b.ID)
 	if rootOk && root.ID == b.ID {
 		contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
-		if !plugin.KVSet(contentKey, root.Data) {
-			return plugin.ErrorReply(msg, "failed_to_save_content")
-		}
+		plugin.KVSet(contentKey, root.Data)
 	}
-
-	plugin.Log("info", "Saved buffer "+b.ID)
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",
@@ -624,10 +573,8 @@ func handleSave(msg AlloyMessage) AlloyMessage {
 }
 
 // handleLoad handles buffer load requests.
-func handleLoad(msg AlloyMessage) AlloyMessage {
+func handleLoad(msg guest.AlloyMessage) guest.AlloyMessage {
 	keys := plugin.KVList("buffer:")
-	plugin.Log("info", fmt.Sprintf("Loading: found %d keys", len(keys)))
-
 	loadedCount := 0
 	for _, key := range keys {
 		if strings.HasSuffix(key, ":meta") {
@@ -636,9 +583,7 @@ func handleLoad(msg AlloyMessage) AlloyMessage {
 				var b Buffer
 				if err := json.Unmarshal(val, &b); err == nil {
 					buffers[b.ID] = &b
-					plugin.Log("info", "Restored buffer " + b.ID)
 					loadedCount++
-					// If root, get content too
 					if b.BaseBufferID == "" {
 						contentKey := fmt.Sprintf("buffer:%s:content", b.ID)
 						content, contentOk := plugin.KVGet(contentKey)
@@ -651,9 +596,6 @@ func handleLoad(msg AlloyMessage) AlloyMessage {
 		}
 	}
 
-	plugin.Log("info", fmt.Sprintf("Loaded %d buffers", loadedCount))
-
-	// Notify about loaded buffers
 	for id := range buffers {
 		notifyAll(id, "load")
 	}
@@ -673,7 +615,6 @@ func notifyAll(id string, event string) {
 	}
 	evtData, _ := json.Marshal(evt)
 	
-	// standardized event structure
 	topic := "buffer:update"
 	if event == "cursor_update" {
 		topic = "buffer:cursors_updated"
@@ -684,39 +625,24 @@ func notifyAll(id string, event string) {
 		"data":  json.RawMessage(evtData),
 	})
 
-	tid := fmt.Sprint(time.Now().UnixNano())
-
-	// Notify events service
-	plugin.RouteMessage(AlloyMessage{
-		Id:      "evt-pub-" + tid,
+	plugin.RouteMessage(guest.AlloyMessage{
+		Id:      "evt-pub-" + id,
 		MsgType: "request",
 		Method:  "publish",
 		Sender:  "buffer",
-		Target:  Some("events"),
+		Target:  guest.Some("events"),
 		Payload: publishPayload,
 	})
-
-	// Notify subscribers
-	for _, sub := range subscribers[id] {
-		plugin.RouteMessage(AlloyMessage{
-			Id:      "evt-sub-" + tid,
-			MsgType: "event",
-			Method:  "update",
-			Sender:  "buffer",
-			Target:  Some(sub),
-			Payload: evtData,
-		})
-	}
 }
 
 // Direct interaction handlers (WIT interface implementation)
 
-func ReadBuffer(id string) (AlloyBuffer, bool) {
+func ReadBuffer(id string) (guest.AlloyBuffer, bool) {
 	root, ok := findRootBuffer(id)
 	if !ok {
-		return AlloyBuffer{}, false
+		return guest.AlloyBuffer{}, false
 	}
-	return AlloyBuffer{
+	return guest.AlloyBuffer{
 		Id:           root.ID,
 		Name:         root.Name,
 		Content:      root.Data,

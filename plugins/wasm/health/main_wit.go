@@ -18,11 +18,11 @@ func main() {
 		}
 
 		payload, _ := json.Marshal(status)
-		return &guest.Message{
-			ID:      msg.ID + "-resp",
+		return &guest.AlloyMessage{
+			Id:      msg.Id + "-resp",
 			Method:  msg.Method,
 			Payload: payload,
-			Target:  msg.Sender,
+			Target:  msg.Target,
 		}
 	})
 
