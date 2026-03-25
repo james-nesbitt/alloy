@@ -29,3 +29,4 @@ go.work.sum
 .vscode/
 .idea/
 .DS_Store
+cmd/alloy-web/node_modules

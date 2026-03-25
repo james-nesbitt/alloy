@@ -160,3 +160,19 @@ test-wasm:
 test-unified: build-plugins
     @echo ">> Running Unified Sanity Check..."
     go test -v ./tests/sanity_check_test.go
+
+# Install web frontend dependencies (JS testing tools)
+install-web-deps:
+    @echo ">> Installing web dependencies..."
+    cd cmd/alloy-web && npm install
+
+# Run all tests (Unit, Integration, and Web)
+test-all: test-web test
+    @echo ">> All tests completed successfully."
+
+# Run web frontend tests (Go and JS/WASM Bridge)
+test-web: install-web-deps
+    @echo ">> Running Go tests for web proxy..."
+    go test -v ./cmd/alloy-web
+    @echo ">> Running JS/WASM Bridge UX tests..."
+    cd cmd/alloy-web && npm test

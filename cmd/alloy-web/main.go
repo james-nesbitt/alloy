@@ -23,8 +23,14 @@ import (
 //go:embed static/* templates/*
 var content embed.FS
 
+type AlloyClient interface {
+	Send(ctx context.Context, target, method string, payload []byte) (api.Message, error)
+	OnMessage(h func(api.Message))
+	Close() error
+}
+
 type WebFrontend struct {
-	client *frontend.Client
+	client AlloyClient
 	port   int
 
 	mu         sync.RWMutex

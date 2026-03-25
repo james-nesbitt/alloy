@@ -31,6 +31,9 @@ To build the entire project (Core, Plugins, GUIs, CLI):
 # 1. Install prerequisites (Go 1.25+, TinyGo 0.33+, wit-bindgen-cli, just)
 # 2. Build everything
 just build-all
+
+# 3. (Optional) Install web dependencies for testing
+just install-web-deps
 ```
 
 The primary entry point is the `alloy` tool:

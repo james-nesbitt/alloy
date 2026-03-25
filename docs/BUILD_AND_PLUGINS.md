@@ -26,6 +26,8 @@ Alloy uses a `justfile` (via [just](https://github.com/casey/just)) to manage it
 | `build-plugin NAME` | Build a single plugin (e.g., `health`) | `just build-plugin health` |
 | `generate` | Regenerate WIT bindings | `just generate` |
 | `setup-dev` | Configure Go work and module replacements | `just setup-dev` |
+| `install-web-deps` | Install JS dependencies for web testing | `just install-web-deps` |
+| `test-web` | Run Go and JS/UX tests for the web frontend | `just test-web` |
 
 ### 2.2 Output Structure
 
