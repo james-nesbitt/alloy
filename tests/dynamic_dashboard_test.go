@@ -18,7 +18,7 @@ type mockPlugin struct {
 	handler func(context.Context, api.Message) (api.Message, error)
 }
 
-func (m *mockPlugin) ID() string             { return m.id }
+func (m *mockPlugin) ID() string                     { return m.id }
 func (m *mockPlugin) Capabilities() []api.Capability { return nil }
 func (m *mockPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	return m.handler(ctx, msg)
@@ -30,7 +30,7 @@ func TestDynamicDashboardWidgets(t *testing.T) {
 	kvStore := storage.NewMemoryStateStore()
 	logH := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	k, err := kernel.NewWITKernel(logH, kvStore, dataDir, "")
+	k, err := kernel.New(logH, kvStore, dataDir, "")
 	if err != nil {
 		t.Fatalf("failed to create WIT kernel: %v", err)
 	}
@@ -52,10 +52,10 @@ func TestDynamicDashboardWidgets(t *testing.T) {
 
 	// Add subscription
 	k.RouteMessage(context.Background(), api.Message{
-		ID:     "sub-1",
-		Sender: "dashboard-mock",
-		Target: "events",
-		Method: "subscribe",
+		ID:      "sub-1",
+		Sender:  "dashboard-mock",
+		Target:  "events",
+		Method:  "subscribe",
 		Payload: []byte(`{"topic":"dashboard:widget-registered"}`),
 	})
 

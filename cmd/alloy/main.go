@@ -51,12 +51,6 @@ func main() {
 	case "help":
 		usage()
 	default:
-		// Check for legacy commands for backward compatibility
-		switch cmd {
-		case "ping", "discover", "list", "stop":
-			fmt.Printf("Note: '%s' is a legacy command. Use 'alloy help' for new commands.\n", cmd)
-			// Implementation omitted for brevity in this refactor, but can be added back if needed
-		}
 		fmt.Printf("Unknown command: %s\n", cmd)
 		usage()
 	}

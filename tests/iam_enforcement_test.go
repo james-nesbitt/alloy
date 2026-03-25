@@ -19,13 +19,7 @@ func TestIAMEnforcement(t *testing.T) {
 	manifest := map[string]any{
 		"plugins": []map[string]any{
 			{
-				"id":        "iam",
-				"type":      "wasm",
-				"path":      filepath.Join(buildDir, "iam.wasm"),
-				"load_time": "boot",
-			},
-			{
-				"id":        "health",
+				"id":        "test-health",
 				"type":      "wasm",
 				"path":      filepath.Join(buildDir, "health.wasm"),
 				"load_time": "boot",
@@ -33,11 +27,11 @@ func TestIAMEnforcement(t *testing.T) {
 		},
 	}
 
-	_, conn, collector, home := setupTestCore(t, "iam-test", manifest)
+	_, conn, collector, home := setupTestCoreSecure(t, "iam-test", manifest)
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
-	waitForPlugins(t, conn, collector, []string{"iam", "health"}, 30*time.Second)
+	waitForPlugins(t, conn, collector, []string{"test-health"}, 30*time.Second)
 
 	// 1. First, set an identity that has NO permissions
 	// (Note: We use the 'admin' bypass or assume the current connection is 'user')
@@ -52,10 +46,11 @@ func TestIAMEnforcement(t *testing.T) {
 	})
 
 	// We need to be authorized to SET a policy.
-	// Currently 'user' (guest) has "iam:*" (I added it to the guest list in my last edit).
+	// We'll use 'admin-sim' as sender.
+
 	sendMsg(t, conn, api.Message{
 		ID:      "set-policy",
-		Sender:  "user",
+		Sender:  "admin-sim",
 		Target:  "iam",
 		Method:  "policy:set",
 		Payload: setPolicyReq,
@@ -69,7 +64,7 @@ func TestIAMEnforcement(t *testing.T) {
 	})
 	sendMsg(t, conn, api.Message{
 		ID:      "set-identity",
-		Sender:  "user",
+		Sender:  "admin-sim",
 		Target:  "iam",
 		Method:  "identity:set",
 		Payload: setIdentReq,
@@ -81,7 +76,7 @@ func TestIAMEnforcement(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "attack-1",
 		Sender: "villain", // The IPC server will set Actor = villain
-		Target: "health",
+		Target: "test-health",
 		Method: "status",
 	})
 

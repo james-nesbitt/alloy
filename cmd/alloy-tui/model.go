@@ -57,6 +57,9 @@ type Model struct {
 	DashboardTiles map[string]frontend.DashboardTile
 	TileOrder      []string
 
+	inspectorLogs []string
+	inspectorVp   viewport.Model
+
 	lastMainMode       int
 	localBufferVersion int
 	isLocalBufferDirty bool
@@ -119,21 +122,21 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 	ci.SetHeight(1)
 
 	return Model{
-		client:        client,
-		textarea:      ta,
-		commandInput:  ci,
-		msgCh:         msgCh,
-		ActiveChannel: "general",
-		Mode:          tui.ModeDashboard,
-		subscriptions: make(map[string]bool),
-		recency:       make(map[string]int),
-		frequency:     make(map[string]int),
-		statuses:      make(map[string]string),
+		client:         client,
+		textarea:       ta,
+		commandInput:   ci,
+		msgCh:          msgCh,
+		ActiveChannel:  "general",
+		Mode:           tui.ModeDashboard,
+		subscriptions:  make(map[string]bool),
+		recency:        make(map[string]int),
+		frequency:      make(map[string]int),
+		statuses:       make(map[string]string),
 		DashboardTiles: make(map[string]frontend.DashboardTile),
 		TileOrder:      nil,
-		width:         80,
-		height:        24,
-		ready:         false,
+		width:          80,
+		height:         24,
+		ready:          false,
 		Panes: []tui.Pane{
 			{Type: tui.ModeDashboard, WidthPct: 1.0},
 		},

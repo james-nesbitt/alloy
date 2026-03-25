@@ -17,7 +17,6 @@ func TestBufferCollaborativeEditing(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "events", "type": "native"},
 			{"id": "buffer", "type": "wasm", "path": bufferWasmPath},
 		},
 	}

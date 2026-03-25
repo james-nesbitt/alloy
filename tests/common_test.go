@@ -105,6 +105,15 @@ func (mc *MessageCollector) AwaitID(id string, timeout time.Duration) (api.Messa
 // setupTestCore starts the alloy-core with the given manifest and returns
 // the process, connection, and a collector.
 func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *MessageCollector, string) {
+	return setupTestCoreInsecure(t, label, manifest, true)
+}
+
+func setupTestCoreSecure(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *MessageCollector, string) {
+	// Enable RBAC, but no mTLS for easy testing
+	return setupTestCoreInsecure(t, label, manifest, false)
+}
+
+func setupTestCoreInsecure(t *testing.T, label string, manifest map[string]any, insecure bool) (*exec.Cmd, net.Conn, *MessageCollector, string) {
 	homeDir, _ := os.MkdirTemp("", "alloy-core-"+label+"-*")
 	socketPath := filepath.Join(homeDir, "alloy.sock")
 
@@ -115,13 +124,18 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	os.WriteFile(provisionPath, manifestData, 0644)
 
-	cmd := StartCore(t, corePath, []string{
+	args := []string{
 		"--listen", "unix://" + socketPath,
 		"--data-dir", homeDir,
-		"--insecure",
 		"--debug",
 		"--provision", provisionPath,
-	})
+		"--no-mtls",
+	}
+	if insecure {
+		args = append(args, "--insecure")
+	}
+
+	cmd := StartCore(t, corePath, args)
 
 	// Wait for socket with exponential backoff and net.Dial readiness check
 	var conn net.Conn
@@ -132,7 +146,7 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 			break
 		}
 		t.Logf("Attempt %d: failed to dial %s: %v", i, socketPath, err)
-		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+		time.Sleep(time.Duration(200*(i+1)) * time.Millisecond)
 	}
 
 	if err != nil {

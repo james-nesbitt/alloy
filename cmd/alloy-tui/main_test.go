@@ -12,7 +12,7 @@ import (
 
 func TestTuiLeaderModeNavigation(t *testing.T) {
 	// 1. Initialize a model with a mock client
-	m := NewModel(nil, nil) 
+	m := NewModel(nil, nil)
 	m.ready = true
 	m.Mode = tui.ModeNormal // Explicitly set to Normal
 	m.width = 80
@@ -86,7 +86,7 @@ func TestTuiFuzzyMatching(t *testing.T) {
 	if len(filtered) == 0 {
 		t.Fatal("Expected at least one filtered command for 'p p'")
 	}
-	
+
 	found := false
 	for _, opt := range filtered {
 		if opt.Display == "p p" {

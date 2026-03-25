@@ -1,4 +1,4 @@
-package native
+package kernel
 
 import (
 	"context"
@@ -35,9 +35,8 @@ func (e *EventManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "events:subscribe", Description: "Subscribe to an event topic"},
 		{Method: "events:publish", Description: "Publish an event to a topic"},
-		// Backward compatibility
-		{Method: "subscribe", Description: "Subscribe to an event topic"},
-		{Method: "publish", Description: "Publish an event to a topic"},
+		{Method: "subscribe", Description: "Subscribe to an event topic (Legacy)"},
+		{Method: "publish", Description: "Publish an event to a topic (Legacy)"},
 	}
 }
 
@@ -71,25 +70,7 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 			return api.Message{}, err
 		}
 
-		e.mu.RLock()
-		subs := e.subscribers[req.Topic]
-		e.mu.RUnlock()
-
-		e.logger.Info("publishing event", "topic", req.Topic, "subscribers", len(subs), "sender", msg.Sender)
-
-		if e.route != nil {
-			for _, sub := range subs {
-				go e.route(ctx, api.Message{
-					ID:        "evt-" + time.Now().Format("150405.000"),
-					Type:      api.TypeEvent,
-					Sender:    e.ID(),
-					Target:    sub,
-					Method:    req.Topic,
-					Payload:   req.Data,
-					Timestamp: time.Now().Unix(),
-				})
-			}
-		}
+		e.Publish(ctx, req.Topic, msg.Sender, req.Data)
 
 		return api.Message{
 			ID:        msg.ID + "-resp",
@@ -102,6 +83,36 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 	}
 
 	return api.Message{}, nil
+}
+
+// Publish distributes an event to all subscribers.
+func (e *EventManager) Publish(ctx context.Context, topic string, sender string, data json.RawMessage) {
+	e.mu.RLock()
+	subs := e.subscribers[topic]
+	e.mu.RUnlock()
+
+	e.logger.Info("publishing event", "topic", topic, "subscribers", len(subs), "sender", sender)
+
+	if e.route != nil {
+		for _, sub := range subs {
+			go e.route(ctx, api.Message{
+				ID:        "evt-" + time.Now().Format("150405.000"),
+				Type:      api.TypeEvent,
+				Sender:    e.ID(),
+				Target:    sub,
+				Method:    topic,
+				Payload:   data,
+				Timestamp: time.Now().Unix(),
+			})
+		}
+	}
+}
+
+// HasSubscribers checks if there are any subscribers for a given topic.
+func (e *EventManager) HasSubscribers(topic string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.subscribers[topic]) > 0
 }
 
 func (e *EventManager) Shutdown(ctx context.Context) error {

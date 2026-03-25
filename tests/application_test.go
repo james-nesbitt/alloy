@@ -25,9 +25,6 @@ func TestApplicationPlugins(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "kv", "type": "native"},
-			{"id": "logger", "type": "native"},
-			{"id": "events", "type": "native"},
 			{
 				"id":           "buffer",
 				"type":         "wasm",
@@ -47,11 +44,11 @@ func TestApplicationPlugins(t *testing.T) {
 				"capabilities": []api.Capability{{Method: "chat:send"}},
 			},
 			{
-				"id":           "ai",
-				"type":         "wasm",
-				"path":         filepath.Join(buildDir, "ai.wasm"),
+				"id":            "ai",
+				"type":          "wasm",
+				"path":          filepath.Join(buildDir, "ai.wasm"),
 				"max_memory_mb": 256,
-				"capabilities": []api.Capability{{Method: "ai:query"}},
+				"capabilities":  []api.Capability{{Method: "ai:query"}},
 			},
 		},
 	}

@@ -77,9 +77,28 @@ Frontends interact with the system by sending `api.Message` structures.
 - **Cons**: Software rendering (SHM) only; no hardware acceleration. Requires a Wayland compositor with `xdg-shell` support.
 - **Build**: Uses the `experimental_wayland` build tag.
 
-### 2.4 Alloy Web (Future)
-- **Technology**: Go (serving WASM), React/Vue.
-- **Strategy**: Leverage the same `pkg/frontend` logic compiled to WASM to bridge browser-based JS events to the Alloy IPC socket (likely via a WebSocket proxy).
+### 2.4 Alloy Web (Active)
+- **Path**: `cmd/alloy-web/`
+- **Technology**: Go (Native Host Proxy), Go-WASM (Internal Core), JavaScript/Tailwind (UI Bridge).
+- **Architecture**: A three-tier model:
+    1.  **Native Host Proxy**: A Go server that handles the mTLS/IPC connection to the Alloy Kernel and serves the web assets.
+    2.  **Go-WASM Core**: The `pkg/frontend` logic compiled into the browser to provide sub-millisecond fuzzy search and state management.
+    3.  **JavaScript Bridge**: A lightweight UI layer that renders the Omni-palette, dynamic forms, and notifications.
+- **Development Dependencies**: 
+    - **Go**: For building the WASM and Proxy binaries.
+    - **Node.js / NPM**: For running UX/JS tests (`vitest`).
+- **Setup**:
+    ```bash
+    # Install all JS-based testing and dev dependencies
+    just install-web-deps
+    
+    # Run all web-specific tests (Go + JS)
+    just test-web
+    
+    # Build and run a dedicated web instance
+    just run-web --dedicated
+    ```
+- **Use Case**: Cross-platform access via any modern browser without local installation.
 
 ---
 

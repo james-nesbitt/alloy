@@ -9,6 +9,7 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 type mockInterceptor struct {
@@ -17,6 +18,10 @@ type mockInterceptor struct {
 }
 
 func (m *mockInterceptor) PreRoute(ctx context.Context, msg api.Message) (api.Message, bool, error) {
+	if msg.Target != "target-plugin" {
+		return msg, true, nil
+	}
+
 	m.count.Add(1)
 	if m.deny {
 		return msg, false, nil
@@ -39,7 +44,9 @@ func (m *mockInterceptor) HandleMessage(ctx context.Context, msg api.Message) (a
 
 func TestInterceptors(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	k := kernel.New(logger, "")
+	state := storage.NewMemoryStateStore()
+	k, _ := kernel.New(logger, state, "", "")
+	k.SetInsecure(true)
 
 	interceptor := &mockInterceptor{}
 	target := &targetPlugin{received: make(chan api.Message, 1)}

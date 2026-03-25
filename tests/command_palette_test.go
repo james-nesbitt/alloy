@@ -24,7 +24,7 @@ func TestDynamicCommandDiscovery(t *testing.T) {
 	kv := storage.NewMemoryStateStore()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	k, err := kernel.NewWITKernel(logger, kv, dataDir, "")
+	k, err := kernel.New(logger, kv, dataDir, "")
 	require.NoError(t, err)
 	defer k.Shutdown(ctx)
 

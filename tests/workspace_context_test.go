@@ -42,10 +42,10 @@ func TestWorkspaceContext(t *testing.T) {
 	call := func(ctx context.Context, msg api.Message) (api.Message, error) {
 		if msg.Target == "project" && msg.Method == "get_active" {
 			resp := api.Message{
-				ID:     msg.ID + "-resp",
-				Type:   api.TypeResponse,
-				Sender: "project",
-				Target: "ai",
+				ID:      msg.ID + "-resp",
+				Type:    api.TypeResponse,
+				Sender:  "project",
+				Target:  "ai",
 				Payload: json.RawMessage(`{"id":"test-proj","name":"Test Project","description":"Test project description"}`),
 			}
 			return resp, nil

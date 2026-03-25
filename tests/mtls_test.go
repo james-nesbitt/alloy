@@ -11,6 +11,7 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
 	"github.com/james-nesbitt/alloy/pkg/security/identity"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func TestMTLSMessageFlow(t *testing.T) {
@@ -33,11 +34,11 @@ func TestMTLSMessageFlow(t *testing.T) {
 	clientTLS, _ := store.GetClientTLSConfig(ca, "test-client")
 
 	// 2. Start Kernel
-	k := kernel.New(logger, "")
+	k, _ := kernel.New(logger, storage.NewMemoryStateStore(), "", "")
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
-	defer k.Stop(ctx)
+	defer k.Shutdown(ctx)
 
 	// 3. Start IPC Server
 	server := ipc.NewServer(logger, k, serverTLS)

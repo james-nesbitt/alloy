@@ -33,10 +33,11 @@ func TestAIDirectBufferInteraction(t *testing.T) {
 	}
 
 	// Create WIT kernel
-	k, err := kernel.NewWITKernel(logger, kv, tempDir, "")
+	k, err := kernel.New(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	k.SetInsecure(true)
 	defer k.Shutdown(context.Background())
 
 	cwd, _ := os.Getwd()
@@ -122,7 +123,7 @@ func TestAIDirectBufferInteraction(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("AI Response: %s", aiResp.Response)
-		
+
 		// The mock provider in AI plugin currently returns "Mock AI response with system context ... to: Summarize..."
 		// or just "Mock AI response to: Summarize..." if no context
 		if aiResp.Response == "" {

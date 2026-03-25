@@ -63,7 +63,7 @@ func TestEmptyBoot(t *testing.T) {
 	sendMsg(t, conn, api.Message{
 		ID:     "bad-req-1",
 		Sender: "test-frontend",
-		Target: "kv", // Only exists if provisioned
+		Target: "ghost-plugin", // KV ALWAYS exists now as core service
 		Method: "set",
 	})
 

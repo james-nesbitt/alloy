@@ -1,8 +1,8 @@
 package frontend
 
 import (
-	"testing"
 	"github.com/james-nesbitt/alloy/api"
+	"testing"
 )
 
 func TestBuildCommandTree(t *testing.T) {
@@ -53,9 +53,15 @@ func TestBuildCommandTree(t *testing.T) {
 	foundPl := false
 	foundCs := false
 	for _, item := range items {
-		if item.FullTitle == "p o" { foundPo = true }
-		if item.FullTitle == "p l" { foundPl = true }
-		if item.FullTitle == "c s" { foundCs = true }
+		if item.FullTitle == "p o" {
+			foundPo = true
+		}
+		if item.FullTitle == "p l" {
+			foundPl = true
+		}
+		if item.FullTitle == "c s" {
+			foundCs = true
+		}
 	}
 	if !foundPo || !foundPl || !foundCs {
 		t.Errorf("Missing expected flattened items: po=%v, pl=%v, cs=%v", foundPo, foundPl, foundCs)

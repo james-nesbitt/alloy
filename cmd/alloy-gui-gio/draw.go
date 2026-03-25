@@ -29,7 +29,7 @@ func formatMessage(msg api.Message) string {
 			Topic string          `json:"topic"`
 			Data  json.RawMessage `json:"data"`
 		}
-		if err := json.Unmarshal(msg.Payload, &ev) ; err == nil {
+		if err := json.Unmarshal(msg.Payload, &ev); err == nil {
 			switch ev.Topic {
 			case "chat:message":
 				var chatMsg struct {
@@ -37,7 +37,7 @@ func formatMessage(msg api.Message) string {
 					Channel string `json:"channel"`
 					Content string `json:"content"`
 				}
-				if err := json.Unmarshal(ev.Data, &chatMsg) ; err == nil {
+				if err := json.Unmarshal(ev.Data, &chatMsg); err == nil {
 					return fmt.Sprintf("[%s] #%s <%s> %s", ts, chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
 				}
 			}

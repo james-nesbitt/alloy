@@ -18,7 +18,7 @@ type WASMFrontend struct {
 
 func main() {
 	fmt.Println("Alloy: Browser-WASM frontend initializing...")
-	
+
 	wf := &WASMFrontend{}
 
 	// Register JS callbacks
@@ -45,7 +45,8 @@ func (wf *WASMFrontend) fetchCommands() {
 	body, _ := io.ReadAll(resp.Body)
 	var regs []api.Registration
 	if err := json.Unmarshal(body, &regs); err != nil {
-		fmt.Printf("WASM Trace: Failed to unmarshal registrations: %v\n", err)
+		// Log error and body for debugging
+		fmt.Printf("WASM Trace: Failed to unmarshal registrations: %v. Body: %s\n", err, body)
 		return
 	}
 
@@ -57,7 +58,7 @@ func (wf *WASMFrontend) jsHandleEvent(this js.Value, args []js.Value) any {
 	if len(args) < 1 {
 		return nil
 	}
-	
+
 	var msg api.Message
 	if err := json.Unmarshal([]byte(args[0].String()), &msg); err != nil {
 		return nil
@@ -86,12 +87,12 @@ func (wf *WASMFrontend) jsSend(this js.Value, args []js.Value) any {
 	}
 
 	fmt.Printf("WASM Bridge: Sending %s %s with %s\n", target, method, payload)
-	
+
 	// API call to local proxy
 	go func() {
 		// Mock implementation: eventually posts back to /api/send
 		log.Printf("Proxy Send: %s %s -> %s\n", target, method, payload)
-		
+
 		// Map back to Alloy Kernel protocol
 		_ = js.Global().Get("fetch").Call("call", js.Global(), "/api/send", js.ValueOf(map[string]any{
 			"method": "POST",
@@ -107,7 +108,7 @@ func (wf *WASMFrontend) jsSearch(this js.Value, args []js.Value) any {
 		return nil
 	}
 	query := args[0].String()
-	
+
 	if wf.commandTree == nil {
 		return "[]"
 	}
@@ -121,12 +122,12 @@ func (wf *WASMFrontend) jsSearch(this js.Value, args []js.Value) any {
 			results = append(results, item)
 		}
 	}
-	
+
 	frontend.SortItems(results)
 	if len(results) > 10 {
 		results = results[:10]
 	}
-	
+
 	resJson, _ := json.Marshal(results)
 	return string(resJson)
 }

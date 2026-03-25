@@ -17,9 +17,6 @@ func TestBufferPersistence(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "command-manager", "type": "native"},
-			{"id": "events", "type": "native"},
-			{"id": "kv", "type": "native"},
 			{"id": "buffer", "type": "wasm", "path": bufferWasmPath, "max_memory_mb": 256, "msg_per_second": 0},
 		},
 	}

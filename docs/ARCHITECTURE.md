@@ -1,53 +1,37 @@
-# Alloy Architecture Design
+# Alloy Architecture Design: Pragmatic Hybrid Kernel
 
-Alloy's architecture follows a micro-kernel pattern, where the core (backend) provides a message-passing infrastructure and a set of minimal services while offloading actual application logic to plugins and frontends.
+Alloy's architecture follows a **Pragmatic Hybrid Kernel** pattern. Unlike a traditional micro-kernel where all services are external, Alloy integrates its most critical "infrastructure" services—**IAM, KV, Events, and Telemetry**—directly into the Go-based core. This provides the performance and integrity of a monolith for low-level system operations while preserving the isolation and extensibility of a micro-kernel for application logic.
 
 ## 1. Core Architecture
 
-### 1.1 Backend Kernel
-The backend kernel is responsible for:
+### 1.1 The Integrated Kernel
+The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and the services it exposes to external plugins.
+
+#### Integrated Core Services:
+- **Identity & Access Management (IAM)**: A native Go implementation that manages identities, roles, and policies. It serves as the authoritative Policy Decision Point (PDP) for the entire system.
+- **Key-Value Store (KV)**: A high-performance, persistent state store integrated directly into the kernel to eliminate RPC overhead for frequent metadata reads/writes.
+- **Event Bus (Pub/Sub)**: The internal central nervous system for message routing and asynchronous event notification.
+- **Telemetry & Logging**: Native monitoring of all kernel and plugin interactions.
+
+#### Host Functions:
 - **Message Bus (IPC)**: A high-performance message routing system for cross-plugin and frontend-to-backend communication.
-- **WASM Plugin Engine**: Runtime for loading and executing WASM-based plugins.
-- **Security & Policy Engine**: Manages user authentication, authorization, and plugin sandbox constraints.
-- **Service Discovery**: Allows plugins and frontends to discover available capabilities.
-- **Logging & Monitoring**: Centralized logging for the kernel itself and all managed plugins.
-- **Decision Engine (Native vs WASM)**: Alloy prioritizes WASM for all application and security logic to ensure isolation and stability. Infrastructure services remain Native. See [Build and Plugin Guidelines](BUILD_AND_PLUGINS.md) for detailed criteria.
+- **WASM Plugin Engine**: A `wazero`-based runtime for loading and executing WASM-based components using the WASM Component Model (WIT).
+- **Service Discovery**: Allows plugins to discover the WIT-compatible surface of the integrated Core Services.
 
-### 1.2 IPC Mechanism
-- **Socket-Based**: Communication occurs over Unix Domain Sockets (local) or TCP (network).
-- **Transport**: Plain TCP/Unix sockets are used for transport (encryption and authentication are currently deferred).
-- **Message & Event Bus**: 
-    - Supports **Request/Response** patterns for direct interactions.
-    - Acts as an **Event System (Pub/Sub)**, allowing components to emit events (`TypeEvent`) and others to subscribe to them.
-- **Message Format**: Encoded as newline-delimited JSON (JSON-seq) passing through the message bus.
-- **Multi-user/Multi-tenant**: Supports multiple users with distinct contexts and permissions.
+### 1.2 Communication Paths
+Alloy features two distinct communication models:
+1. **Direct Go Calls (Internal)**: Internal kernel components communicate via direct method calls. This ensures high throughput and zero-latency for the "Zero-Latency Core."
+2. **WIT-based Async Messaging (Plugins/Frontends)**: All 3rd-party code and frontends interact via the Message Bus. The kernel converts internal Go results into the asynchronous, WIT-compatible response format.
 
-## 2. Plugins (WASM)
+## 2. Application Logic (WASM Plugins)
 
-Plugins extend the capabilities of the Alloy backend.
-- **Isolation**: Each plugin runs in its own WASM sandbox (e.g., using `wazero`). Each plugin is a separate WASM binary.
-- **Lifecycle Management**: 
-    - The Backend Kernel provides low-level mechanisms for starting, stopping, and **hot-reloading** plugins.
-    - The `WasmManager` supports a `reload` command that can swap a plugin's binary at runtime while preserving the registry state.
-    - High-level orchestration (downloading, upgrading, and managing the plugin catalog) is handled by the **Registry & Plugin Manager** plugin (see [Plugin Roadmap](PLUGINS.md)).
-- **Discovery**: While the core supports explicit provisioning, it can also automatically discover WASM plugins in directories specified via the `--wasm-plugins` flag at startup.
-- **Standard Interface**: Plugins must implement a standard interface for message handling.
-- **Inter-Plugin Communication**: Plugins can communicate with each other via the kernel's message bus.
-- **Helper Service Plugins**:
-    - **Standardized Helpers**: Specific plugins provide common services (KV, Cache, Secrets, Doc Store) as "Service Providers."
-    - **Interface-based**: Other plugins interact with these via logical service targets (e.g., `service:kv`), allowing the underlying plugin to be swapped (e.g., from a local implementation to a Redis-backed bridge).
-    - **Bootstrap Independence**: The Kernel must remain self-sufficient and not depend on these helper plugins for its own basic startup or mTLS operations.
-- **Dependencies**: 
-    - Plugins can depend on the presence of other plugins to function.
-    - Plugins can provide **optional functionality**; for example, the Chat plugin might offer enhanced logging only if the Buffer Manager plugin is available.
-- **Runtime Specifications**:
-    - **Memory Management**: Uses a "Copy-on-pass" model for small messages and "Reference IDs" for large data (video/logs) to avoid expensive copying between host and guest.
-    - **Resource Constraints**: Each plugin is assigned a "Sandbox Profile" defining maximum memory and CPU "fuel" (instruction counts) to prevent resource exhaustion.
-    - **Storage**: Plugins use a Virtual Filesystem (WASI) scoped to a specific, kernel-managed directory.
-    - **Concurrency**: Host-calls are non-blocking where possible, ensuring plugins remain responsive to the message bus.
-    - **Versioning**: Uses a SemVer-based ABI. Plugins must declare their ABI version and required capabilities in a manifest.
-- **Examples**: Core functionality like buffer management, user roles, chat, and AI agents are implemented as plugins (see [Plugin Roadmap](PLUGINS.md)).
-- **SDK**: A core library in Go/AssemblyScript/Rust for developing plugins.
+While infrastructure is integrated, all **application-level logic** is offloaded to isolated WASM plugins. 
+
+- **Isolation**: Each plugin runs in a `wazero` sandbox, ensuring that a bug in an AI Agent or Chat plugin cannot crash the core kernel or access unauthorized data.
+- **Hot-Reloading**: The `WasmManager` can swap a plugin binary at runtime while preserving the registry and subscriber state.
+- **Standard WIT Surface**: Every plugin communicates with the integrated Core Services via standard WebAssembly Interface Type (WIT) bindings. For example, a plugin's call to `alloy:kv/read` is fulfilled by the kernel's integrated KV store.
+- **Discovery**: The kernel can automatically discover WASM plugins in directories specified via the `--wasm-plugins` flag.
+- **Resource Constraints**: Each plugin is assigned a sandbox profile defining limits on memory, CPU "fuel," and internal storage access.
 
 ## 3. Frontends
 

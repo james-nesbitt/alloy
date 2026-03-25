@@ -166,13 +166,6 @@ func TestWasmFunctionalSuite(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "kv", "type": "native", "load_time": "boot"},
-			{
-				"id":        "iam",
-				"type":      "wasm",
-				"path":      filepath.Join(buildDir, "iam.wasm"),
-				"load_time": "boot",
-			},
 			{
 				"id":           "chat",
 				"type":         "wasm",
@@ -195,7 +188,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 				"capabilities": []map[string]string{{"method": "store_secret"}},
 			},
 			{
-				"id":           "health",
+				"id":           "test-health",
 				"type":         "wasm",
 				"path":         filepath.Join(buildDir, "health.wasm"),
 				"load_time":    "lazy",
@@ -217,7 +210,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 
 	expected := []string{
 		"chat", "ai", "secrets",
-		"health", "buffer",
+		"test-health", "buffer",
 	}
 
 	// Check that lazy plugins are discoverable via metadata before loading
@@ -228,7 +221,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 		ID:     "health-1",
 		Type:   api.TypeRequest,
 		Sender: "user",
-		Target: "health",
+		Target: "test-health",
 		Method: "status",
 	})
 	awaitResponse(t, collector, "health-1")

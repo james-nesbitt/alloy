@@ -33,6 +33,16 @@ func GetAlloyRuntimeDir() string {
 	return filepath.Join(os.TempDir(), "alloy-"+user)
 }
 
+// ClientInterface represents the public API of the Alloy frontend client.
+type ClientInterface interface {
+	Send(ctx context.Context, target, method string, payload []byte) (api.Message, error)
+	OnMessage(h func(api.Message))
+	Close() error
+	Name() string
+	Actor() string
+	Messages() []api.Message
+}
+
 // Client represents a standardized frontend client for Alloy.
 type Client struct {
 	ipc      *ipc.Client
