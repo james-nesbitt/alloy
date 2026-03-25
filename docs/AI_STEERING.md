@@ -1,82 +1,62 @@
 # AI Steering & Guidelines for Alloy
 
-This document defines how AI agents, like yourselves, should interact with the Alloy project to maintain architectural integrity and consistency.
+This document defines how AI agents must interact with the Alloy project. Adherence to these steering guidelines is **mandatory** to maintain architectural integrity and repository history.
+
+---
+
+## 🚨 CRITICAL: POSITIVE CONTROL (MANDATORY) 🚨
+
+To prevent repository corruption and maintain high-quality history, agents must follow this exact Git workflow. There are **NO EXCEPTIONS**.
+
+### 1. Branching Strategy
+*   **DECOUPLED DEVELOPMENT**: All work **MUST** happen on a dedicated branch prefixed with `feature/` or `fix/` (e.g., `feature/wasm-mmap` or `fix/io-deadlock`).
+*   **NEVER WORK ON MAIN**: If you find yourself on `main`, stop immediately, move changes to a new branch, and reset `main` to `origin/main`.
+
+### 2. The Merge Procedure (The "Stop-and-Wait" Rule)
+1.  **Work and Validate**: Complete the task on your branch. Run `just fmt` and `just test`.
+2.  **Summary Phase**: Provide a concise summary of your changes, any test results, and any new architectural implications.
+3.  **The Question**: Ask the user: **"Work is complete on branch `feature/xyz`. May I merge this into `main`?"**
+4.  **Positive Affirmation**: You **MUST NOT** merge until you receive an explicit "Yes", "Merge it", "Proceed", or equivalent affirmative response. **Silence or moving to a new topic is NOT permission to merge.**
+
+### 3. Commit Standards
+*   Use descriptive, atomic commits.
+*   Prefer the [conventional commits](https://www.conventionalcommits.org/) format (e.g., `feat(kernel): ...`, `fix(plugins): ...`).
+
+---
 
 ## Design Philosophy
 
-- **Micro-kernel-centric**: Keep the core small. If functionality can be a WASM plugin, it *should* be a WASM plugin.
-- **IPC-first**: 
-    - Design interactions assuming they will occur over a message bus. 
-    - Leverage the event-driven nature (Pub/Sub) for decoupled communication.
-    - Avoid direct imports for core functionality when possible.
-- **Golang-centric**: The core, backends, and TUI/GUI frontends are primarily Go.
-- **Modular and Extensible**: Each component should be replaceable.
+*   **Pragmatic Hybrid Kernel**: 
+    *   **Core Services** (IAM, KV, Events, Telemetry) are integrated Go-native for performance.
+    *   **Application Logic** (AI, Chat, Project Management) belongs in isolated WASM plugins.
+*   **Message-Driven (IPC)**: All external interactions (Plugins and Frontends) occur over the asynchronous message bus.
+*   **XDG Compliance**: Respect platform standards for file locations (`~/.config/alloy`, `~/.local/share/alloy`, etc.).
 
-## Project Structure Guidelines
+---
 
-- **`cmd/alloy-core`**: The main backend server.
-- **`cmd/alloy`**: Tooling for managing backends.
-- **`cmd/alloy-tui`**, `cmd/alloy-gui`, `cmd/alloy-web`: Frontend entry points.
-- **`pkg/kernel`**: Core logic for the backend.
-- **`pkg/wasm`**: WASM runtime and plugin management logic.
-- **`pkg/ipc`**: IPC message definitions and bus implementation.
-- **`plugins/`**: Source for WASM plugins.
+## Interaction Workflow for Agents
 
-## Code Standards
+### 1. Read-Before-Write
+Always read existing relevant files (horizontally) and documentation before proposing changes to ensure consistency with established patterns (e.g., how WASM host calls are implemented).
 
-- **Coding Guidelines**: Adhere to the project's [Coding Guidelines](./CODING_GUIDELINES.md).
-- **Format and Lint**: Ensure all code is formatted (`go fmt`) and passes linting (`golangci-lint`) as defined in the `justfile`.
-- **Error Handling**: Use idiomatic Go error handling with a preference for `fmt.Errorf("...: %w", err)`.
-- **Extensive Logging**: Ensure every major component and interaction is logged to facilitate debugging.
+### 2. Validation Suite
+Before asking to merge, you must verify:
+*   **Formatting**: Code is formatted via `just fmt`.
+*   **Compilation**: The project builds via `just build-all`.
+*   **Testing**: All tests pass via `just test`. 
+*   **Coverage**: Target 85% unit test coverage for new logic in `pkg/`.
 
-## Guidelines for AI Agents
+### 3. Documentation Maintenance
+Changes to architecture or core protocols **MUST** be reflected in the relevant `.md` files in the `docs/` directory during the same feature branch lifecycle.
 
-- **Prioritize the Architecture**: When suggesting features, consider if they belong in the kernel, a plugin, or a frontend.
-- **Maintain Separations**: Ensure that frontends stay frontend-focused, and the kernel remains the orchestrator.
-- **WASM Constraints**: 
-    - Remember that WASM plugins have restricted access. 
-    - Use the kernel's message bus or RefID system for resource access (files, network).
-    - Respect "Fuel" and memory limits in plugin logic.
-    - Implement non-blocking host calls.
-- **Security by Design**: Always think about multi-user permissions and sandbox isolation. (Note: mTLS-based identity is currently deferred).
-- **XDG Compliance**: Always respect XDG environment variables (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_RUNTIME_DIR`, etc.). 
-    - Default to `~/.config/alloy`, `~/.local/share/alloy`, and `~/.cache/alloy`.
-    - Volatile files (sockets, PIDs) should reside in `XDG_RUNTIME_DIR/alloy`.
-    - Paths should only fall back to the current directory (`pwd`) when explicitly requested or during localized development.
-- **Audit Everything**: Ensure new features or communication paths are integrated into the audit logging system.
-- **Follow the Path**: When adding new files, place them in the established directory hierarchy.
+---
 
-### Interaction Workflow
+## Project Directory Map
 
-1.  **Read Before Writing**: Always read existing relevant files horizontally to ensure consistent style and approach.
-## 🚨 POSITIVE CONTROL GUIDELINES (MANDATORY) 🚨
-
-These guidelines are **non-negotiable**. Failure to follow these results in repository corruption and loss of project history integrity.
-
-### 1. ABSOLUTELY NO COMMITS OR MERGES TO `main` WITHOUT EXPLICIT PERMISSION
-*   **NEVER** commit directly to the `main` branch.
-*   **NEVER** merge a feature branch into `main` automatically.
-*   **PROCEDURE**: 
-    1.  Work ONLY on `feature/` or `fix/` branches.
-    2.  Once work is complete and tests pass, **STOP**.
-    3.  Present a summary of changes to the user.
-    4.  **ASK**: "Work is complete on branch `feature/xyz`. May I merge this into `main`?"
-    5.  **WAIT** for a "Yes", "Merge it", or similar affirmative response before proceeding with the merge.
-
-### 2. Git Flow & Branching
-- All changes must be made on a dedicated, descriptively named feature branch (e.g., `feature/pki-implementation`).
-- Commit changes incrementally to the feature branch with meaningful commit messages.
-- If you find yourself on `main` by mistake, move your changes to a new branch immediately using `git checkout -b` and `git reset --hard origin/main`.
-
-## Interaction Workflow
-
-1.  **Read Before Writing**: Always read existing relevant files horizontally to ensure consistent style and approach.
-2.  **Validation (Before Asking to Merge)**:
-    - **Format**: Always run `just fmt` (or `go fmt ./...`) before committing changes.
-    - **Test**: 
-        - Always run `just test` (or `go test ./...`) before proposing a merge.
-        - **New and changed tests must be verified to pass.**
-        - Ensure a minimum of 85% unit test coverage for new code in `pkg/`.
-    - **Diagnostic Efficiency**: Use small, focused test harnesses during active debugging.
-3.  **Verify Assumptions**: If you aren't sure where a piece of logic should reside, ask for clarification.
-4.  **Iterative Development**: Start with small, verifiable pieces before building larger systems.
+*   **`cmd/`**: Binary entry points (Alloy CLI, Core, TUI, GUI, Web).
+*   **`pkg/kernel/`**: The core "Operating System" logic.
+*   **`pkg/wasm/`**: WASM runtime and the SDK shared by all Go plugins.
+*   **`plugins/wasm/`**: The individual WASM-based application components.
+*   **`api/`**: Shared IPC message schemas.
+*   **`wit/`**: WebAssembly Interface Type definitions.
+*   **`docs/`**: Deep-dive architectural documentation.
