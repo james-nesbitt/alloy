@@ -139,11 +139,6 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	return k, nil
 }
 
-// Support for backward compatibility
-func NewWITKernel(logger *slog.Logger, storage storage.StateStore, dataDir string, metricsAddr string) (*Kernel, error) {
-	return New(logger, storage, dataDir, metricsAddr)
-}
-
 // Start initializes the kernel services.
 func (k *Kernel) Start(ctx context.Context) error {
 	k.logger.Info("starting alloy kernel")
@@ -179,11 +174,6 @@ func (k *Kernel) Shutdown(ctx context.Context) error {
 		return k.telemetry.Shutdown(ctx)
 	}
 	return nil
-}
-
-// Stop is an alias for Shutdown for backward compatibility.
-func (k *Kernel) Stop(ctx context.Context) error {
-	return k.Shutdown(ctx)
 }
 
 // RouteMessage handles the delivery of a message to its intended target.
@@ -225,7 +215,7 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			}
 		}
 
-		// Legacy External Interceptors
+		// External Interceptors
 		k.mu.RLock()
 		interceptors := k.interceptors
 		k.mu.RUnlock()
@@ -543,11 +533,6 @@ func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoad
 		})
 		k.events.Publish(context.Background(), "component:registered", "kernel", metaData)
 	}()
-}
-
-// RegisterPluginLoader is an alias for RegisterMetadata for WIT-compatibility.
-func (k *Kernel) RegisterPluginLoader(pluginID string, loader api.PluginLoader, metadata api.PluginMetadata) {
-	k.RegisterMetadata(metadata, loader)
 }
 
 // RegisterFrontend registers a frontend's response channel.

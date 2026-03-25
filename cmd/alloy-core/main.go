@@ -80,7 +80,7 @@ func main() {
 	// Create kernel
 	k, err := kernel.New(logger, kv, *dataDir, *metricsAddr)
 	if err != nil {
-		logger.Error("failed to create WIT kernel", "error", err)
+		logger.Error("failed to create Alloy kernel", "error", err)
 		os.Exit(1)
 	}
 
@@ -255,7 +255,11 @@ func loadProvisionedPlugins(k *kernel.Kernel, provisionFile string, logger *slog
 
 		if p.LoadTime == "lazy" {
 			// Register a lazy loader for this plugin
-			k.RegisterPluginLoader(p.ID, &wasmLoader{
+			k.RegisterMetadata(api.PluginMetadata{
+				ID:           p.ID,
+				LoadTime:     api.LoadTimeLazy,
+				Capabilities: p.Capabilities,
+			}, &wasmLoader{
 				k:            k,
 				pluginID:     p.ID,
 				path:         wasmPath,
@@ -263,10 +267,6 @@ func loadProvisionedPlugins(k *kernel.Kernel, provisionFile string, logger *slog
 				maxMemoryMB:  p.MaxMemoryMB,
 				msgPerSecond: p.MsgPerSecond,
 				capabilities: p.Capabilities,
-			}, api.PluginMetadata{
-				ID:           p.ID,
-				LoadTime:     api.LoadTimeLazy,
-				Capabilities: p.Capabilities,
 			})
 			logger.Info("registered lazy-loaded plugin", "id", p.ID, "path", wasmPath)
 		} else {

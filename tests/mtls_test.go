@@ -38,7 +38,7 @@ func TestMTLSMessageFlow(t *testing.T) {
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
-	defer k.Stop(ctx)
+	defer k.Shutdown(ctx)
 
 	// 3. Start IPC Server
 	server := ipc.NewServer(logger, k, serverTLS)

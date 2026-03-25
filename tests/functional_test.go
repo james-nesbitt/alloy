@@ -49,7 +49,7 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
-	defer k.Stop(ctx)
+	defer k.Shutdown(ctx)
 
 	// 2. Register Mock Plugin
 	p := &MockPlugin{id: "test-plugin"}
