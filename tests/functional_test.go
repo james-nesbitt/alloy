@@ -10,6 +10,7 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 // MockPlugin is a simple plugin for testing.
@@ -44,7 +45,7 @@ func TestFunctionalMessageFlow(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// 1. Initialize Kernel
-	k := kernel.New(logger, "")
+	k, _ := kernel.New(logger, storage.NewMemoryStateStore(), "", "")
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

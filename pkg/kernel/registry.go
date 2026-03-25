@@ -1,4 +1,4 @@
-package native
+package kernel
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 )
 
-// CommandManager maintains a registry of all system-wide actions.
+// CommandManager maintains a registry of all system-wide actions and component capabilities.
 type CommandManager struct {
 	mu       sync.RWMutex
 	registry map[string]api.Registration
@@ -29,16 +29,6 @@ func NewCommandManager(logger *slog.Logger, provider func() []api.Registration) 
 
 func (c *CommandManager) SetRouter(r func(context.Context, api.Message)) {
 	c.route = r
-	// Subscribe to registration events
-	c.route(context.Background(), api.Message{
-		ID:        "sub-cm-reg",
-		Type:      api.TypeRequest,
-		Sender:    c.ID(),
-		Target:    "events",
-		Method:    "subscribe",
-		Payload:   []byte(`{"topic":"component:registered"}`),
-		Timestamp: time.Now().Unix(),
-	})
 }
 
 func (c *CommandManager) ID() string { return "command-manager" }

@@ -10,6 +10,7 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func TestIPCMessageFlow(t *testing.T) {
@@ -18,11 +19,11 @@ func TestIPCMessageFlow(t *testing.T) {
 	defer cancel()
 
 	// 1. Start Kernel
-	k := kernel.New(logger, "")
+	k, _ := kernel.New(logger, storage.NewMemoryStateStore(), "", "")
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}
-	defer k.Stop(ctx)
+	defer k.Shutdown(ctx)
 
 	// 2. Start IPC Server on a random port
 	server := ipc.NewServer(logger, k, nil)

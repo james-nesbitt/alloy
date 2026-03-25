@@ -1,4 +1,4 @@
-package native
+package kernel
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/james-nesbitt/alloy/api"
-	"github.com/james-nesbitt/alloy/pkg/storage"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+// HealthManager monitorsHost and Kernel health.
 type HealthManager struct {
 	logger    *slog.Logger
 	startTime time.Time
@@ -87,8 +87,4 @@ func (h *HealthManager) getStats() HealthStats {
 		OS:         runtime.GOOS,
 		Arch:       runtime.GOARCH,
 	}
-}
-
-func NewHealthManagerPlugin(ctx context.Context, logger *slog.Logger, state storage.StateStore) (any, error) {
-	return NewHealthManager(logger), nil
 }

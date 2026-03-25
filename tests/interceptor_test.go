@@ -9,6 +9,7 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 type mockInterceptor struct {
@@ -39,7 +40,8 @@ func (m *mockInterceptor) HandleMessage(ctx context.Context, msg api.Message) (a
 
 func TestInterceptors(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	k := kernel.New(logger, "")
+	state := storage.NewMemoryStateStore()
+	k, _ := kernel.New(logger, state, "", "")
 
 	interceptor := &mockInterceptor{}
 	target := &targetPlugin{received: make(chan api.Message, 1)}

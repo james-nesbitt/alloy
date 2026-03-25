@@ -3,12 +3,17 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/wasm"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -22,49 +27,121 @@ const (
 
 // Kernel is the core component that manages plugins and message routing.
 type Kernel struct {
-	logger *slog.Logger
-	mu     sync.RWMutex
-	tracer trace.Tracer
+	logger   *slog.Logger
+	mu       sync.RWMutex
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	tracer   trace.Tracer
 
-	// plugins maps plugin IDs to their active instances
-	plugins map[string]api.Plugin
-
-	// metadata maps plugin IDs to their metadata (for lazy loading)
-	metadata map[string]api.PluginMetadata
-
-	// loaders maps plugin IDs to a loader that can instantiate them
-	loaders map[string]api.PluginLoader
-
-	// frontends maps connection IDs to their message channels
+	// active plugins, metadata, loaders, and frontends
+	plugins   map[string]api.Plugin
+	metadata  map[string]api.PluginMetadata
+	loaders   map[string]api.PluginLoader
 	frontends map[string]chan<- api.Message
+	loading   map[string]chan struct{}
 
-	// interceptors is a list of components that can filter or modify messages before delivery
-	interceptors []api.Interceptor
+	// context for background tasks
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	// loading keeps track of plugins currently being lazy-loaded
-	loading map[string]chan struct{}
+	// WASM environment
+	wasmManager *wasm.Manager
+	storage     storage.StateStore
+	dataDir     string
 
-	// stopCh is used to signal the kernel to shut down
-	stopCh chan struct{}
-
+	// telemetry
 	telemetry *Telemetry
+
+	// integrated core services
+	events   *EventManager
+	iam      *IdentityManager
+	commands *CommandManager
+	health   *HealthManager
+	loggerSvc *LoggerManager
+
+	// capability management
+	capabilityMap map[string]string // capability name -> plugin ID
+
+	// list of components that can filter or modify messages (Legacy interceptors)
+	interceptors []api.Interceptor
 }
 
 // New creates a new instance of the Alloy Kernel.
-func New(logger *slog.Logger, metricsAddr string) *Kernel {
+func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metricsAddr string) (*Kernel, error) {
 	tel, _ := initTelemetry(metricsAddr)
-	return &Kernel{
-		logger:       logger,
-		plugins:      make(map[string]api.Plugin),
-		metadata:     make(map[string]api.PluginMetadata),
-		loaders:      make(map[string]api.PluginLoader),
-		frontends:    make(map[string]chan<- api.Message),
-		interceptors: make([]api.Interceptor, 0),
-		loading:      make(map[string]chan struct{}),
-		stopCh:       make(chan struct{}),
-		tracer:       otel.Tracer(tracerName),
-		telemetry:    tel,
+	ctx, cancel := context.WithCancel(context.Background())
+
+	k := &Kernel{
+		logger:        logger,
+		plugins:       make(map[string]api.Plugin),
+		metadata:      make(map[string]api.PluginMetadata),
+		loaders:       make(map[string]api.PluginLoader),
+		frontends:     make(map[string]chan<- api.Message),
+		loading:       make(map[string]chan struct{}),
+		stopCh:        make(chan struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		storage:       storage,
+		dataDir:       dataDir,
+		capabilityMap: make(map[string]string),
+		telemetry:     tel,
+		tracer:        otel.Tracer(tracerName),
 	}
+
+	// Create the WASM manager
+	wm, err := wasm.NewManager(logger, storage, dataDir, k.RouteMessage, k.HandleMessageSync)
+	if err != nil {
+		return nil, err
+	}
+	k.wasmManager = wm
+
+	// Initialize and register integrated core services
+	k.events = NewEventManager(logger)
+	k.events.SetRouter(k.RouteMessage)
+	k.RegisterPlugin(k.events)
+
+	k.iam, _ = NewIdentityManager(context.Background(), logger, storage)
+	k.RegisterPlugin(k.iam)
+
+	k.commands = NewCommandManager(logger, k.listRegistrations)
+	k.RegisterPlugin(k.commands)
+
+	k.health = NewHealthManager(logger)
+	k.RegisterPlugin(k.health)
+
+	// Integrated Logger (Auditing)
+	auditDir := storage.BaseDir()
+	if auditDir != "" {
+		auditDir = filepath.Join(filepath.Dir(auditDir), "audit")
+	} else {
+		// fallback
+		auditDir = filepath.Join(dataDir, "audit")
+	}
+	k.loggerSvc, _ = NewLoggerManager(logger, auditDir)
+	if k.loggerSvc != nil {
+		k.RegisterPlugin(k.loggerSvc)
+		// Subscribe to audit events
+		k.RouteMessage(context.Background(), api.Message{
+			ID:      "sub-audit",
+			Sender:  "logger",
+			Target:  "events",
+			Method:  "subscribe",
+			Payload: []byte(`{"topic":"system:audit"}`),
+		})
+	}
+
+	// Register WASM manager as a plugin
+	k.RegisterPlugin(&wasmManagerPlugin{kernel: k})
+
+	// Start the monitor
+	k.wasmManager.StartMonitor(k.ctx, 30*time.Second)
+
+	return k, nil
+}
+
+// Support for backward compatibility
+func NewWITKernel(logger *slog.Logger, storage storage.StateStore, dataDir string, metricsAddr string) (*Kernel, error) {
+	return New(logger, storage, dataDir, metricsAddr)
 }
 
 // Start initializes the kernel services.
@@ -73,238 +150,214 @@ func (k *Kernel) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop shuts down the kernel and all active plugins.
+// Shutdown gracefully shuts down the kernel.
+func (k *Kernel) Shutdown(ctx context.Context) error {
+	k.logger.Info("shutting down kernel")
+	k.stopOnce.Do(func() {
+		close(k.stopCh)
+		k.cancel()
+	})
+
+	k.mu.Lock()
+	plugins := make([]api.Plugin, 0, len(k.plugins))
+	for _, plugin := range k.plugins {
+		plugins = append(plugins, plugin)
+	}
+	k.mu.Unlock()
+
+	for _, plugin := range plugins {
+		_ = plugin.Shutdown(ctx)
+	}
+
+	if k.wasmManager != nil {
+		if err := k.wasmManager.Close(ctx); err != nil {
+			return err
+		}
+	}
+
+	if k.telemetry != nil {
+		return k.telemetry.Shutdown(ctx)
+	}
+	return nil
+}
+
+// Stop is an alias for Shutdown for backward compatibility.
 func (k *Kernel) Stop(ctx context.Context) error {
-	k.logger.Info("stopping alloy kernel")
-	close(k.stopCh)
-	return nil
+	return k.Shutdown(ctx)
 }
 
-// RegisterMetadata describes a plugin to the kernel without loading it yet.
-func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoader) {
-	k.mu.Lock()
-	k.metadata[info.ID] = info
-	k.loaders[info.ID] = loader
-	k.mu.Unlock()
+// RouteMessage handles the delivery of a message to its intended target.
+func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
+	// Start trace span
+	ctx, span := k.tracer.Start(ctx, "kernel.RouteMessage",
+		trace.WithAttributes(msg.ToSpanAttributes()...))
+	defer span.End()
 
-	k.logger.Info("plugin metadata registered", "plugin_id", info.ID, "load_time", info.LoadTime)
+	k.logger.Debug("kernel routing message", "id", msg.ID, "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
+	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
 
-	go func() {
-		// Emit registration event so CommandManager knows about it even before load
-		metaData, _ := json.Marshal(map[string]any{
-			"id":           info.ID,
-			"type":         "plugin-meta",
-			"capabilities": info.Capabilities,
-		})
+	// 1. Core Interception (RBAC & Integrated Interceptors)
+	if ctx.Value(skipInterceptorsKey) == nil {
+		// RBAC Check via built-in IdentityManager
+		actor := msg.Actor
+		if actor == "" {
+			actor = msg.Sender
+		}
 
-		publishPayload, _ := json.Marshal(map[string]any{
-			"topic": "component:registered",
-			"data":  json.RawMessage(metaData),
-		})
+		// Security Check
+		if msg.Sender != "system" && msg.Sender != "kernel" && msg.Sender != "iam" &&
+			msg.Target != "iam" && msg.Type != api.TypeResponse {
+			if !k.iam.Authorize(actor, msg.Target, msg.Method) {
+				k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target)
+				k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
+				span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
 
-		systemCtx := context.WithValue(context.Background(), auditContextKey, true)
-		systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
-
-		k.logger.Debug("emitting component:registered event", "plugin_id", info.ID)
-		k.RouteMessage(systemCtx, api.Message{
-			ID:        "event-reg-meta-" + info.ID,
-			Type:      api.TypeEvent,
-			Sender:    "kernel",
-			Target:    "events",
-			Method:    "publish",
-			Payload:   publishPayload,
-			Timestamp: time.Now().Unix(),
-		})
-	}()
-}
-
-// BootPlugins triggers the manual instantiation of all plugins configured to load at boot.
-func (k *Kernel) BootPlugins(ctx context.Context) error {
-	k.mu.RLock()
-	var boot []string
-	for id, info := range k.metadata {
-		if info.LoadTime == api.LoadTimeBoot {
-			if _, active := k.plugins[id]; !active {
-				boot = append(boot, id)
+				// Send error response back if request
+				k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+					ID:        msg.ID + "-resp",
+					Type:      api.TypeResponse,
+					Sender:    "kernel",
+					Target:    msg.Sender,
+					Payload:   []byte(`{"error":"unauthorized"}`),
+					Timestamp: time.Now().Unix(),
+				})
+				return
 			}
 		}
-	}
-	k.mu.RUnlock()
 
-	for _, id := range boot {
+		// Legacy External Interceptors
 		k.mu.RLock()
-		loader, hasLoader := k.loaders[id]
+		interceptors := k.interceptors
 		k.mu.RUnlock()
 
-		if hasLoader {
-			k.logger.Info("booting plugin", "plugin_id", id)
-			p, err := loader.LoadPlugin(ctx, id)
+		for _, interceptor := range interceptors {
+			newMsg, cont, err := interceptor.PreRoute(ctx, msg)
 			if err != nil {
-				return fmt.Errorf("failed to boot plugin %s: %w", id, err)
+				k.logger.Error("interceptor error", "error", err)
+				return
 			}
-			k.RegisterPlugin(p)
+			if !cont {
+				return
+			}
+			msg = newMsg
 		}
 	}
-	return nil
-}
+	span.SetAttributes(attribute.Bool("alloy.msg.allowed", true))
 
-// Call performs a synchronous call to a plugin.
-func (k *Kernel) Call(ctx context.Context, msg api.Message) (api.Message, error) {
+	// 2. Broadcast and Discovery Handling
+	if msg.Target == "" || msg.Target == "*" {
+		k.broadcast(ctx, msg)
+		return
+	}
+
+	// 3. System and Command Management Integration
+	if msg.Target == "kernel" || msg.Target == "system" {
+		k.handleInternalMessage(ctx, msg)
+		return
+	}
+
+	if msg.Target == "command-manager" {
+		k.handleCommandManagerMessage(ctx, msg)
+		// Fall through to deliver to plugin unless handle method consumed it?
+		// Actually the command manager IS a registered plugin, so we just deliver.
+	}
+
+	// 4. Resolve Target (Capability resolution)
+	target := msg.Target
 	k.mu.RLock()
-	p, ok := k.plugins[msg.Target]
+	capTarget, isCap := k.capabilityMap[target]
 	k.mu.RUnlock()
 
-	if !ok {
-		// Attempt lazy load if metadata exists and target is not currently being loaded
-		k.mu.RLock()
-		_, hasMeta := k.metadata[msg.Target]
-		_, hasLoader := k.loaders[msg.Target]
-		k.mu.RUnlock()
-
-		if hasMeta && hasLoader {
-			k.logger.Info("performing synchronous lazy-load on call", "target", msg.Target)
-			lp, err := k.LoadPluginSync(ctx, msg.Target)
-			if err == nil {
-				p = lp
-			} else {
-				return api.Message{}, fmt.Errorf("plugin %s not found and lazy-load failed: %w", msg.Target, err)
-			}
-		} else {
-			return api.Message{}, fmt.Errorf("plugin not found: %s", msg.Target)
-		}
+	if isCap {
+		k.logger.Debug("resolved capability to target", "capability", target, "target", capTarget)
+		target = capTarget
+		msg.Target = target
 	}
 
-	if p == nil {
-		return api.Message{}, fmt.Errorf("plugin not available: %s", msg.Target)
-	}
+	// 5. Deliver to Frontend, Plugin, or Lazy Load
+	k.mu.RLock()
+	frontendChan, isFrontend := k.frontends[target]
+	plugin, isPlugin := k.plugins[target]
+	_, hasMetadata := k.metadata[target]
+	_, hasLoader := k.loaders[target]
+	k.mu.RUnlock()
 
-	return p.HandleMessage(ctx, msg)
-}
-
-// LoadPluginSync performs a synchronous load of a lazy plugin.
-func (k *Kernel) LoadPluginSync(ctx context.Context, id string) (api.Plugin, error) {
-	k.mu.Lock()
-	if loadCh, inProgress := k.loading[id]; inProgress {
-		k.mu.Unlock()
+	if isFrontend {
 		select {
-		case <-loadCh:
-			k.mu.RLock()
-			p := k.plugins[id]
-			k.mu.RUnlock()
-			return p, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case frontendChan <- msg:
+			k.logger.Debug("message delivered to frontend", "target", target)
+		default:
+			k.logger.Warn("frontend buffer full", "target", target)
 		}
+		return
 	}
 
-	meta, hasMeta := k.metadata[id]
-	loader, hasLoader := k.loaders[id]
-	if !hasMeta || !hasLoader {
-		k.mu.Unlock()
-		return nil, fmt.Errorf("plugin %s metadata or loader missing", id)
+	if isPlugin {
+		k.deliverToPlugin(ctx, plugin, msg)
+		return
 	}
 
-	loadCh := make(chan struct{})
-	k.loading[id] = loadCh
-	k.mu.Unlock()
-
-	defer func() {
-		k.mu.Lock()
-		delete(k.loading, id)
-		close(loadCh)
-		k.mu.Unlock()
-	}()
-
-	k.logger.Info("synchronous loading plugin", "plugin_id", id)
-	loadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	p, err := loader.LoadPlugin(loadCtx, id)
-	if err == nil {
-		k.RegisterPlugin(p)
-		k.mu.Lock()
-		// Capabilities update
-		meta.Capabilities = p.Capabilities()
-		k.metadata[id] = meta
-		k.mu.Unlock()
-		return p, nil
-	}
-	return nil, err
-}
-
-// RegisterPlugin attaches an active plugin to the kernel.
-func (k *Kernel) RegisterPlugin(p api.Plugin) {
-	k.mu.Lock()
-	if _, exists := k.plugins[p.ID()]; !exists {
-		k.telemetry.PluginCountChange(context.Background(), 1)
-	}
-	k.plugins[p.ID()] = p
-	// Automatically register if it implements Interceptor
-	if i, ok := p.(api.Interceptor); ok {
-		k.interceptors = append(k.interceptors, i)
-		k.logger.Info("interceptor registered", "plugin_id", p.ID())
+	if hasMetadata && hasLoader {
+		go k.lazyLoadAndDeliver(ctx, msg)
+		return
 	}
 
-	// Update metadata with actual capabilities once fully loaded
-	existingMeta, ok := k.metadata[p.ID()]
-	if !ok || len(existingMeta.Capabilities) == 0 {
-		k.metadata[p.ID()] = api.PluginMetadata{
-			ID:           p.ID(),
-			Capabilities: p.Capabilities(),
-			LoadTime:     api.LoadTimeBoot, // Active plugins are considered "booted"
-		}
-	}
-	k.mu.Unlock()
-
-	k.logger.Info("plugin registered and active", "plugin_id", p.ID())
-
-	// Handle IAM enforcement natively
-	if p.ID() == "iam" {
-		k.logger.Info("IAM plugin detected, enabling RBAC enforcement")
-		// In a real system, we might promote IAM to a first-class interceptor
-	}
-
-	go func() {
-		// Emit registration event
-		caps := p.Capabilities()
-		capsData, _ := json.Marshal(caps)
-		// Use non-auditing/intercepting context for system-level events
-		systemCtx := context.WithValue(context.Background(), auditContextKey, true)
-		systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
-
-		k.RouteMessage(systemCtx, api.Message{
-			ID:        "event-reg-" + p.ID(),
-			Type:      api.TypeEvent,
+	k.logger.Warn("message target not found", "target", msg.Target)
+	if msg.Type == api.TypeRequest {
+		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
 			Sender:    "kernel",
-			Target:    "events",
-			Method:    "publish",
-			Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + p.ID() + `","type":"plugin","capabilities":` + string(capsData) + `}}`),
+			Target:    msg.Sender,
+			Payload:   []byte(`{"error":"target service or capability not found"}`),
 			Timestamp: time.Now().Unix(),
 		})
+	}
+}
 
-		k.publishAuditEvent(systemCtx, api.Message{Sender: "system", Target: p.ID()}, "plugin_register", "success")
-	}()
+// HandleMessageSync performs a synchronous message call, resolving capabilities if needed.
+func (k *Kernel) HandleMessageSync(ctx context.Context, msg api.Message) (api.Message, error) {
+	k.mu.RLock()
+	target := msg.Target
+	if capTarget, ok := k.capabilityMap[target]; ok {
+		target = capTarget
+		msg.Target = target
+	}
+	plugin, ok := k.plugins[target]
+	_, hasMeta := k.metadata[target]
+	k.mu.RUnlock()
+
+	if !ok && hasMeta {
+		if err := k.lazyLoadPlugin(ctx, target); err == nil {
+			k.mu.RLock()
+			plugin, ok = k.plugins[target]
+			k.mu.RUnlock()
+		}
+	}
+
+	if ok && plugin != nil {
+		return plugin.HandleMessage(ctx, msg)
+	}
+
+	return api.Message{}, fmt.Errorf("plugin or capability %s not found", msg.Target)
+}
+
+// Call is the exported version of HandleMessageSync
+func (k *Kernel) Call(ctx context.Context, msg api.Message) (api.Message, error) {
+	return k.HandleMessageSync(ctx, msg)
 }
 
 func (k *Kernel) deliverToPlugin(ctx context.Context, p api.Plugin, msg api.Message) {
-	// We use a background context here because we are starting a decoupled delivery goroutine.
-	// However, we want to maintain the tracing span context if possible.
 	go func(plugin api.Plugin, m api.Message, parentCtx context.Context) {
-		// Use context.Background() to ensure the delivery isn't cancelled when the router returns
-		// but preserve the trace span from parentCtx.
 		deliveryCtx := context.Background()
+		// Propagate context values and spans
 		if parentCtx != nil {
-			// Copy important values
 			if audit, ok := parentCtx.Value(auditContextKey).(bool); ok {
 				deliveryCtx = context.WithValue(deliveryCtx, auditContextKey, audit)
 			}
 			if skip, ok := parentCtx.Value(skipInterceptorsKey).(bool); ok {
 				deliveryCtx = context.WithValue(deliveryCtx, skipInterceptorsKey, skip)
 			}
-		}
-
-		// Preserve the trace span from the parent context
-		if parentCtx != nil {
 			if span := trace.SpanFromContext(parentCtx); span.SpanContext().IsValid() {
 				deliveryCtx = trace.ContextWithSpan(deliveryCtx, span)
 			}
@@ -318,235 +371,236 @@ func (k *Kernel) deliverToPlugin(ctx context.Context, p api.Plugin, msg api.Mess
 		if err != nil {
 			k.logger.Error("plugin error", "plugin_id", m.Target, "error", err)
 			childSpan.RecordError(err)
-
-			// Status tracking for crash-aware plugins
-			type statusAware interface{ IsCrashed() bool }
-			if sa, ok := p.(statusAware); ok && sa.IsCrashed() {
-				k.publishCrashEvent(m.Target, err.Error())
-			}
 			return
 		}
-		if resp.ID != "" || resp.Target != "" {
+
+		if resp.ID != "" && resp.Target != "" {
 			k.RouteMessage(childCtx, resp)
 		}
 	}(p, msg, ctx)
 }
 
-// RouteMessage handles the delivery of a message to its intended target.
-func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
-	// Start OpenTelemetry span
-	ctx, span := k.tracer.Start(ctx, "kernel.RouteMessage",
-		trace.WithAttributes(msg.ToSpanAttributes()...))
-	defer span.End()
-
-	k.logger.Debug("routing message", "id", msg.ID, "sender", msg.Sender, "method", msg.Method, "target", msg.Target)
-	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
-
-	// Pre-Route Interception
-	if ctx.Value(skipInterceptorsKey) == nil {
-		k.mu.RLock()
-		interceptors := k.interceptors
-		iam, hasIAM := k.plugins["iam"]
-		k.mu.RUnlock()
-
-		// Core RBAC Enforcement via iam
-		if hasIAM && msg.Sender != "system" && msg.Sender != "iam" && msg.Method != "check" && msg.Type == api.TypeRequest {
-			// Ask IAM for permission
-			checkPayload, _ := json.Marshal(map[string]string{
-				"actor":  msg.Actor,
-				"target": msg.Target,
-				"method": msg.Method,
-			})
-			iamCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
-			defer cancel()
-
-			// Call the plugin handler directly to avoid recursive routing
-			resp, err := iam.HandleMessage(iamCtx, api.Message{
-				ID:      "iam-check-" + msg.ID,
-				Type:    api.TypeRequest,
-				Sender:  "kernel",
-				Target:  "iam",
-				Method:  "check",
-				Payload: checkPayload,
-			})
-
-			if err != nil {
-				k.logger.Error("IAM check failed", "error", err)
-				return
-			}
-
-			var result struct {
-				Allowed bool `json:"allowed"`
-			}
-			if err := json.Unmarshal(resp.Payload, &result); err == nil && !result.Allowed {
-				k.logger.Warn("IAM: authorization denied", "actor", msg.Actor, "target", msg.Target, "method", msg.Method)
-
-				// Optional: Send access denied response back to sender
-				k.RouteMessage(context.WithValue(ctx, skipInterceptorsKey, true), api.Message{
-					ID:      msg.ID + "-error",
-					Type:    api.TypeResponse,
-					Sender:  "kernel",
-					Target:  msg.Sender,
-					Payload: []byte(`{"error":"unauthorized"}`),
-				})
-				return
-			}
-		}
-
-		for _, interceptor := range interceptors {
-			newMsg, allow, err := interceptor.PreRoute(ctx, msg)
-			if err != nil {
-				k.logger.Error("interceptor error", "error", err, "target", msg.Target)
-				k.telemetry.RecordError(ctx, msg.Target, "interceptor_fail")
-				span.RecordError(err)
-				return
-			}
-			if !allow {
-				k.logger.Warn("routing denied by interceptor", "sender", msg.Sender, "target", msg.Target)
-				k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
-				span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
-				return
-			}
-			msg = newMsg
-		}
-	}
-	span.SetAttributes(attribute.Bool("alloy.msg.allowed", true))
-
+func (k *Kernel) broadcast(ctx context.Context, msg api.Message) {
 	k.mu.RLock()
-	plugin, isPlugin := k.plugins[msg.Target]
-	frontendChan, isFrontend := k.frontends[msg.Target]
-	_, hasMetadata := k.metadata[msg.Target]
-	loader, hasLoader := k.loaders[msg.Target]
+	frontends := make(map[string]chan<- api.Message, len(k.frontends))
+	for id, ch := range k.frontends {
+		frontends[id] = ch
+	}
 	k.mu.RUnlock()
 
-	// 1. Audit core routing
-	if ctx.Value(auditContextKey) == nil {
-		k.publishAuditEvent(ctx, msg, "route", "processed")
-	}
-
-	// 2. Handle internal messages
-	if msg.Target == "kernel" || msg.Target == "system" {
-		k.handleInternalMessage(ctx, msg)
-		return
-	}
-
-	// 3. Handle active plugins
-	if isPlugin {
-		k.deliverToPlugin(ctx, plugin, msg)
-		return
-	}
-
-	// 4. Handle lazy loading
-	if !isPlugin && hasMetadata && hasLoader {
-		go func() {
-			k.mu.Lock()
-			if loadCh, inProgress := k.loading[msg.Target]; inProgress {
-				k.mu.Unlock()
-				<-loadCh // Wait for the in-progress load
-				// After waiting, check again if it was successful
-				k.mu.RLock()
-				plugin, isNowActive := k.plugins[msg.Target]
-				k.mu.RUnlock()
-				if isNowActive {
-					k.deliverToPlugin(ctx, plugin, msg)
-				} else {
-					// Load must have failed - previous load would have reported error
-					// but we don't know the exact error here. Let's just retry or report generic error.
-					k.logger.Warn("waiting for lazy-load failed: target not active")
-				}
-				return
-			}
-
-			// First one here: start the load
-			loadCh := make(chan struct{})
-			k.loading[msg.Target] = loadCh
-			k.mu.Unlock()
-
-			defer func() {
-				k.mu.Lock()
-				delete(k.loading, msg.Target)
-				close(loadCh)
-				k.mu.Unlock()
-			}()
-
-			k.logger.Info("lazy loading plugin on message request", "plugin_id", msg.Target)
-			loadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-
-			p, err := loader.LoadPlugin(loadCtx, msg.Target)
-			if err == nil {
-				k.RegisterPlugin(p)
-				k.deliverToPlugin(ctx, p, msg)
-			} else {
-				k.logger.Error("failed to lazy-load plugin", "plugin_id", msg.Target, "error", err)
-				// Notify the sender that the lazy-load failed
-				k.logger.Debug("sending lazy-load failure response", "target", msg.Sender, "original_id", msg.ID)
-				k.RouteMessage(context.WithValue(context.Background(), skipInterceptorsKey, true), api.Message{
-					ID:        msg.ID + "-resp",
-					Type:      api.TypeResponse,
-					Sender:    "kernel",
-					Target:    msg.Sender,
-					Payload:   []byte(`{"error":"failed_to_load_plugin","details":"` + err.Error() + `"}`),
-					Timestamp: time.Now().Unix(),
-				})
-			}
-		}()
-		return
-	}
-
-	// 5. Handle frontends
-	if isFrontend {
+	for _, ch := range frontends {
 		select {
-		case frontendChan <- msg:
-			k.logger.Debug("message delivered to frontend", "target", msg.Target)
+		case ch <- msg:
 		case <-ctx.Done():
-			k.logger.Warn("context cancelled while delivering to frontend", "target", msg.Target)
+			return
+		case <-k.stopCh:
+			return
 		default:
-			k.logger.Error("frontend buffer full or closed", "target", msg.Target)
 		}
-		return
 	}
-
-	k.logger.Warn("message target not found", "target", msg.Target)
 }
 
-func (k *Kernel) publishCrashEvent(id, err string) {
-	k.RouteMessage(context.WithValue(context.Background(), skipInterceptorsKey, true), api.Message{
-		ID:        "evt-crash-" + id + "-" + fmt.Sprint(time.Now().UnixNano()),
-		Type:      api.TypeEvent,
-		Sender:    "kernel",
-		Target:    "events",
-		Method:    "publish",
-		Payload:   []byte(`{"topic":"plugin:crashed","data":{"id":"` + id + `","error":"` + err + `"}}`),
-		Timestamp: time.Now().Unix(),
-	})
+func (k *Kernel) lazyLoadAndDeliver(ctx context.Context, msg api.Message) {
+	k.logger.Debug("triggering lazy-load for plugin", "id", msg.Target)
+	if err := k.lazyLoadPlugin(ctx, msg.Target); err == nil {
+		k.mu.RLock()
+		plugin, ok := k.plugins[msg.Target]
+		k.mu.RUnlock()
+		if ok {
+			k.deliverToPlugin(ctx, plugin, msg)
+		}
+	} else {
+		k.logger.Error("lazy-load failed", "id", msg.Target, "error", err)
+		if msg.Type == api.TypeRequest {
+			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+				ID:        msg.ID + "-resp",
+				Type:      api.TypeResponse,
+				Sender:    "kernel",
+				Target:    msg.Sender,
+				Payload:   []byte(fmt.Sprintf(`{"error":"failed to load plugin: %s"}`, err.Error())),
+				Timestamp: time.Now().Unix(),
+			})
+		}
+	}
+}
+
+func (k *Kernel) lazyLoadPlugin(ctx context.Context, pluginID string) error {
+	k.mu.Lock()
+	if _, ok := k.plugins[pluginID]; ok {
+		k.mu.Unlock()
+		return nil
+	}
+	if ch, inProgress := k.loading[pluginID]; inProgress {
+		k.mu.Unlock()
+		select {
+		case <-ch:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	ch := make(chan struct{})
+	k.loading[pluginID] = ch
+	k.mu.Unlock()
+
+	defer func() {
+		k.mu.Lock()
+		delete(k.loading, pluginID)
+		close(ch)
+		k.mu.Unlock()
+	}()
+
+	k.mu.RLock()
+	loader, hasLoader := k.loaders[pluginID]
+	k.mu.RUnlock()
+
+	if !hasLoader {
+		return errors.New("loader not found")
+	}
+
+	p, err := loader.LoadPlugin(ctx, pluginID)
+	if err != nil {
+		return err
+	}
+
+	k.RegisterPlugin(p)
+	return nil
+}
+
+// RegisterPlugin attaches an active plugin to the kernel.
+func (k *Kernel) RegisterPlugin(p api.Plugin) {
+	id := p.ID()
+	k.mu.Lock()
+
+	// Skip re-registration for core plugins
+	if existing, ok := k.plugins[id]; ok && existing != nil {
+		if id == "events" || id == "command-manager" || id == "wasm-manager" || id == "iam" {
+			k.mu.Unlock()
+			return
+		}
+	} else {
+		k.telemetry.PluginCountChange(context.Background(), 1)
+	}
+
+	k.plugins[id] = p
+	k.metadata[id] = api.PluginMetadata{
+		ID:           id,
+		Capabilities: p.Capabilities(),
+	}
+
+	// Update capability map
+	for _, cap := range p.Capabilities() {
+		if cap.Method != "" {
+			k.capabilityMap[cap.Method] = id
+		}
+	}
+
+	// Automatically register if it implements Interceptor
+	if i, ok := p.(api.Interceptor); ok {
+		k.interceptors = append(k.interceptors, i)
+		k.logger.Info("interceptor registered", "plugin_id", p.ID())
+	}
+	k.mu.Unlock()
+
+	k.logger.Info("plugin registered", "plugin_id", id)
+
+	// Inject router if accepted
+	type routerAcceptor interface {
+		SetRouter(func(context.Context, api.Message))
+	}
+	if ra, ok := p.(routerAcceptor); ok {
+		ra.SetRouter(k.RouteMessage)
+	}
+
+	// Emit registration event
+	go func() {
+		caps := p.Capabilities()
+		capsData, _ := json.Marshal(caps)
+		k.events.Publish(context.Background(), "component:registered", "kernel",
+			[]byte(`{"id":"`+id+`","type":"plugin","capabilities":`+string(capsData)+`}`))
+	}()
+}
+
+// RegisterMetadata describes a plugin to the kernel without loading it yet.
+func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoader) {
+	k.mu.Lock()
+	k.metadata[info.ID] = info
+	k.loaders[info.ID] = loader
+	for _, cap := range info.Capabilities {
+		if cap.Method != "" {
+			k.capabilityMap[cap.Method] = info.ID
+		}
+	}
+	k.mu.Unlock()
+
+	k.logger.Info("plugin metadata registered", "plugin_id", info.ID)
+
+	go func() {
+		metaData, _ := json.Marshal(map[string]any{
+			"id":           info.ID,
+			"type":         "plugin-meta",
+			"capabilities": info.Capabilities,
+		})
+		k.events.Publish(context.Background(), "component:registered", "kernel", metaData)
+	}()
+}
+
+// RegisterPluginLoader is an alias for RegisterMetadata for WIT-compatibility.
+func (k *Kernel) RegisterPluginLoader(pluginID string, loader api.PluginLoader, metadata api.PluginMetadata) {
+	k.RegisterMetadata(metadata, loader)
 }
 
 // RegisterFrontend registers a frontend's response channel.
 func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 	k.mu.Lock()
-	if existing, ok := k.frontends[id]; ok && existing == ch {
-		k.mu.Unlock()
-		return
-	}
 	k.frontends[id] = ch
 	k.mu.Unlock()
 
 	k.logger.Info("frontend registered", "frontend_id", id)
 
-	// Emit registration event
-	systemCtx := context.WithValue(context.Background(), auditContextKey, true)
-	systemCtx = context.WithValue(systemCtx, skipInterceptorsKey, true)
+	go k.events.Publish(context.Background(), "component:registered", "kernel",
+		[]byte(`{"id":"`+id+`","type":"frontend"}`))
+}
 
-	k.RouteMessage(systemCtx, api.Message{
-		ID:        "event-reg-" + id,
-		Type:      api.TypeEvent,
-		Sender:    "kernel",
-		Target:    "events",
-		Method:    "publish",
-		Payload:   []byte(`{"topic":"component:registered","data":{"id":"` + id + `","type":"frontend"}}`),
-		Timestamp: time.Now().Unix(),
-	})
+func (k *Kernel) UnregisterFrontend(id string) {
+	k.mu.Lock()
+	delete(k.frontends, id)
+	k.mu.Unlock()
+}
+
+func (k *Kernel) deliverToFrontendSync(ctx context.Context, id string, msg api.Message) {
+	k.mu.RLock()
+	ch, ok := k.frontends[id]
+	k.mu.RUnlock()
+
+	if ok {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+func (k *Kernel) listRegistrations() []api.Registration {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	var regs []api.Registration
+	for id, meta := range k.metadata {
+		regs = append(regs, api.Registration{
+			ID:           id,
+			Type:         "plugin",
+			Status:       "active",
+			Capabilities: meta.Capabilities,
+		})
+	}
+	// Add frontends
+	for id := range k.frontends {
+		regs = append(regs, api.Registration{
+			ID:   id,
+			Type: "frontend",
+		})
+	}
+	return regs
 }
 
 func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
@@ -554,76 +608,182 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 		return
 	}
 
-	k.logger.Debug("handling internal message", "method", msg.Method)
-
 	switch msg.Method {
 	case "ping":
-		resp := api.Message{
+		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,
 			Sender:    "kernel",
 			Target:    msg.Sender,
-			Method:    "ping",
 			Payload:   []byte(`{"status":"pong"}`),
 			Timestamp: time.Now().Unix(),
-		}
-		k.RouteMessage(ctx, resp)
-	case "audit":
-		// Handle audit log request (e.g., from an external auditor plugin)
-		k.publishAuditEvent(ctx, msg, "audit_request", "authorized")
-	case "stop":
-		k.logger.Info("stop request received via internal channel")
-		k.Stop(ctx)
-	default:
-		k.logger.Warn("unknown internal method", "method", msg.Method)
-	}
-}
-
-// StopCh returns the shutdown signal channel.
-func (k *Kernel) StopCh() <-chan struct{} {
-	return k.stopCh
-}
-
-func (k *Kernel) publishAuditEvent(ctx context.Context, msg api.Message, action, status string) {
-	return
-	// Avoid recursive auditing and system noise:
-	if msg.Target == "events" || msg.Target == "logger" || msg.Target == "kv" ||
-		msg.Sender == "kernel" || msg.Sender == "events" || msg.Sender == "logger" || msg.Sender == "kv" ||
-		msg.Sender == "system" || msg.Sender == "ipc-server" ||
-		msg.Method == "system:audit" || msg.Method == "component:registered" {
-		return
-	}
-
-	// Modern Event-driven audit log
-	// We use a non-blocking go-routine to avoid routing cycles or delays
-	go func() {
-		details, _ := json.Marshal(map[string]any{
-			"actor":  msg.Sender,
-			"action": action,
-			"target": msg.Target,
-			"status": status,
-			"method": msg.Method,
 		})
+	case "discovery:list", "list":
+		msg.Target = "command-manager"
+		k.RouteMessage(ctx, msg)
+	case "stop":
+		k.Shutdown(ctx)
+	}
+}
 
-		// Use a explicit context to prevent audit loops or interception at the routing level
-		auditCtx := context.WithValue(context.Background(), auditContextKey, true)
-		auditCtx = context.WithValue(auditCtx, skipInterceptorsKey, true)
+func (k *Kernel) handleCommandManagerMessage(ctx context.Context, msg api.Message) {
+	if msg.Method == "register" {
+		var reg api.Registration
+		if err := json.Unmarshal(msg.Payload, &reg); err == nil {
+			id := reg.ID
+			if id == "" {
+				id = msg.Sender
+			}
+			k.mu.Lock()
+			md := k.metadata[id]
+			md.ID = id
+			md.Capabilities = reg.Capabilities
+			k.metadata[id] = md
 
-		auditMsg := api.Message{
-			ID:        "audit-" + time.Now().Format("150405.000"),
-			Type:      api.TypeEvent,
-			Sender:    "kernel",
-			Target:    "events",
-			Method:    "publish",
-			Payload:   []byte(`{"topic":"system:audit","data":` + string(details) + `}`),
-			Timestamp: time.Now().Unix(),
+			for _, cap := range reg.Capabilities {
+				if cap.Method != "" {
+					k.capabilityMap[cap.Method] = id
+				}
+			}
+			k.mu.Unlock()
 		}
+	} else if msg.Method == "register-capability" {
+		var cap api.Capability
+		if err := json.Unmarshal(msg.Payload, &cap); err == nil {
+			if cap.Method != "" {
+				id := msg.Sender
+				k.mu.Lock()
+				k.capabilityMap[cap.Method] = id
 
-		// Propagate trace context to audit log message if present
-		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-			auditMsg.InjectSpanContext(span.SpanContext())
+				// Update metadata as well
+				md := k.metadata[id]
+				md.ID = id
+				found := false
+				for i, existing := range md.Capabilities {
+					if existing.Method == cap.Method {
+						md.Capabilities[i] = cap
+						found = true
+						break
+					}
+				}
+				if !found {
+					md.Capabilities = append(md.Capabilities, cap)
+				}
+				k.metadata[id] = md
+				k.mu.Unlock()
+			}
 		}
+	}
+}
 
-		k.RouteMessage(auditCtx, auditMsg)
-	}()
+// WIT/WASM helpers
+
+func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability) error {
+	plugin := &witPluginWrapper{
+		id:      pluginID,
+		manager: k.wasmManager,
+		caps:    caps,
+	}
+
+	k.RegisterPlugin(plugin)
+	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps)
+}
+
+func (k *Kernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
+	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps)
+}
+
+func (k *Kernel) GetPluginMetadata() map[string]api.PluginMetadata {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	meta := make(map[string]api.PluginMetadata, len(k.metadata))
+	for id, m := range k.metadata {
+		meta[id] = m
+	}
+	return meta
+}
+
+func (k *Kernel) GetPlugin(id string) (api.Plugin, bool) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	p, ok := k.plugins[id]
+	return p, ok
+}
+
+func (k *Kernel) RegisterInterceptor(i api.Interceptor) {
+	k.mu.Lock()
+	k.interceptors = append(k.interceptors, i)
+	k.mu.Unlock()
+}
+
+// Workspace Management (Passthrough to WasmManager)
+
+func (k *Kernel) RegisterWorkspace(ws api.Workspace)   { k.wasmManager.RegisterWorkspace(ws) }
+func (k *Kernel) UnregisterWorkspace(id string)        { k.wasmManager.UnregisterWorkspace(id) }
+func (k *Kernel) SetActiveWorkspace(id string)         { k.wasmManager.SetActiveWorkspace(id) }
+func (k *Kernel) GetActiveWorkspace() (api.Workspace, bool) { return k.wasmManager.GetActiveWorkspace() }
+func (k *Kernel) ListWorkspaces() []api.Workspace      { return k.wasmManager.ListWorkspaces() }
+func (k *Kernel) ListWidgets() []api.Widget            { return k.wasmManager.ListWidgets() }
+
+// Internal helper for wasm manager
+type witPluginWrapper struct {
+	id      string
+	manager *wasm.Manager
+	caps    []api.Capability
+}
+
+func (p *witPluginWrapper) ID() string                     { return p.id }
+func (p *witPluginWrapper) Capabilities() []api.Capability { return p.caps }
+func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	if msg.Type == api.TypeRequest {
+		err := p.manager.RouteMessage(ctx, p.id, msg)
+		if err != nil {
+			return api.Message{}, err
+		}
+		return p.manager.GetResponse(ctx, p.id, msg.ID)
+	}
+	return api.Message{}, p.manager.RouteMessage(ctx, p.id, msg)
+}
+func (p *witPluginWrapper) Shutdown(ctx context.Context) error { return p.manager.UnloadPlugin(ctx, p.id) }
+
+type wasmManagerPlugin struct {
+	kernel *Kernel
+}
+
+func (w *wasmManagerPlugin) ID() string { return "wasm-manager" }
+func (w *wasmManagerPlugin) Capabilities() []api.Capability {
+	return []api.Capability{
+		{Method: "load", Description: "Load a WASM plugin"},
+		{Method: "unload", Description: "Unload a WASM plugin"},
+	}
+}
+func (w *wasmManagerPlugin) Shutdown(ctx context.Context) error { return nil }
+func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	switch msg.Method {
+	case "load":
+		var req struct {
+			ID           string           `json:"id"`
+			Path         string           `json:"path"`
+			MaxMemoryMB  uint32           `json:"max_memory_mb"`
+			Capabilities []api.Capability `json:"capabilities"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return api.Message{}, err
+		}
+		wasmBytes, err := os.ReadFile(req.Path)
+		if err != nil {
+			return api.Message{}, err
+		}
+		err = w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, 1000, req.Capabilities)
+		if err != nil {
+			return api.Message{}, err
+		}
+		return api.Message{ID: msg.ID + "-resp", Type: api.TypeResponse, Sender: w.ID(), Target: msg.Sender, Payload: []byte(`{"status":"loaded"}`)}, nil
+	case "unload":
+		var req struct{ ID string }
+		json.Unmarshal(msg.Payload, &req)
+		w.kernel.wasmManager.UnloadPlugin(ctx, req.ID)
+		return api.Message{ID: msg.ID + "-resp", Type: api.TypeResponse, Sender: w.ID(), Target: msg.Sender, Payload: []byte(`{"status":"unloaded"}`)}, nil
+	}
+	return api.Message{}, nil
 }

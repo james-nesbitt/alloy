@@ -1,4 +1,4 @@
-package native
+package kernel
 
 import (
 	"context"
@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
-// IdentityManager implements a native plugin that controls message routing permissions.
+// IdentityManager implements authorization enforcement for the kernel.
 type IdentityManager struct {
 	logger *slog.Logger
 	state  storage.StateStore
@@ -21,7 +22,7 @@ type IdentityManager struct {
 	policies map[string]map[string]bool
 }
 
-func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.StateStore) (api.Plugin, error) {
+func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.StateStore) (*IdentityManager, error) {
 	iam := &IdentityManager{
 		logger:   logger,
 		state:    state,
@@ -58,16 +59,7 @@ func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (a
 			return api.Message{}, err
 		}
 
-		// Simplified native check: does the actor have permissions for this target?
-		i.mu.RLock()
-		targetPolicies, hasPolicies := i.policies[req.Actor]
-		allowed := false
-		if !hasPolicies {
-			allowed = true // Default allow for native simple IAM
-		} else if targetPolicies["*"] || targetPolicies[req.Target] {
-			allowed = true
-		}
-		i.mu.RUnlock()
+		allowed := i.Authorize(req.Actor, req.Target, req.Method)
 
 		return api.Message{
 			ID:      msg.ID + "-resp",
@@ -75,6 +67,7 @@ func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (a
 			Sender:  i.ID(),
 			Target:  msg.Sender,
 			Payload: []byte(fmt.Sprintf(`{"allowed":%v}`, allowed)),
+			Timestamp: time.Now().Unix(),
 		}, nil
 
 	case "allow":
@@ -98,6 +91,7 @@ func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (a
 			Sender:  i.ID(),
 			Target:  msg.Sender,
 			Payload: []byte(`{"status":"policy-added"}`),
+			Timestamp: time.Now().Unix(),
 		}, nil
 
 	case "deny":
@@ -123,35 +117,38 @@ func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (a
 			Sender:  i.ID(),
 			Target:  msg.Sender,
 			Payload: []byte(`{"status":"policy-removed"}`),
+			Timestamp: time.Now().Unix(),
 		}, nil
 	}
 	return api.Message{}, nil
 }
 
-func (i *IdentityManager) PreRoute(ctx context.Context, msg api.Message) (api.Message, bool, error) {
+// Authorize checks if an actor has permission to perform an action.
+func (i *IdentityManager) Authorize(actor, target, method string) bool {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
-	// 1. Check if sender has policies
-	targetPolicies, hasPolicies := i.policies[msg.Sender]
+	// 1. Check if actor has policies
+	targetPolicies, hasPolicies := i.policies[actor]
 	if !hasPolicies {
-		// By default, for now, we allow unknown senders if not explicitly restricted.
-		// In a production scenario, we'd probably have a "default allow/deny" policy.
-		return msg, true, nil
+		// By default, for now, we allow unknown actors if not explicitly restricted.
+		return true
 	}
 
 	// 2. Check if wildcard allowed
 	if targetPolicies["*"] {
-		return msg, true, nil
+		return true
 	}
 
 	// 3. Check if explicit target allowed
-	if targetPolicies[msg.Target] {
-		return msg, true, nil
+	if targetPolicies[target] {
+		return true
 	}
 
-	i.logger.Warn("IAM denied routing", "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
-	return msg, false, nil
+	i.logger.Warn("IAM denied access", "actor", actor, "target", target, "method", method)
+	return false
 }
 
-func (i *IdentityManager) Shutdown(ctx context.Context) error { return nil }
+func (i *IdentityManager) Shutdown(ctx context.Context) error {
+	return nil
+}

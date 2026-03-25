@@ -10,21 +10,13 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
-	"github.com/james-nesbitt/alloy/pkg/plugins/native"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
 func TestIAMInterceptor(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	k := kernel.New(logger, "")
 	state := storage.NewMemoryStateStore()
-
-	// 1. Load IAM
-	iam, _ := native.NewIdentityManager(ctx, logger, state)
-	k.RegisterPlugin(iam.(api.Plugin))
+	k, _ := kernel.New(logger, state, "", "")
 
 	// 2. Load a target plugin
 	target := &targetPlugin{received: make(chan api.Message, 1)}

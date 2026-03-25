@@ -1,10 +1,9 @@
-package native
+package kernel
 
 import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"time"
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/security/audit"
@@ -30,19 +29,6 @@ func NewLoggerManager(logger *slog.Logger, dataDir string) (*LoggerManager, erro
 
 func (l *LoggerManager) SetRouter(r func(context.Context, api.Message)) {
 	l.route = r
-	// Subscribe to audit events
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		l.route(context.Background(), api.Message{
-			ID:        "sub-logger-audit",
-			Type:      api.TypeRequest,
-			Sender:    l.ID(),
-			Target:    "events",
-			Method:    "subscribe",
-			Payload:   []byte(`{"topic":"system:audit"}`),
-			Timestamp: time.Now().Unix(),
-		})
-	}()
 }
 
 func (l *LoggerManager) ID() string { return "logger" }

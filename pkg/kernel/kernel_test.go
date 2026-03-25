@@ -14,9 +14,9 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
-func TestWITKernelBasicOperations(t *testing.T) {
+func TestKernelBasicOperations(t *testing.T) {
 	// Create a temporary directory for test data
-	tempDir, err := os.MkdirTemp("", "wit-kernel-test")
+	tempDir, err := os.MkdirTemp("", "kernel-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,23 +32,23 @@ func TestWITKernelBasicOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Test 1: Create WIT kernel
-	kernel, err := kernel.NewWITKernel(logger, kv, tempDir, "")
+	// Test 1: Create kernel
+	k, err := kernel.New(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kernel.Shutdown(context.Background())
+	defer k.Shutdown(context.Background())
 
-	if kernel == nil {
+	if k == nil {
 		t.Error("kernel should not be nil")
 	}
 
-	t.Log("WIT kernel basic operations test passed!")
+	t.Log("Kernel basic operations test passed!")
 }
 
-func TestWITKernelPluginRegistration(t *testing.T) {
+func TestKernelPluginRegistration(t *testing.T) {
 	// Create a temporary directory for test data
-	tempDir, err := os.MkdirTemp("", "wit-kernel-registration-test")
+	tempDir, err := os.MkdirTemp("", "kernel-registration-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,12 +64,12 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create WIT kernel
-	kernel, err := kernel.NewWITKernel(logger, kv, tempDir, "")
+	// Create kernel
+	k, err := kernel.New(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kernel.Shutdown(context.Background())
+	defer k.Shutdown(context.Background())
 
 	// Create a simple WASM module for testing
 	wasmBytes := createTestWASMModule(t)
@@ -80,13 +80,13 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 		{Method: "status", Description: "Test method"},
 	}
 
-	err = kernel.RegisterWASMPlugin(pluginID, wasmBytes, caps)
+	err = k.RegisterWASMPlugin(pluginID, wasmBytes, caps)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Test 2: Verify plugin metadata
-	metadata := kernel.GetPluginMetadata()
+	metadata := k.GetPluginMetadata()
 	pluginMD, ok := metadata[pluginID]
 	if !ok {
 		t.Error("plugin should be registered")
@@ -100,12 +100,12 @@ func TestWITKernelPluginRegistration(t *testing.T) {
 		t.Error("unexpected capability method")
 	}
 
-	t.Log("WIT kernel plugin registration test passed!")
+	t.Log("Kernel plugin registration test passed!")
 }
 
-func TestWITKernelMessageRouting(t *testing.T) {
+func TestKernelMessageRouting(t *testing.T) {
 	// Create a temporary directory for test data
-	tempDir, err := os.MkdirTemp("", "wit-kernel-routing-test")
+	tempDir, err := os.MkdirTemp("", "kernel-routing-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestWITKernelMessageRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create WIT kernel
-	k, err := kernel.NewWITKernel(logger, kv, tempDir, "")
+	// Create kernel
+	k, err := kernel.New(logger, kv, tempDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,10 +130,13 @@ func TestWITKernelMessageRouting(t *testing.T) {
 
 	// Read the health plugin for testing
 	cwd, _ := os.Getwd()
+	// Navigate up from pkg/kernel to project root
 	projectRoot := filepath.Dir(filepath.Dir(cwd))
-	healthWasm, err := os.ReadFile(filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/health.wasm"))
+	healthWasmPath := filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/health.wasm")
+	healthWasm, err := os.ReadFile(healthWasmPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("failed to read health wasm at %s: %v", healthWasmPath, err)
+		return
 	}
 
 	// Register WASM plugin
@@ -165,9 +168,8 @@ func TestWITKernelMessageRouting(t *testing.T) {
 		Payload: []byte(`{}`),
 	}
 
-	// Route the message through kernel (this should trigger IAM check if present, 
-	// which is allowed for health:status by default as per iam_interceptor logic)
-	go k.RouteMessage(context.Background(), testMsg)
+	// Route the message through kernel
+	k.RouteMessage(context.Background(), testMsg)
 
 	// Test 2: Verify message was routed and we got a response in the frontend
 	select {
@@ -189,7 +191,7 @@ func TestWITKernelMessageRouting(t *testing.T) {
 		t.Fatal("timed out waiting for response from plugin")
 	}
 
-	t.Log("WIT kernel message routing test passed!")
+	t.Log("Kernel message routing test passed!")
 }
 
 func createTestWASMModule(t *testing.T) []byte {

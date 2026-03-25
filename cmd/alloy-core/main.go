@@ -77,8 +77,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create WIT-based kernel
-	k, err := kernel.NewWITKernel(logger, kv, *dataDir, *metricsAddr)
+	// Create kernel
+	k, err := kernel.New(logger, kv, *dataDir, *metricsAddr)
 	if err != nil {
 		logger.Error("failed to create WIT kernel", "error", err)
 		os.Exit(1)
@@ -194,7 +194,7 @@ type ProvisionPlugin struct {
 }
 
 // loadProvisionedPlugins loads plugins from a provisioning file.
-func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *slog.Logger, kv storage.StateStore) error {
+func loadProvisionedPlugins(k *kernel.Kernel, provisionFile string, logger *slog.Logger, kv storage.StateStore) error {
 	logger.Info("loading provisioned plugins", "file", provisionFile)
 	data, err := os.ReadFile(provisionFile)
 	if err != nil {
@@ -212,6 +212,11 @@ func loadProvisionedPlugins(k *kernel.WITKernel, provisionFile string, logger *s
 			// Register native plugin from the registry
 			constructor, ok := native.Registry[p.ID]
 			if !ok {
+				// Check if it's a core internal plugin already registered
+				if p.ID == "events" || p.ID == "iam" || p.ID == "command-manager" || p.ID == "wasm-manager" {
+					logger.Debug("skipping already integrated core plugin", "id", p.ID)
+					continue
+				}
 				logger.Error("unsupported native plugin id", "id", p.ID)
 				continue
 			}
@@ -336,7 +341,7 @@ func resolvePluginPath(manifestPath, pluginPath string) string {
 
 // wasmLoader implements the api.PluginLoader interface for lazy-loading WASM plugins.
 type wasmLoader struct {
-	k            *kernel.WITKernel
+	k            *kernel.Kernel
 	pluginID     string
 	path         string
 	logger       *slog.Logger
@@ -374,7 +379,7 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 }
 
 // healthMonitor monitors the health of plugins.
-func healthMonitor(k *kernel.WITKernel, logger *slog.Logger) {
+func healthMonitor(k *kernel.Kernel, logger *slog.Logger) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

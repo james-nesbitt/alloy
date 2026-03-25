@@ -30,7 +30,7 @@ func TestDynamicDashboardWidgets(t *testing.T) {
 	kvStore := storage.NewMemoryStateStore()
 	logH := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	k, err := kernel.NewWITKernel(logH, kvStore, dataDir, "")
+	k, err := kernel.New(logH, kvStore, dataDir, "")
 	if err != nil {
 		t.Fatalf("failed to create WIT kernel: %v", err)
 	}
