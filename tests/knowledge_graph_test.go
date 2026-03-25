@@ -108,10 +108,10 @@ func TestCollaborativeKnowledgeGraph(t *testing.T) {
 
 	// 4. Query AI about the kernel - it should retrieve context from the index
 	queryMsg := api.Message{
-		ID:     "query-1",
-		Sender: "user-2",
-		Target: "ai",
-		Method: "query",
+		ID:      "query-1",
+		Sender:  "user-2",
+		Target:  "ai",
+		Method:  "query",
 		Payload: json.RawMessage(`{"prompt":"tell me about the kernel"}`),
 	}
 	err = manager.RouteMessage(context.Background(), "ai", queryMsg)

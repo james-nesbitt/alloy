@@ -108,6 +108,13 @@ func (e *EventManager) Publish(ctx context.Context, topic string, sender string,
 	}
 }
 
+// HasSubscribers checks if there are any subscribers for a given topic.
+func (e *EventManager) HasSubscribers(topic string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.subscribers[topic]) > 0
+}
+
 func (e *EventManager) Shutdown(ctx context.Context) error {
 	return nil
 }

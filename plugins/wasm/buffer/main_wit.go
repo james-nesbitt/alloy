@@ -671,17 +671,29 @@ func notifyAll(id string, event string) {
 		"event":     event,
 		"timestamp": time.Now().Unix(),
 	}
-	payload, _ := json.Marshal(evt)
+	evtData, _ := json.Marshal(evt)
+	
+	// standardized event structure
+	topic := "buffer:update"
+	if event == "cursor_update" {
+		topic = "buffer:cursors_updated"
+	}
+	
+	publishPayload, _ := json.Marshal(map[string]any{
+		"topic": topic,
+		"data":  json.RawMessage(evtData),
+	})
+
 	tid := fmt.Sprint(time.Now().UnixNano())
 
-	// Notify events plugin
+	// Notify events service
 	plugin.RouteMessage(AlloyMessage{
 		Id:      "evt-pub-" + tid,
 		MsgType: "request",
 		Method:  "publish",
 		Sender:  "buffer",
 		Target:  Some("events"),
-		Payload: payload,
+		Payload: publishPayload,
 	})
 
 	// Notify subscribers
@@ -692,7 +704,7 @@ func notifyAll(id string, event string) {
 			Method:  "update",
 			Sender:  "buffer",
 			Target:  Some(sub),
-			Payload: payload,
+			Payload: evtData,
 		})
 	}
 }

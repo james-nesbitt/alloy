@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// This test verifies that the TUI and GUI logic correctly synchronize 
+// This test verifies that the TUI and GUI logic correctly synchronize
 // when receiving events from the kernel.
 
 func TestCrossClientWorkspaceSync(t *testing.T) {
@@ -27,8 +27,8 @@ func TestCrossClientWorkspaceSync(t *testing.T) {
 		Payload: payload,
 	}
 
-	// 2. We can't easily test the private state of the frontends across packages 
-	// without more refactoring, but we've verified the individual Update/OnMessage 
+	// 2. We can't easily test the private state of the frontends across packages
+	// without more refactoring, but we've verified the individual Update/OnMessage
 	// logic in their respective package tests.
 
 	// In a real integration test, we would spawn the processes and use a real socket.

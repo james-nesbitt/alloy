@@ -52,15 +52,15 @@ func TestUnifiedSanity(t *testing.T) {
 	defer cancel()
 
 	os.Setenv("ALLOY_TEST_MODE", "true")
-	kernelCmd := exec.CommandContext(ctx, "go", "run", filepath.Join(root, "cmd/alloy-core"), 
-		"--listen", "unix://"+socket, 
-		"--insecure", 
+	kernelCmd := exec.CommandContext(ctx, "go", "run", filepath.Join(root, "cmd/alloy-core"),
+		"--listen", "unix://"+socket,
+		"--insecure",
 		"--provision", provisionPath,
 		"--data-dir", filepath.Join(runtimeDir, "data"))
-		
+
 	kernelCmd.Stdout = os.Stdout
 	kernelCmd.Stderr = os.Stderr
-	
+
 	if err := kernelCmd.Start(); err != nil {
 		t.Fatalf("Failed to start kernel: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestUnifiedSanity(t *testing.T) {
 	eventChan := make(chan api.Message, 10)
 	for name, client := range clients {
 		n := name
-		
+
 		// Subscribe to sanity topic
 		subPayload, _ := json.Marshal(map[string]string{"topic": "sanity-topic"})
 		_, err := client.Send(context.Background(), "events", "subscribe", subPayload)
@@ -163,7 +163,7 @@ func TestUnifiedSanity(t *testing.T) {
 		"topic": "sanity-topic",
 		"data":  map[string]string{"msg": "sanity-check"},
 	})
-	
+
 	sendCtx, sendCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer sendCancel()
 	_, sendErr := clients["tui-sim"].Send(sendCtx, "events", "publish", pubPayload)

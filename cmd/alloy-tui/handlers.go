@@ -237,6 +237,28 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				displayMsg = fmt.Sprintf("[%s] #%s <%s> %s",
 					time.Now().Format("15:04:05"), chatMsg.Channel, chatMsg.Sender, chatMsg.Content)
 			}
+		case "system:trace":
+			var trace struct {
+				Topic string `json:"topic"`
+				Data  struct {
+					ID     string `json:"id"`
+					Sender string `json:"sender"`
+					Target string `json:"target"`
+					Method string `json:"method"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &trace); err == nil {
+				logEntry := fmt.Sprintf("[%s] %s -> %s:%s (%s)",
+					time.Now().Format("15:04:05.000"),
+					trace.Data.Sender, trace.Data.Target, trace.Data.Method, trace.Data.ID)
+				m.inspectorLogs = append(m.inspectorLogs, logEntry)
+				if len(m.inspectorLogs) > 500 {
+					m.inspectorLogs = m.inspectorLogs[1:]
+				}
+				m.inspectorVp.SetContent(strings.Join(m.inspectorLogs, "\n"))
+				m.inspectorVp.GotoBottom()
+			}
+			displayMsg = "skip"
 		case "component:registered":
 			// NEW: React to new components by updating discovery
 			cmds = append(cmds, m.doDiscovery)
@@ -356,6 +378,10 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "v":
 		m.Mode = tui.ModeNormal
+		m.isLeader = false
+		return m, nil
+	case "x":
+		m.Mode = tui.ModeInspector
 		m.isLeader = false
 		return m, nil
 	case "c":

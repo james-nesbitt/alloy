@@ -341,4 +341,3 @@ func TestWorkspaceWIT(t *testing.T) {
 
 	t.Log("Workspace WIT integration test passed!")
 }
-

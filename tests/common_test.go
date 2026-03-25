@@ -109,6 +109,7 @@ func setupTestCore(t *testing.T, label string, manifest map[string]any) (*exec.C
 }
 
 func setupTestCoreSecure(t *testing.T, label string, manifest map[string]any) (*exec.Cmd, net.Conn, *MessageCollector, string) {
+	// Enable RBAC, but no mTLS for easy testing
 	return setupTestCoreInsecure(t, label, manifest, false)
 }
 
@@ -128,13 +129,14 @@ func setupTestCoreInsecure(t *testing.T, label string, manifest map[string]any, 
 		"--data-dir", homeDir,
 		"--debug",
 		"--provision", provisionPath,
+		"--no-mtls",
 	}
 	if insecure {
 		args = append(args, "--insecure")
 	}
 
 	cmd := StartCore(t, corePath, args)
-	
+
 	// Wait for socket with exponential backoff and net.Dial readiness check
 	var conn net.Conn
 	var err error
@@ -144,7 +146,7 @@ func setupTestCoreInsecure(t *testing.T, label string, manifest map[string]any, 
 			break
 		}
 		t.Logf("Attempt %d: failed to dial %s: %v", i, socketPath, err)
-		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+		time.Sleep(time.Duration(200*(i+1)) * time.Millisecond)
 	}
 
 	if err != nil {

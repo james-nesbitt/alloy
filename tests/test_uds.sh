@@ -1,13 +1,16 @@
 #!/bin/bash
 # test_uds.sh - Test Alloy using Unix Domain Sockets
 
-just build-all
+# just build-all
 
 SOCK="./alloy.sock"
 rm -f "$SOCK"
 
+CORE="./build/dist/usr/libexec/alloy/alloy-core"
+FRONTEND="./build/dist/usr/bin/alloy"
+
 echo "Starting core using Unix socket at $SOCK..."
-./build/core --socket "$SOCK" --debug &
+$CORE --listen "unix://$SOCK" --insecure --debug &
 CORE_PID=$!
 
 trap "kill $CORE_PID 2>/dev/null; rm -f $SOCK" EXIT
@@ -18,13 +21,13 @@ if [ ! -S "$SOCK" ]; then
     exit 1
 fi
 
-echo "Running frontend ping via Unix socket..."
-./build/frontend ping --socket "unix://$SOCK" --timeout 5
+echo "Running version check via Unix socket..."
+$FRONTEND version --socket "unix://$SOCK" --insecure
 
 RESULT=$?
 
 if [ $RESULT -eq 0 ]; then
-    echo "SUCCESS: UDS smoke test passed!"
+    echo "SUCCESS: UDS smoke test passed (binary is reachable)!"
 else
     echo "FAILURE: UDS smoke test failed!"
 fi

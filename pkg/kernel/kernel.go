@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,16 +54,16 @@ type Kernel struct {
 	telemetry *Telemetry
 
 	// integrated core services
-	events   *EventManager
-	iam      *IdentityManager
-	commands *CommandManager
-	health   *HealthManager
-	loggerSvc *LoggerManager
-	kv        *KVManager
+	events     *EventManager
+	iam        *IdentityManager
+	commands   *CommandManager
+	health     *HealthManager
+	loggerSvc  *LoggerManager
+	kv         *KVManager
 	storageSvc *StorageManager
-	network   *NetworkManager
-	cache     *CacheManager
-	doc       *DocStore
+	network    *NetworkManager
+	cache      *CacheManager
+	doc        *DocStore
 
 	// security configuration
 	insecure bool
@@ -228,7 +229,7 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 
 			// Security Check
 			if msg.Sender != "system" && msg.Sender != "kernel" && msg.Sender != "iam" &&
-				msg.Target != "iam" && msg.Type != api.TypeResponse {
+				msg.Type != api.TypeResponse {
 				if !k.iam.Authorize(actor, msg.Target, msg.Method) {
 					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target)
 					k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
@@ -266,6 +267,25 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 		}
 	}
 	span.SetAttributes(attribute.Bool("alloy.msg.allowed", true))
+
+	// Observability: Emit trace event for TUI/Inspector
+	// Prevent loop by ignoring trace events and messages from the event bus itself
+	if k.events != nil && msg.ID != "" &&
+		!strings.HasPrefix(msg.ID, "trace-") &&
+		!strings.HasPrefix(msg.ID, "evt-") &&
+		msg.Method != "system:trace" &&
+		msg.Sender != "events" &&
+		msg.Sender != "logger" &&
+		k.events.HasSubscribers("system:trace") {
+		tracePayload, _ := json.Marshal(map[string]any{
+			"id":     msg.ID,
+			"sender": msg.Sender,
+			"target": msg.Target,
+			"method": msg.Method,
+			"time":   time.Now().UnixNano(),
+		})
+		go k.events.Publish(ctx, "system:trace", "kernel", json.RawMessage(tracePayload))
+	}
 
 	// 2. Broadcast and Discovery Handling
 	if msg.Target == "" || msg.Target == "*" {
@@ -637,6 +657,77 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 			Payload:   []byte(`{"status":"pong"}`),
 			Timestamp: time.Now().Unix(),
 		})
+	case "workspace:register":
+		var ws api.Workspace
+		if err := json.Unmarshal(msg.Payload, &ws); err != nil {
+			k.logger.Error("failed to unmarshal workspace register request", "error", err, "payload", string(msg.Payload))
+			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+				ID:        msg.ID + "-resp",
+				Type:      api.TypeResponse,
+				Sender:    "kernel",
+				Target:    msg.Sender,
+				Payload:   []byte(`{"error":"invalid workspace format"}`),
+				Timestamp: time.Now().Unix(),
+			})
+			return
+		}
+
+		k.RegisterWorkspace(ws)
+		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Payload:   []byte(`{"status":"ok"}`),
+			Timestamp: time.Now().Unix(),
+		})
+
+	case "workspace:set_active":
+		var id string
+		if err := json.Unmarshal(msg.Payload, &id); err != nil {
+			k.logger.Error("failed to unmarshal workspace set_active request", "error", err, "payload", string(msg.Payload))
+			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+				ID:        msg.ID + "-resp",
+				Type:      api.TypeResponse,
+				Sender:    "kernel",
+				Target:    msg.Sender,
+				Payload:   []byte(`{"error":"invalid workspace id format"}`),
+				Timestamp: time.Now().Unix(),
+			})
+			return
+		}
+
+		k.SetActiveWorkspace(id)
+		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+			ID:        msg.ID + "-resp",
+			Type:      api.TypeResponse,
+			Sender:    "kernel",
+			Target:    msg.Sender,
+			Payload:   []byte(`{"status":"ok"}`),
+			Timestamp: time.Now().Unix(),
+		})
+	case "workspace:get_active":
+		ws, ok := k.GetActiveWorkspace()
+		if ok {
+			data, _ := json.Marshal(ws)
+			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+				ID:        msg.ID + "-resp",
+				Type:      api.TypeResponse,
+				Sender:    "kernel",
+				Target:    msg.Sender,
+				Payload:   data,
+				Timestamp: time.Now().Unix(),
+			})
+		} else {
+			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+				ID:        msg.ID + "-resp",
+				Type:      api.TypeResponse,
+				Sender:    "kernel",
+				Target:    msg.Sender,
+				Payload:   []byte(`{"error":"no active workspace"}`),
+				Timestamp: time.Now().Unix(),
+			})
+		}
 	case "discovery:list", "list":
 		msg.Target = "command-manager"
 		k.RouteMessage(ctx, msg)
@@ -698,13 +789,13 @@ func (k *Kernel) handleCommandManagerMessage(ctx context.Context, msg api.Messag
 // Provisioning
 
 type PluginDef struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"` // "wasm" (native is now built-in or handled differently)
-	Path         string           `json:"path,omitempty"`
-	MaxMemoryMB  uint32           `json:"max_memory_mb,omitempty"`
-	MsgPerSecond int              `json:"msg_per_second,omitempty"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"` // "wasm" (native is now built-in or handled differently)
+	Path         string             `json:"path,omitempty"`
+	MaxMemoryMB  uint32             `json:"max_memory_mb,omitempty"`
+	MsgPerSecond int                `json:"msg_per_second,omitempty"`
 	LoadTime     api.PluginLoadTime `json:"load_time,omitempty"`
-	Capabilities []api.Capability `json:"capabilities,omitempty"`
+	Capabilities []api.Capability   `json:"capabilities,omitempty"`
 }
 
 func (k *Kernel) Provision(plugins []PluginDef) error {
@@ -828,12 +919,14 @@ func (k *Kernel) RegisterInterceptor(i api.Interceptor) {
 
 // Workspace Management (Passthrough to WasmManager)
 
-func (k *Kernel) RegisterWorkspace(ws api.Workspace)   { k.wasmManager.RegisterWorkspace(ws) }
-func (k *Kernel) UnregisterWorkspace(id string)        { k.wasmManager.UnregisterWorkspace(id) }
-func (k *Kernel) SetActiveWorkspace(id string)         { k.wasmManager.SetActiveWorkspace(id) }
-func (k *Kernel) GetActiveWorkspace() (api.Workspace, bool) { return k.wasmManager.GetActiveWorkspace() }
-func (k *Kernel) ListWorkspaces() []api.Workspace      { return k.wasmManager.ListWorkspaces() }
-func (k *Kernel) ListWidgets() []api.Widget            { return k.wasmManager.ListWidgets() }
+func (k *Kernel) RegisterWorkspace(ws api.Workspace) { k.wasmManager.RegisterWorkspace(ws) }
+func (k *Kernel) UnregisterWorkspace(id string)      { k.wasmManager.UnregisterWorkspace(id) }
+func (k *Kernel) SetActiveWorkspace(id string)       { k.wasmManager.SetActiveWorkspace(id) }
+func (k *Kernel) GetActiveWorkspace() (api.Workspace, bool) {
+	return k.wasmManager.GetActiveWorkspace()
+}
+func (k *Kernel) ListWorkspaces() []api.Workspace { return k.wasmManager.ListWorkspaces() }
+func (k *Kernel) ListWidgets() []api.Widget       { return k.wasmManager.ListWidgets() }
 
 // Internal helper for wasm manager
 type witPluginWrapper struct {
@@ -854,7 +947,9 @@ func (p *witPluginWrapper) HandleMessage(ctx context.Context, msg api.Message) (
 	}
 	return api.Message{}, p.manager.RouteMessage(ctx, p.id, msg)
 }
-func (p *witPluginWrapper) Shutdown(ctx context.Context) error { return p.manager.UnloadPlugin(ctx, p.id) }
+func (p *witPluginWrapper) Shutdown(ctx context.Context) error {
+	return p.manager.UnloadPlugin(ctx, p.id)
+}
 
 type wasmManagerPlugin struct {
 	kernel *Kernel

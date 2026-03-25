@@ -12,21 +12,27 @@ import (
 // SecurityFlags represents the common security-related command line flags.
 type SecurityFlags struct {
 	Insecure    *bool
+	NoMTLS      *bool
 	SecurityDir *string
 }
 
 // RegisterSecurityFlags adds common security flags to the provided FlagSet.
 func RegisterSecurityFlags(fs *flag.FlagSet) SecurityFlags {
 	return SecurityFlags{
-		Insecure:    fs.Bool("insecure", false, "Disable mTLS and use insecure communication"),
+		Insecure:    fs.Bool("insecure", false, "Disable all security (RBAC and mTLS)"),
+		NoMTLS:      fs.Bool("no-mtls", false, "Disable mTLS transport security only"),
 		SecurityDir: fs.String("security-dir", "", "Path to the security/identity directory"),
 	}
 }
 
 // ValidateSecurity ensures that insecure mode and security paths are not used simultaneously.
 func (s SecurityFlags) Validate() error {
-	if *s.Insecure && *s.SecurityDir != "" {
-		return fmt.Errorf("cannot use --insecure together with --security-dir")
+	if *s.Insecure {
+		if *s.SecurityDir != "" {
+			return fmt.Errorf("cannot use --insecure together with --security-dir")
+		}
+		// If insecure is set, automatically disable mTLS unless already disabled
+		*s.NoMTLS = true
 	}
 	return nil
 }

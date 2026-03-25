@@ -37,11 +37,21 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 
 	// Bootstrap default roles
 	iam.policies["admin"] = Policy{Role: "admin", Permissions: []string{"*"}}
-	iam.policies["guest"] = Policy{Role: "guest", Permissions: []string{"*"}}
-	// Bootstrapped guest: health, events, etc.
-	// iam.policies["guest"] = Policy{Role: "guest", Permissions: []string{
-	// 	"health:*", "events:*", "chat:*", "buffer:*", "command-manager:*", "iam:check", "kernel:*", "kv:*", "storage:*", "network:*", "cache:*", "doc:*", "ai:*",
-	// }}
+
+	// Explicit guest permissions for core functionality
+	iam.policies["guest"] = Policy{Role: "guest", Permissions: []string{
+		"health:*",            // Any user can check health status
+		"command-manager:*",   // Discovery is public
+		"events:subscribe",    // Monitoring public events
+		"events:publish",      // Emitting non-privileged events (e.g. log)
+		"iam:check",           // Checking own permissions
+		"project:get_active",  // Seeing project context
+		"chat:send",           // Basic interaction
+		"buffer:read",         // Public data
+		"kernel:*",            // Basic system calls (e.g. registry read)
+		"logger:*",            // Sending logs
+		"wasm-manager:status", // Seeing plugin status
+	}}
 
 	// Bootstrap system identities
 	iam.identities["system"] = "admin"
@@ -51,6 +61,8 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 	iam.identities["command-manager"] = "admin"
 	iam.identities["wasm-manager"] = "admin"
 	iam.identities["logger"] = "admin"
+	iam.identities["admin-user"] = "admin"
+	iam.identities["admin-sim"] = "admin"
 
 	return iam, nil
 }

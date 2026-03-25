@@ -58,15 +58,15 @@ func main() {
 	})
 
 	mux := http.NewServeMux()
-	
+
 	// API for the WASM/JS bridge
 	mux.HandleFunc("/api/send", wf.handleSend)
 	mux.HandleFunc("/api/events", wf.handleEvents)
 	mux.HandleFunc("/api/commands", wf.handleCommands)
-	
+
 	// Static assets
 	mux.Handle("/static/", http.FileServer(http.FS(content)))
-	
+
 	// Main UI
 	mux.HandleFunc("/", wf.handleIndex)
 

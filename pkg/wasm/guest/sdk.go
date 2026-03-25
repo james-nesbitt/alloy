@@ -355,6 +355,38 @@ func (p *Plugin) ReplyError(req Message, errMsg string) *Message {
 	}
 }
 
+// RequireService checks if a specific service (by plugin ID) is available
+// and logs an error and exits if not.
+func (p *Plugin) RequireService(serviceID string) {
+	providers := p.FindProviders("*") // Get all providers
+	found := false
+	for _, provider := range providers {
+		if provider == serviceID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		p.Log(LogLevelError, fmt.Sprintf("Required service '%s' not found. Plugin exiting.", serviceID))
+		panic(fmt.Sprintf("missing required service: %s", serviceID))
+	}
+}
+
+// CheckCapability checks if any plugin provides the specified method.
+func (p *Plugin) CheckCapability(method string) bool {
+	providers := p.FindProviders(method)
+	return len(providers) > 0
+}
+
+// RequireCapability checks if any plugin provides the specified method
+// and logs an error and exits if not.
+func (p *Plugin) RequireCapability(method string) {
+	if !p.CheckCapability(method) {
+		p.Log(LogLevelError, fmt.Sprintf("Required capability '%s' not found. Plugin exiting.", method))
+		panic(fmt.Sprintf("missing required capability: %s", method))
+	}
+}
+
 // KV Utils
 func (p *Plugin) KVSet(key string, val []byte) bool {
 	return guest.AlloyKvSet(key, val)
@@ -428,6 +460,16 @@ func (p *Plugin) ReadBuffer(id string) (guest.AlloyBuffer, bool) {
 		return res.Unwrap(), true
 	}
 	return guest.AlloyBuffer{}, false
+}
+
+// GetBufferView returns a direct memory hint (address, size) for the host-side buffer.
+func (p *Plugin) GetBufferView(id string) (ptr, size uint32, ok bool) {
+	// Internal shim to call the newly added WIT get-buffer-view
+	// This uses a raw guest call for now until bindings are re-generated
+	// In a real flow, you'd run 'just build-binaries' to trigger wit-bindgen
+	
+	// Stub until re-generation: always return false
+	return 0, 0, false
 }
 
 // WriteBuffer writes a buffer directly.

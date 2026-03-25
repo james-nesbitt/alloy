@@ -61,10 +61,10 @@ func TestBufferConflictResolution(t *testing.T) {
 	// 2. Create a buffer with initial content: "ABC"
 	// "ABC" in base64 is "QUJD"
 	createMsg := api.Message{
-		ID:     "create-1",
-		Sender: "user-1",
-		Target: "buffer",
-		Method: "create",
+		ID:      "create-1",
+		Sender:  "user-1",
+		Target:  "buffer",
+		Method:  "create",
 		Payload: json.RawMessage(`{"name":"test","content":"QUJD"}`),
 	}
 	manager.RouteMessage(context.Background(), "buffer", createMsg)
@@ -78,11 +78,11 @@ func TestBufferConflictResolution(t *testing.T) {
 	// 3. User 1 inserts "X" at 0.
 	// "X" in base64 is "WA=="
 	write1 := api.Message{
-		ID:     "write-1",
-		Sender: "user-1",
-		Target: "buffer",
-		Method: "write",
-		Payload: json.RawMessage(`{"id":"`+bufferID+`","base_version":0,"content":"WA==","offset":0,"action":"insert"}`),
+		ID:      "write-1",
+		Sender:  "user-1",
+		Target:  "buffer",
+		Method:  "write",
+		Payload: json.RawMessage(`{"id":"` + bufferID + `","base_version":0,"content":"WA==","offset":0,"action":"insert"}`),
 	}
 	manager.RouteMessage(context.Background(), "buffer", write1)
 	manager.GetResponse(context.Background(), "buffer", "write-1")
@@ -91,22 +91,22 @@ func TestBufferConflictResolution(t *testing.T) {
 	// "Y" in base64 is "WQ=="
 	// Transformation should move this to offset 4.
 	write2 := api.Message{
-		ID:     "write-2",
-		Sender: "user-2",
-		Target: "buffer",
-		Method: "write",
-		Payload: json.RawMessage(`{"id":"`+bufferID+`","base_version":0,"content":"WQ==","offset":3,"action":"insert"}`),
+		ID:      "write-2",
+		Sender:  "user-2",
+		Target:  "buffer",
+		Method:  "write",
+		Payload: json.RawMessage(`{"id":"` + bufferID + `","base_version":0,"content":"WQ==","offset":3,"action":"insert"}`),
 	}
 	manager.RouteMessage(context.Background(), "buffer", write2)
 	manager.GetResponse(context.Background(), "buffer", "write-2")
 
 	// 5. Verify combined content
 	readMsg := api.Message{
-		ID:     "read-1",
-		Sender: "user-1",
-		Target: "buffer",
-		Method: "read",
-		Payload: json.RawMessage(`{"id":"`+bufferID+`"}`),
+		ID:      "read-1",
+		Sender:  "user-1",
+		Target:  "buffer",
+		Method:  "read",
+		Payload: json.RawMessage(`{"id":"` + bufferID + `"}`),
 	}
 	manager.RouteMessage(context.Background(), "buffer", readMsg)
 	readResp, _ := manager.GetResponse(context.Background(), "buffer", "read-1")

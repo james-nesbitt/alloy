@@ -15,14 +15,14 @@ type ParamInfo struct {
 }
 
 type CommandNode struct {
-	Key         string                 `json:"key"`
-	Description string                 `json:"description"`
-	Target      string                 `json:"target"`
-	Method      string                 `json:"method"`
+	Key         string                  `json:"key"`
+	Description string                  `json:"description"`
+	Target      string                  `json:"target"`
+	Method      string                  `json:"method"`
 	Children    map[string]*CommandNode `json:"children,omitempty"`
-	Annotation  string                 `json:"annotation,omitempty"`
-	Shortcut    string                 `json:"shortcut,omitempty"`
-	Params      []ParamInfo            `json:"params,omitempty"` // Structured parameters
+	Annotation  string                  `json:"annotation,omitempty"`
+	Shortcut    string                  `json:"shortcut,omitempty"`
+	Params      []ParamInfo             `json:"params,omitempty"` // Structured parameters
 }
 
 func parseParams(raw string) []ParamInfo {
@@ -35,11 +35,11 @@ func parseParams(raw string) []ParamInfo {
 		if p == "" {
 			continue
 		}
-		
+
 		info := ParamInfo{Type: "string", Required: false}
 		subparts := strings.Split(p, ":")
 		info.Name = subparts[0]
-		
+
 		for i := 1; i < len(subparts); i++ {
 			switch subparts[i] {
 			case "string", "int", "bool":
@@ -103,13 +103,13 @@ func BuildCommandTree(regs []api.Registration) *CommandNode {
 				}
 			}
 			targetNode := root.Children[r.ID]
-			
+
 			// Use the part after ':' if it's there (e.g. project:open -> open)
 			methodKey := cap.Method
 			if idx := strings.Index(methodKey, ":"); idx != -1 {
 				methodKey = methodKey[idx+1:]
 			}
-			
+
 			if _, ok := targetNode.Children[methodKey]; !ok {
 				targetNode.Children[methodKey] = &CommandNode{
 					Key:         methodKey,
@@ -149,16 +149,16 @@ func (n *CommandNode) Find(path []string) *CommandNode {
 
 // SearchItem is a flattened representation of a command for fuzzy searching.
 type SearchItem struct {
-	FullTitle   string      `json:"full_title"`   // e.g., "project open"
+	FullTitle   string      `json:"full_title"` // e.g., "project open"
 	Description string      `json:"description"`
 	Shortcut    string      `json:"shortcut,omitempty"`
 	Target      string      `json:"target"`
 	Method      string      `json:"method"`
-	Weight      int         `json:"weight"`       // Fuzzy match score
-	Frequency   int         `json:"frequency"`    // Usage count
-	Recency     int         `json:"recency"`      // Last use timestamp (offset)
-	Status      string      `json:"status"`       // "running", "crashed", etc.
-	Group       string      `json:"group,omitempty"` // For visual categorization
+	Weight      int         `json:"weight"`           // Fuzzy match score
+	Frequency   int         `json:"frequency"`        // Usage count
+	Recency     int         `json:"recency"`          // Last use timestamp (offset)
+	Status      string      `json:"status"`           // "running", "crashed", etc.
+	Group       string      `json:"group,omitempty"`  // For visual categorization
 	Params      []ParamInfo `json:"params,omitempty"` // Structured parameters
 }
 

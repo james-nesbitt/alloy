@@ -111,6 +111,11 @@ world alloy {
         write-buffer: func(id: string, content: list<u8>) -> bool;
         list-buffers: func() -> list<string>;
 
+        // High-performance Buffer Access (Zero-Copy candidate)
+        // Returns the start address and size of a host-managed shared memory region
+        // Note: In current wazero/WASM, this is a hint for host-side optimization
+        get-buffer-view: func(id: string) -> option<tuple<u32, u32>>;
+
         // Dashboard/Widget Management
         register-widget: func(w: widget);
         unregister-widget: func(id: string);

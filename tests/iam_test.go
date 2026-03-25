@@ -32,6 +32,7 @@ func TestIAMInterceptor(t *testing.T) {
 			"target": "target-plugin",
 		})
 		k.RouteMessage(noAuditCtx, api.Message{
+			Sender:  "kernel", // Kernel is admin, can set policies
 			Method:  "allow",
 			Target:  "iam",
 			Payload: payload,
@@ -59,6 +60,7 @@ func TestIAMInterceptor(t *testing.T) {
 			"target": "kernel",
 		})
 		k.RouteMessage(noAuditCtx, api.Message{
+			Sender:  "kernel", // Admin
 			Method:  "allow",
 			Target:  "iam",
 			Payload: payload,
@@ -90,6 +92,7 @@ func TestIAMInterceptor(t *testing.T) {
 			"target": "target-plugin",
 		})
 		k.RouteMessage(noAuditCtx, api.Message{
+			Sender:  "kernel", // Admin
 			Method:  "allow",
 			Target:  "iam",
 			Payload: payload,

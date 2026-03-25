@@ -144,7 +144,13 @@ func (s *Server) handleConn(netConn net.Conn) {
 	// Identity defaults to remote addr
 	clientID := netConn.RemoteAddr().String()
 
-	// If TLS, extract identity from certificate
+	// If Unix Domain Socket on Linux, extract OS identity
+	if peerID, ok := getFormattedPeerIdentity(netConn); ok {
+		clientID = peerID
+		s.logger.Info("peer credentials detected", "client_id", clientID)
+	}
+
+	// If TLS, extract identity from certificate (highest priority)
 	if tlsConn, ok := netConn.(*tls.Conn); ok {
 		if err := tlsConn.Handshake(); err != nil {
 			s.logger.Error("TLS handshake failed", "error", err)

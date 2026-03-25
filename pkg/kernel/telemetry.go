@@ -22,6 +22,7 @@ import (
 type Telemetry struct {
 	meter metric.Meter
 	tp    *sdktrace.TracerProvider
+	srv   *http.Server
 
 	msgCounter  metric.Int64Counter
 	errCounter  metric.Int64Counter
@@ -66,12 +67,14 @@ func initTelemetry(metricsAddr string) (*Telemetry, error) {
 	}
 
 	// Expose prometheus metrics
+	var srv *http.Server
 	if metricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		srv = &http.Server{Addr: metricsAddr, Handler: mux}
 		go func() {
-			mux := http.NewServeMux()
-			mux.Handle("/metrics", promhttp.Handler())
 			fmt.Printf("Telemetry: Metrics server listening on %s/metrics\n", metricsAddr)
-			if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Printf("Telemetry: Metrics server failed: %v", err)
 			}
 		}()
@@ -80,6 +83,7 @@ func initTelemetry(metricsAddr string) (*Telemetry, error) {
 	return &Telemetry{
 		meter:       meter,
 		tp:          tp,
+		srv:         srv,
 		msgCounter:  msgCounter,
 		errCounter:  errCounter,
 		pluginGauge: pluginGauge,
@@ -87,10 +91,24 @@ func initTelemetry(metricsAddr string) (*Telemetry, error) {
 }
 
 func (t *Telemetry) Shutdown(ctx context.Context) error {
-	if t == nil || t.tp == nil {
+	if t == nil {
 		return nil
 	}
-	return t.tp.Shutdown(ctx)
+	var errs []error
+	if t.srv != nil {
+		if err := t.srv.Shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if t.tp != nil {
+		if err := t.tp.Shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("telemetry shutdown errors: %v", errs)
+	}
+	return nil
 }
 
 func (t *Telemetry) RecordMessage(ctx context.Context, sender, target, method string) {

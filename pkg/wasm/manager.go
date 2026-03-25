@@ -213,6 +213,7 @@ func (m *Manager) Close(ctx context.Context) error {
 
 // StartMonitor starts a background monitor for plugin health.
 func (m *Manager) StartMonitor(ctx context.Context, interval time.Duration) {
+	// Use a dedicated goroutine that respects BOTH manager closure and system context
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -220,6 +221,7 @@ func (m *Manager) StartMonitor(ctx context.Context, interval time.Duration) {
 		for {
 			select {
 			case <-ctx.Done():
+				m.logger.Debug("stopping WASM monitor (manager context done)")
 				return
 			case <-ticker.C:
 				m.checkPluginsHealth()

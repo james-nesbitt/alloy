@@ -109,7 +109,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		reg := c.registry[msg.Sender]
 		reg.ID = msg.Sender
 		reg.Type = "plugin"
-		
+
 		// Add or update capability
 		found := false
 		for i, c := range reg.Capabilities {

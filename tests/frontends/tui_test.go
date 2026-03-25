@@ -21,8 +21,8 @@ func (m *MockClient) Send(target, method string, payload []byte) (api.Message, e
 }
 
 func TestTuiLeaderMode(t *testing.T) {
-	// Note: We need to import the Model and other types. 
-	// Since they are in the 'main' package of cmd/alloy-tui, 
+	// Note: We need to import the Model and other types.
+	// Since they are in the 'main' package of cmd/alloy-tui,
 	// we may need to use a different approach if they are not exported or in a different package.
 	// But I just exported them in the previous step.
 }

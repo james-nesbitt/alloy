@@ -27,7 +27,7 @@ func TestIAMEnforcement(t *testing.T) {
 		},
 	}
 
-	_, conn, collector, home := setupTestCore(t, "iam-test", manifest)
+	_, conn, collector, home := setupTestCoreSecure(t, "iam-test", manifest)
 	defer os.RemoveAll(home)
 	defer conn.Close()
 
@@ -46,8 +46,8 @@ func TestIAMEnforcement(t *testing.T) {
 	})
 
 	// We need to be authorized to SET a policy.
-	// We'll use 'admin-sim' as sender. 
-	
+	// We'll use 'admin-sim' as sender.
+
 	sendMsg(t, conn, api.Message{
 		ID:      "set-policy",
 		Sender:  "admin-sim",

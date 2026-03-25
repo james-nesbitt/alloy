@@ -29,6 +29,9 @@ func (m Model) View() string {
 	case tui.ModeDashboard:
 		modeStr = " DASHBOARD "
 		modeStyle = modeStyle.Background(lipgloss.Color("14"))
+	case tui.ModeInspector:
+		modeStr = " INSPECTOR "
+		modeStyle = modeStyle.Background(lipgloss.Color("1"))
 	case tui.ModeEdit:
 		modeStr = " EDIT "
 		modeStyle = modeStyle.Background(lipgloss.Color("2"))
@@ -249,7 +252,7 @@ func (m Model) View() string {
 			if i < m.formIdx {
 				val = m.formValues[i]
 			}
-			
+
 			prefix := "  "
 			if i == m.formIdx {
 				prefix = "> "
@@ -296,6 +299,10 @@ func (m Model) renderPaneContent(paneType int, width int, height int) string {
 		view := m.dashboardView()
 		m.width, m.height = oldW, oldH
 		return view
+	} else if paneType == tui.ModeInspector {
+		m.inspectorVp.Width = width
+		m.inspectorVp.Height = height
+		return m.inspectorVp.View()
 	}
 
 	m.viewport.Width = width

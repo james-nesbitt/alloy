@@ -23,6 +23,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - 3
+		m.inspectorVp.Width = msg.Width
+		m.inspectorVp.Height = msg.Height - 3
 		m.textarea.SetWidth(msg.Width)
 		m.commandInput.SetWidth(msg.Width)
 		if !m.ready {
@@ -151,6 +153,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.subscribe("dashboard:widget-registered"),
 					m.subscribe("dashboard:widget-updated"),
 					m.subscribe("dashboard:widget-unregistered"),
+					m.subscribe("system:trace"),
 					m.subscribe("component:registered"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true

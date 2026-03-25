@@ -9,10 +9,10 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-	"image"
-	"testing"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
+	"image"
+	"testing"
 )
 
 func TestDrawDashboard(t *testing.T) {

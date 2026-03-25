@@ -46,4 +46,5 @@ const (
 	ModeForm      = 4
 	ModeDashboard = 5
 	ModeEdit      = 6
+	ModeInspector = 7
 )

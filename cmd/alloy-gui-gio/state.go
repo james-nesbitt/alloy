@@ -16,12 +16,12 @@ import (
 )
 
 type formState struct {
-	title       string
-	params      []frontend.ParamInfo
-	editors     []widget.Editor
-	errors      []string
-	submit      widget.Clickable
-	cancel      widget.Clickable
+	title   string
+	params  []frontend.ParamInfo
+	editors []widget.Editor
+	errors  []string
+	submit  widget.Clickable
+	cancel  widget.Clickable
 }
 
 type guiState struct {

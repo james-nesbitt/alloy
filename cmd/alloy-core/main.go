@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
@@ -80,15 +79,16 @@ func main() {
 		logger.Error("failed to create Alloy kernel", "error", err)
 		os.Exit(1)
 	}
+	// Insecure flag controls RBAC enforcement
 	k.SetInsecure(*sf.Insecure)
 
 	// Create context for kernel shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Set up security/identity
+	// Set up security/identity (mTLS)
 	var tlsConfig *tls.Config
-	if !*sf.Insecure {
+	if !*sf.NoMTLS {
 		secDir := *sf.SecurityDir
 		if secDir == "" {
 			if home := os.Getenv("XDG_CONFIG_HOME"); home != "" {
@@ -108,10 +108,14 @@ func main() {
 		if tlsConfig != nil {
 			logger.Info("mTLS security enabled", "dir", secDir)
 		} else {
-			logger.Warn("mTLS initialization failed, falling back to insecure", "dir", secDir)
+			logger.Warn("mTLS initialization failed, falling back to plain communication", "dir", secDir)
 		}
 	} else {
-		logger.Warn("running in INSECURE mode")
+		logger.Warn("mTLS disabled - using plain communication")
+	}
+
+	if *sf.Insecure {
+		logger.Warn("RBAC enforcement disabled")
 	}
 
 	// Create and start IPC server BEFORE loading plugins so tests can connect while loading
@@ -182,9 +186,6 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Create health monitor
-	go healthMonitor(k, logger)
-
 	logger.Info("Alloy Core started", "data_dir", *dataDir)
 
 	// Wait for shutdown signal
@@ -238,20 +239,4 @@ func resolvePluginPath(manifestPath, pluginPath string) string {
 	}
 
 	return ""
-}
-
-// healthMonitor monitors the health of plugins.
-func healthMonitor(k *kernel.Kernel, logger *slog.Logger) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			metadata := k.GetPluginMetadata()
-			for id, md := range metadata {
-				logger.Debug("plugin status", "id", id, "capabilities", len(md.Capabilities))
-			}
-		}
-	}
 }

@@ -13,8 +13,8 @@ import (
 
 // MockClient is a mock of the alloy frontend client
 type MockClient struct {
-	lastTarget string
-	lastMethod string
+	lastTarget  string
+	lastMethod  string
 	lastPayload []byte
 }
 
@@ -26,15 +26,15 @@ func (m *MockClient) Send(ctx context.Context, target, method string, payload []
 }
 
 func (m *MockClient) OnMessage(h func(api.Message)) {}
-func (m *MockClient) Close() error { return nil }
-func (m *MockClient) Name() string { return "mock" }
-func (m *MockClient) Actor() string { return "mock" }
-func (m *MockClient) Messages() []api.Message { return nil }
+func (m *MockClient) Close() error                  { return nil }
+func (m *MockClient) Name() string                  { return "mock" }
+func (m *MockClient) Actor() string                 { return "mock" }
+func (m *MockClient) Messages() []api.Message       { return nil }
 
 func TestWebFrontendAPI(t *testing.T) {
 	mock := &MockClient{}
 	wf := &WebFrontend{
-		client: mock,
+		client:     mock,
 		eventChans: make([]chan api.Message, 0),
 	}
 
@@ -74,7 +74,7 @@ func TestWebFrontendAPI(t *testing.T) {
 	t.Run("API Events", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/events", nil)
 		w := httptest.NewRecorder()
-		
+
 		// Use a context that cancels after 50ms to end the SSE loop
 		ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
 		defer cancel()
@@ -82,7 +82,7 @@ func TestWebFrontendAPI(t *testing.T) {
 
 		// We need a custom ResponseWriter that flushes to satisfy handleEvents
 		// httptest.ResponseRecorder implements Flusher as well.
-		
+
 		// Actually, handleEvents blocks until context done or message.
 		// Since we have a keepalive timer at 15s, it will block for 50ms and return.
 		wf.handleEvents(w, req)
