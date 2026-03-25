@@ -34,18 +34,25 @@ type WebFrontend struct {
 func main() {
 	port := flag.Int("port", 8080, "HTTP port for the web frontend")
 	socket := flag.String("socket", "", "Path to the Alloy kernel socket")
+	actor := flag.String("actor", "alloy-web", "Actor identity")
 	insecure := flag.Bool("insecure", true, "Disable mTLS and use insecure connection")
+	securityDir := flag.String("security-dir", "", "Path to the security/identity directory")
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
 	if *socket == "" {
 		*socket = filepath.Join(frontend.GetAlloyRuntimeDir(), "kernel.sock")
 	}
 
-	client, err := frontend.NewClient("alloy-web", *socket, *insecure)
+	client, err := frontend.NewClientWithActorAndSecurity("alloy-web", *actor, *socket, *insecure, *securityDir)
 	if err != nil {
 		log.Fatalf("Failed to connect to kernel: %v", err)
 	}
 	defer client.Close()
+
+	if *debug {
+		log.Printf("Debug logging enabled")
+	}
 
 	wf := &WebFrontend{
 		client:     client,

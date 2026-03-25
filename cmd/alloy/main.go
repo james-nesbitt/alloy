@@ -44,6 +44,8 @@ func main() {
 		launchFrontend("alloy-tui", args)
 	case "gui":
 		launchFrontend("alloy-gui", args)
+	case "web":
+		launchFrontend("alloy-web", args)
 	case "version":
 		fmt.Println("Alloy Tool v0.1.0")
 	case "help":
@@ -66,6 +68,7 @@ func usage() {
 	fmt.Println("  alloy core [options]          Launch a standalone core backend")
 	fmt.Println("  alloy tui [options]           Launch TUI frontend (optionally with dedicated core)")
 	fmt.Println("  alloy gui [options]           Launch GUI frontend (optionally with dedicated core)")
+	fmt.Println("  alloy web [options]           Launch Web frontend (optionally with dedicated core)")
 	fmt.Println("  alloy version                 Show version info")
 	fmt.Println("\nCommon Options:")
 	fmt.Println("  --data-dir DIR                Plugin data directory (default: ./data)")

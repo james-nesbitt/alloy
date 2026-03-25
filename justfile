@@ -131,16 +131,16 @@ run-core *args: build-core
     {{LIBEXEC_DIR}}/alloy-core {{args}}
 
 # Run TUI Frontend
-run-tui *args: build-tui
-    {{BIN_DIR}}/alloy-tui {{args}}
+run-tui *args: build-alloy build-core build-tui
+    {{BIN_DIR}}/alloy tui {{args}}
 
 # Run Native GUI
-run-gui *args: build-gui
-    {{BIN_DIR}}/alloy-gui {{args}}
+run-gui *args: build-alloy build-core build-gui
+    {{BIN_DIR}}/alloy gui {{args}}
 
 # Run Web Frontend (Host Proxy)
-run-web *args: build-web
-    {{BIN_DIR}}/alloy-web {{args}}
+run-web *args: build-alloy build-core build-web
+    {{BIN_DIR}}/alloy web {{args}}
 
 # --- TESTING ---
 
