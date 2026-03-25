@@ -6,7 +6,6 @@ replace github.com/james-nesbitt/alloy/build/gen/bindings/guest => ../../../buil
 
 replace github.com/james-nesbitt/alloy/pkg/wasm/guest => ../../../pkg/wasm/guest
 
-require (
-	github.com/james-nesbitt/alloy/build/gen/bindings/guest v0.0.0-00010101000000-000000000000
-	github.com/james-nesbitt/alloy/pkg/wasm/guest v0.0.0-00010101000000-000000000000
-)
+require github.com/james-nesbitt/alloy/pkg/wasm/guest v0.0.0-00010101000000-000000000000
+
+require github.com/james-nesbitt/alloy/build/gen/bindings/guest v0.0.0-00010101000000-000000000000 // indirect

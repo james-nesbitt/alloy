@@ -10,7 +10,7 @@ import (
 func main() {
 	plugin := guest.NewPlugin("health")
 
-	plugin.RegisterMethod("status", "Get the health status of this WASM instance", func(msg guest.Message) *guest.Message {
+	plugin.RegisterMethod("status", "Get the health status of this WASM instance", func(msg guest.AlloyMessage) *guest.AlloyMessage {
 		status := map[string]string{
 			"status": "healthy",
 			"uptime": "wasm-monitored",

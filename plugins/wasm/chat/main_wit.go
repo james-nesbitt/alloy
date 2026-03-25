@@ -3,7 +3,6 @@
 package main
 
 import (
-	. "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
 	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
