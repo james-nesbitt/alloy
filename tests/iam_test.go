@@ -26,6 +26,18 @@ func TestIAMInterceptor(t *testing.T) {
 	noAuditCtx := context.WithValue(context.Background(), "alloy.no_audit", true)
 
 	t.Run("DefaultAllow", func(t *testing.T) {
+		// Allow random-sender to talk to target-plugin
+		payload, _ := json.Marshal(map[string]string{
+			"sender": "random-sender",
+			"target": "target-plugin",
+		})
+		k.RouteMessage(noAuditCtx, api.Message{
+			Method:  "allow",
+			Target:  "iam",
+			Payload: payload,
+		})
+		time.Sleep(50 * time.Millisecond)
+
 		k.RouteMessage(noAuditCtx, api.Message{
 			ID:     "msg-allow",
 			Sender: "random-sender",

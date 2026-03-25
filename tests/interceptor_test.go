@@ -18,6 +18,10 @@ type mockInterceptor struct {
 }
 
 func (m *mockInterceptor) PreRoute(ctx context.Context, msg api.Message) (api.Message, bool, error) {
+	if msg.Target != "target-plugin" {
+		return msg, true, nil
+	}
+
 	m.count.Add(1)
 	if m.deny {
 		return msg, false, nil
@@ -42,6 +46,7 @@ func TestInterceptors(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	state := storage.NewMemoryStateStore()
 	k, _ := kernel.New(logger, state, "", "")
+	k.SetInsecure(true)
 
 	interceptor := &mockInterceptor{}
 	target := &targetPlugin{received: make(chan api.Message, 1)}

@@ -25,9 +25,6 @@ func TestApplicationPlugins(t *testing.T) {
 
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "kv", "type": "native"},
-			{"id": "logger", "type": "native"},
-			{"id": "events", "type": "native"},
 			{
 				"id":           "buffer",
 				"type":         "wasm",

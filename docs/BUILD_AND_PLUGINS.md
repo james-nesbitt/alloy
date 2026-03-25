@@ -36,16 +36,14 @@ After building, the `./build/` directory will contain:
 ```text
 build/
 ├── bin/             # Host binaries
-│   ├── alloy-core   # Main backend
+│   ├── alloy-core   # Main backend (Hybrid Kernel with Integrated IAM, KV, Events)
 │   ├── alloy-tui    # Terminal interface
-│   ├── alloy    # Command line tool
+│   ├── alloy        # Command line tool
 │   └── alloy-gui    # Gio-based native GUI
-└── wasm/            # Compiled WASM plugins
+└── wasm/            # Compiled WASM application plugins
     ├── ai.wasm
     ├── buffer.wasm
     ├── chat.wasm
-    ├── health.wasm
-    ├── iam.wasm
     ├── project.wasm
     ├── secrets.wasm
     └── tasks.wasm
@@ -53,10 +51,12 @@ build/
 
 ## 3. Plugin Strategy
 
-Alloy plugins are built into independent WebAssembly binaries using the `wasip1` target. These are decoupled from the core lifecycle and can be built separately.
+Alloy uses a **Hybrid Kernel** strategy:
+- **Integrated Services**: Core infrastructure (IAM, KV, Events, Telemetry) is built directly into the `alloy-core` binary in Go. This ensures zero-latency performance and guaranteed system integrity.
+- **WASM Plugins**: Application-level logic is built into independent WebAssembly binaries using the `wasip1` target. These are decoupled from the core lifecycle and provide a language-agnostic extensibility layer.
 
-### 3.1 The Plugin Manager
-The Alloy core discovers plugins at runtime. When starting the core, it scans specified directories for `.wasm` files.
+### 3.1 Plugin Discovery
+The Alloy core discovers WASM plugins at runtime by scanning directories specified via the `--wasm-plugins` flag or the workspace's `provision.json` manifest.
 
 ### 3.2 Loading Plugins
 You can specify plugin directories via command-line flags when running `alloy-core`:

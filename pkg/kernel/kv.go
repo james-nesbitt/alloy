@@ -1,4 +1,4 @@
-package native
+package kernel
 
 import (
 	"context"

@@ -22,7 +22,7 @@ func TestDynamicProvisioning(t *testing.T) {
 	provisionPath := filepath.Join(homeDir, "provision.json")
 	manifest := map[string]any{
 		"plugins": []map[string]any{
-			{"id": "kv", "type": "native"},
+			// Empty list; should still have core services like 'kv' and 'events'
 		},
 	}
 	manifestData, _ := json.Marshal(manifest)
