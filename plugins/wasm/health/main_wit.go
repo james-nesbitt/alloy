@@ -10,7 +10,7 @@ import (
 func main() {
 	plugin := guest.NewPlugin("health")
 
-	plugin.RegisterMethod("status", "Get the health status of this WASM instance", func(msg guest.Message) *guest.Message {
+	plugin.RegisterMethod("status", "Get the health status of this WASM instance", func(msg guest.AlloyMessage) *guest.AlloyMessage {
 		status := map[string]string{
 			"status": "healthy",
 			"uptime": "wasm-monitored",
@@ -18,11 +18,11 @@ func main() {
 		}
 
 		payload, _ := json.Marshal(status)
-		return &guest.Message{
-			ID:      msg.ID + "-resp",
+		return &guest.AlloyMessage{
+			Id:      msg.Id + "-resp",
 			Method:  msg.Method,
 			Payload: payload,
-			Target:  msg.Sender,
+			Target:  msg.Target,
 		}
 	})
 

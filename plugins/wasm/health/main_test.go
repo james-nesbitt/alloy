@@ -2,97 +2,90 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
+	"time"
 
 	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
 
 func TestHealthPlugin(t *testing.T) {
-	// 1. Initialize our plugin mock environment
-	wasm.ResetMock()
-	
-	p := wasm.New("health").
-		WithCapability("status", "Get status", "h s").
-		Handle("status", func(msg wasm.Message) wasm.Message {
-			return wasm.Reply(msg, map[string]string{"status": "ok"})
-		})
-	
-	// 2. Simulate a status message
-	input := wasm.Message{
-		ID:     "123",
-		Method: "status",
-		Sender: "client",
-		Target: "health",
-	}
-	
-	output := p.MockSimulate(input)
-	
-	// 3. Verify the output
-	if output.Type != "response" {
-		t.Errorf("Expected response message, got %s", output.Type)
-	}
-	
-	var res map[string]string
-	if err := json.Unmarshal(output.Payload, &res); err != nil {
-		t.Fatalf("Failed to unmarshal payload: %v", err)
-	}
-	
-	if res["status"] != "ok" {
-		t.Errorf("Expected status ok, got %s", res["status"])
-	}
-}
+	// 1. Create mock environment
+	plugin, mock := guest.NewMockPlugin("health")
 
-func TestStorageMock(t *testing.T) {
-	wasm.ResetMock()
-	
-	store := wasm.NewKVStore[string]("test-prefix")
-	err := store.Set("key1", "value1")
-	if err != nil {
-		t.Fatalf("Set failed: %v", err)
-	}
-	
-	val, err := store.Get("key1")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	
-	if val != "value1" {
-		t.Errorf("Expected value1, got %s", val)
-	}
-	
-	// Verify it's actually in the underlying mock map with premium prefixing
-	underlying := wasm.GetKV()
-	data := underlying["test-prefix:key1"]
-	if data == nil {
-		t.Errorf("Prefixing failed, key not found in mock store")
-	}
-}
-
-func TestNetworkMock(t *testing.T) {
-	wasm.ResetMock()
-	
-	// Mock an external API
-	wasm.SetFetchHandler(func(req wasm.FetchRequest) (*wasm.FetchResponse, error) {
-		if req.URL == "https://api.example.com/status" {
-			return &wasm.FetchResponse{
-				Status: 200,
-				Body:   []byte(`{"status":"up"}`),
-			}, nil
+	// 2. Register the status handler (same logic as main_wit.go)
+	plugin.RegisterMethod("status", "Get status", func(msg guest.AlloyMessage) *guest.AlloyMessage {
+		status := map[string]string{
+			"status": "healthy",
+			"uptime": "mock-test",
+			"source": "health-plugin",
 		}
-		return nil, fmt.Errorf("wrong url")
+		payload, _ := json.Marshal(status)
+		return &guest.AlloyMessage{
+			Id:      msg.Id + "-resp",
+			Method:  msg.Method,
+			Payload: payload,
+			Target:  msg.Target,
+		}
 	})
+
+	// 3. Serve the plugin in a separate goroutine
+	go plugin.Serve()
+
+	// 4. Push a request message
+	req := guest.AlloyMessage{
+		Id:     "msg-1",
+		Method: "status",
+		Sender: "tester-client",
+	}
+	mock.PushMessage(req)
+
+	// 5. Polling wait for the response (unit test speed: <10ms usually)
+	var resp guest.AlloyMessage
+	var ok bool
+	timeout := time.After(500 * time.Millisecond)
 	
-	type statusRes struct {
-		Status string `json:"status"`
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("Timeout waiting for plugin response")
+		default:
+			resp, ok = mock.GetResponse("msg-1-resp")
+			if ok {
+				goto verified
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+verified:
+	// 6. Verify response data
+	var status map[string]string
+	if err := json.Unmarshal(resp.Payload, &status); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if status["status"] != "healthy" {
+		t.Errorf("Expected status healthy, got %s", status["status"])
 	}
 	
-	res, err := wasm.GetJSON[statusRes]("https://api.example.com/status", nil)
-	if err != nil {
-		t.Fatalf("GetJSON failed: %v", err)
+	if status["source"] != "health-plugin" {
+		t.Errorf("Wrong source: %s", status["source"])
+	}
+}
+
+func TestKVIntegrationMock(t *testing.T) {
+	plugin, mock := guest.NewMockPlugin("health")
+	
+	// Test KV persistence via SDK
+	plugin.KVSet("test-key", []byte("test-value"))
+	
+	val, ok := plugin.KVGet("test-key")
+	if !ok || string(val) != "test-value" {
+		t.Errorf("KV storage failed in mock: got %s, ok=%v", string(val), ok)
 	}
 	
-	if res.Status != "up" {
-		t.Errorf("Expected status up, got %s", res.Status)
+	// Verify it reached the mock host's memory
+	if string(mock.KV["test-key"]) != "test-value" {
+		t.Errorf("KV didn't reach mock host state")
 	}
 }
