@@ -27,6 +27,9 @@ func (m *MockClient) Send(ctx context.Context, target, method string, payload []
 
 func (m *MockClient) OnMessage(h func(api.Message)) {}
 func (m *MockClient) Close() error { return nil }
+func (m *MockClient) Name() string { return "mock" }
+func (m *MockClient) Actor() string { return "mock" }
+func (m *MockClient) Messages() []api.Message { return nil }
 
 func TestWebFrontendAPI(t *testing.T) {
 	mock := &MockClient{}

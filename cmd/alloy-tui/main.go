@@ -15,33 +15,22 @@ import (
 func main() {
 	name := flag.String("name", "alloy-tui", "Name of the TUI component")
 	actor := flag.String("actor", "", "Actor identity (defaults to name)")
-	socket := flag.String("socket", frontend.GetAlloyRuntimeDir()+"/default.sock", "Socket address")
+	socket := flag.String("socket", "", "Socket address (defaults to path in runtime dir)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
 
 	cmdutil.HandleSecurityError(sf.Validate())
+	logger := cmdutil.SetupLogger(*debug)
 
-	// Set up logging
-	logLevel := slog.LevelInfo
-	if *debug {
-		logLevel = slog.LevelDebug
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: logLevel,
-	}))
-
-	if *actor == "" {
-		*actor = *name
-	}
-
-	msgCh := make(chan api.Message, 100)
-	client, err := frontend.NewClientWithActorAndSecurity(*name, *actor, *socket, *sf.Insecure, *sf.SecurityDir)
+	client, err := cmdutil.InitClient(*name, *actor, *socket, sf)
 	if err != nil {
 		fmt.Printf("Failed to connect: %v\n", err)
 		os.Exit(1)
 	}
+	defer client.Close()
 
+	msgCh := make(chan api.Message, 100)
 	client.OnMessage(func(msg api.Message) {
 		logger.Debug("received message", "sender", msg.Sender, "method", msg.Method)
 		msgCh <- msg

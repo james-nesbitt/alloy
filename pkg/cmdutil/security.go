@@ -3,7 +3,10 @@ package cmdutil
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
 
 // SecurityFlags represents the common security-related command line flags.
@@ -34,4 +37,31 @@ func HandleSecurityError(err error) {
 		fmt.Fprintf(os.Stderr, "Security Configuration Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// SetupLogger initializes a global slog logger with the given level.
+func SetupLogger(debug bool) *slog.Logger {
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: level,
+	}))
+	slog.SetDefault(logger)
+	return logger
+}
+
+// InitClient is a helper to initialize a standard Alloy frontend client from flags.
+func InitClient(name, actor, socket string, sf SecurityFlags) (*frontend.Client, error) {
+	if socket == "" {
+		socket = fmt.Sprintf("%s/default.sock", frontend.GetAlloyRuntimeDir())
+	}
+
+	if actor == "" {
+		actor = name
+	}
+
+	return frontend.NewClientWithActorAndSecurity(name, actor, socket, *sf.Insecure, *sf.SecurityDir)
 }
