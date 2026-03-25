@@ -1,100 +1,44 @@
-# Alloy Build and Plugin Guidelines
+# Alloy Build & Plugin Guide
 
-Alloy is a hybrid system that leverages both Native Go code for infrastructure and WebAssembly (WASM) for application logic. This document outlines how to build the core and its plugins.
+This document provides a concise reference for building and managing the Alloy hybrid system.
 
-## 1. Prerequisites
+---
 
-Before building Alloy, ensure you have the following tools installed:
+## 🚀 Prerequisites
+- **Go 1.25+**
+- **TinyGo 0.35+**
+- **wit-bindgen-cli 0.36.0**
+- **Just** (Command runner)
 
-1. **Go 1.25+** - [go.dev](https://go.dev/dl/)
-2. **TinyGo 0.33+** - [tinygo.org](https://tinygo.org/getting-started/install/)
-3. **wit-bindgen** - `cargo install wit-bindgen-cli`
-4. **Just** - `cargo install just` (optional, but highly recommended)
+## 🛠 Build Commands (`just`)
 
-## 2. Build Process
+| Command | Action |
+|---------|--------|
+| `just build-all` | Full build (Core + Plugins + Frontends) |
+| `just build-core` | Build the Go backend kernel |
+| `just build-plugins` | Build all WASM plugins |
+| `just generate` | Refresh WIT bindings |
+| `just test` | Run full integration suite |
+| `just setup-dev` | Configure local `go.work` and module replacements |
 
-Alloy uses a `justfile` (via [just](https://github.com/casey/just)) to manage its build process.
+## 📁 Build Output (`./build/dist/`)
+Alloy follows a standard FHS-like layout for builds:
+- `bin/alloy`: Unified CLI entry point.
+- `bin/alloy-tui`: Terminal UI client.
+- `libexec/alloy/alloy-core`: Main backend kernel.
+- `lib/alloy/plugins/*.wasm`: Compiled application logic.
 
-### 2.1 Standard Build Targets
+## 🔌 Plugin Architecture
+Alloy uses a **Pragmatic Hybrid Kernel**:
+- **Native Go (Kernel)**: High-performance infrastructure (IAM, KV, Events, Telemetry).
+- **WASM (Plugins)**: Isolated application logic (AI, Chat, Buffer, Projects).
 
-| Target | Description | Command |
-|--------|-------------|---------|
-| `build-all` | Build everything (Core, Plugins, GUIs, CLI) | `just build-all` |
-| `build-core` | Build the Alloy Core (Backend) | `just build-core` |
-| `build-plugins`| Build all WASM plugins | `just build-plugins` |
-| `build-binaries`| Build all host binaries (Core, TUI, GUI, CLI) | `just build-binaries` |
-| `build-plugin NAME` | Build a single plugin (e.g., `health`) | `just build-plugin health` |
-| `generate` | Regenerate WIT bindings | `just generate` |
-| `setup-dev` | Configure Go work and module replacements | `just setup-dev` |
-| `install-web-deps` | Install JS dependencies for web testing | `just install-web-deps` |
-| `test-web` | Run Go and JS/UX tests for the web frontend | `just test-web` |
+### Strategy & Discovery
+1. **Directory-based**: The kernel scans `--wasm-plugins` or uses a `provision.json` manifest.
+2. **Async Loading**: Plugins are compiled by `wazero` in the background. Use the **Discovery Polling Pattern** in tests to wait for a plugin to reach `Running` status.
+3. **Isolation**: Each plugin is sandboxed with specific memory and capability (WASI) limits.
 
-### 2.2 Output Structure
-
-After building, the `./build/` directory will contain:
-
-```text
-build/
-├── bin/             # Host binaries
-│   ├── alloy-core   # Main backend (Hybrid Kernel with Integrated IAM, KV, Events)
-│   ├── alloy-tui    # Terminal interface
-│   ├── alloy        # Command line tool
-│   └── alloy-gui    # Gio-based native GUI
-└── wasm/            # Compiled WASM application plugins
-    ├── ai.wasm
-    ├── buffer.wasm
-    ├── chat.wasm
-    ├── project.wasm
-    ├── secrets.wasm
-    └── tasks.wasm
-```
-
-## 3. Plugin Strategy
-
-Alloy uses a **Hybrid Kernel** strategy:
-- **Integrated Services**: Core infrastructure (IAM, KV, Events, Telemetry) is built directly into the `alloy-core` binary in Go. This ensures zero-latency performance and guaranteed system integrity.
-- **WASM Plugins**: Application-level logic is built into independent WebAssembly binaries using the `wasip1` target. These are decoupled from the core lifecycle and provide a language-agnostic extensibility layer.
-
-### 3.1 Plugin Discovery
-The Alloy core discovers WASM plugins at runtime by scanning directories specified via the `--wasm-plugins` flag or the workspace's `provision.json` manifest.
-
-### 3.2 Loading Plugins
-You can specify plugin directories via command-line flags when running `alloy-core`:
-```bash
-./build/bin/alloy-core --data-dir ./data --provision provision.json
-```
-
-### 3.3 Asynchronous Loading
-WASM compilation (utilizing the `wazero` runtime) is performed in the background. A plugin becomes available once its code is compiled and it successfully executes its initialization routines via the WIT `alloy-init` function.
-
-## 4. Development & Testing
-
-### 4.1 Development Setup
-If you are developing new plugins or modifying the SDK, run:
-```bash
-just setup-dev
-```
-This script automatically regenerates the `go.work` file and configures the necessary `replace` directives in the plugin `go.mod` files to point to your local code instead of GitHub URI references.
-
-### 4.2 Running Tests
-To run the full test suite, including WIT integration tests:
-```bash
-just test
-```
-To run only WASM-specific implementation tests:
-```bash
-just test-wasm
-```
-
-### 4.3 Testing Constraints
-Due to the compilation overhead of large WASM modules, tests involving plugins should account for significant startup latency. Use the **Discovery Polling Pattern** instead of fixed sleeps:
-1. Connect to the core.
-2. Periodically check plugin availability via the kernel's metadata registry.
-3. Proceed once the plugin status is marked as `Running`.
-
-## 5. Troubleshooting WASM Builds
-
-If TinyGo fails to build because of a missing `wasm-opt`:
-1. Alloy provides a mechanism to download `binaryen` into `./build/tmp/bin` automatically if needed.
-2. The `scripts/build-plugin.sh` looks for `./build/tmp/bin/wasm-opt` and uses it for final optimization passes.
-3. If you still encounter issues, ensure `WASMOPT` is correctly set in your environment or follow the instructions in `scripts/build-plugin.sh`.
+## 🛠 Troubleshooting WASM
+If `wasm-opt` is missing during `just build-plugins`:
+- The build script attempts to download `binaryen` into `./build/tmp/bin`.
+- Ensure `tinygo` is correctly in your `$PATH`.
