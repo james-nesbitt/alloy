@@ -58,6 +58,14 @@ type Kernel struct {
 	commands *CommandManager
 	health   *HealthManager
 	loggerSvc *LoggerManager
+	kv        *KVManager
+	storageSvc *StorageManager
+	network   *NetworkManager
+	cache     *CacheManager
+	doc       *DocStore
+
+	// security configuration
+	insecure bool
 
 	// capability management
 	capabilityMap map[string]string // capability name -> plugin ID
@@ -109,6 +117,21 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	k.health = NewHealthManager(logger)
 	k.RegisterPlugin(k.health)
 
+	k.kv = NewKVManager(storage)
+	k.RegisterPlugin(k.kv)
+
+	k.storageSvc = NewStorageManager()
+	k.RegisterPlugin(k.storageSvc)
+
+	k.network = NewNetworkManager()
+	k.RegisterPlugin(k.network)
+
+	k.cache = NewCacheManager()
+	k.RegisterPlugin(k.cache)
+
+	k.doc = NewDocStore()
+	k.RegisterPlugin(k.doc)
+
 	// Integrated Logger (Auditing)
 	auditDir := storage.BaseDir()
 	if auditDir != "" {
@@ -137,6 +160,14 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	k.wasmManager.StartMonitor(k.ctx, 30*time.Second)
 
 	return k, nil
+}
+
+// SetInsecure disables security enforcement (RBAC, mTLS, etc.) in the kernel.
+func (k *Kernel) SetInsecure(insecure bool) {
+	k.insecure = insecure
+	if insecure {
+		k.logger.Warn("running in INSECURE mode - RBAC enforcement disabled")
+	}
 }
 
 // Start initializes the kernel services.
@@ -189,29 +220,31 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	// 1. Core Interception (RBAC & Integrated Interceptors)
 	if ctx.Value(skipInterceptorsKey) == nil {
 		// RBAC Check via built-in IdentityManager
-		actor := msg.Actor
-		if actor == "" {
-			actor = msg.Sender
-		}
+		if !k.insecure {
+			actor := msg.Actor
+			if actor == "" {
+				actor = msg.Sender
+			}
 
-		// Security Check
-		if msg.Sender != "system" && msg.Sender != "kernel" && msg.Sender != "iam" &&
-			msg.Target != "iam" && msg.Type != api.TypeResponse {
-			if !k.iam.Authorize(actor, msg.Target, msg.Method) {
-				k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target)
-				k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
-				span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
+			// Security Check
+			if msg.Sender != "system" && msg.Sender != "kernel" && msg.Sender != "iam" &&
+				msg.Target != "iam" && msg.Type != api.TypeResponse {
+				if !k.iam.Authorize(actor, msg.Target, msg.Method) {
+					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target)
+					k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
+					span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
 
-				// Send error response back if request
-				k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-					ID:        msg.ID + "-resp",
-					Type:      api.TypeResponse,
-					Sender:    "kernel",
-					Target:    msg.Sender,
-					Payload:   []byte(`{"error":"unauthorized"}`),
-					Timestamp: time.Now().Unix(),
-				})
-				return
+					// Send error response back if request
+					k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
+						ID:        msg.ID + "-resp",
+						Type:      api.TypeResponse,
+						Sender:    "kernel",
+						Target:    msg.Sender,
+						Payload:   []byte(`{"error":"access denied"}`),
+						Timestamp: time.Now().Unix(),
+					})
+					return
+				}
 			}
 		}
 
@@ -464,7 +497,8 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 
 	// Skip re-registration for core plugins
 	if existing, ok := k.plugins[id]; ok && existing != nil {
-		if id == "events" || id == "command-manager" || id == "wasm-manager" || id == "iam" {
+		switch id {
+		case "events", "command-manager", "wasm-manager", "iam", "health", "logger", "kv", "storage", "network", "cache", "doc":
 			k.mu.Unlock()
 			return
 		}
@@ -659,6 +693,97 @@ func (k *Kernel) handleCommandManagerMessage(ctx context.Context, msg api.Messag
 			}
 		}
 	}
+}
+
+// Provisioning
+
+type PluginDef struct {
+	ID           string           `json:"id"`
+	Type         string           `json:"type"` // "wasm" (native is now built-in or handled differently)
+	Path         string           `json:"path,omitempty"`
+	MaxMemoryMB  uint32           `json:"max_memory_mb,omitempty"`
+	MsgPerSecond int              `json:"msg_per_second,omitempty"`
+	LoadTime     api.PluginLoadTime `json:"load_time,omitempty"`
+	Capabilities []api.Capability `json:"capabilities,omitempty"`
+}
+
+func (k *Kernel) Provision(plugins []PluginDef) error {
+	for _, p := range plugins {
+		if p.Type == "wasm" {
+			if p.LoadTime == api.LoadTimeLazy {
+				k.RegisterMetadata(api.PluginMetadata{
+					ID:           p.ID,
+					LoadTime:     api.LoadTimeLazy,
+					Capabilities: p.Capabilities,
+				}, &wasmLoader{
+					k:            k,
+					pluginID:     p.ID,
+					path:         p.Path,
+					logger:       k.logger,
+					maxMemoryMB:  p.MaxMemoryMB,
+					msgPerSecond: p.MsgPerSecond,
+					capabilities: p.Capabilities,
+				})
+			} else {
+				// Immediate load
+				wasmBytes, err := os.ReadFile(p.Path)
+				if err != nil {
+					k.logger.Error("failed to read plugin WASM for boot-load", "id", p.ID, "path", p.Path, "error", err)
+					continue
+				}
+				if err := k.RegisterWASMPluginAtScale(p.ID, wasmBytes, p.MaxMemoryMB, p.MsgPerSecond, p.Capabilities); err != nil {
+					k.logger.Error("failed to register boot-loaded plugin", "id", p.ID, "error", err)
+				}
+			}
+		} else if p.Type == "native" {
+			// Check if it's already a built-in core service
+			if _, ok := k.plugins[p.ID]; ok {
+				k.logger.Debug("plugin already integrated as core service", "id", p.ID)
+				continue
+			}
+			k.logger.Warn("native plugin type is deprecated; core services are now built-in", "id", p.ID)
+		}
+	}
+	return nil
+}
+
+// wasmLoader implements the api.PluginLoader interface for lazy-loading WASM plugins.
+type wasmLoader struct {
+	k            *Kernel
+	pluginID     string
+	path         string
+	logger       *slog.Logger
+	maxMemoryMB  uint32
+	msgPerSecond int
+	capabilities []api.Capability
+}
+
+func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, error) {
+	l.logger.Info("lazy-loading plugin", "id", id, "path", l.path)
+
+	wasmBytes, err := os.ReadFile(l.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read lazy-loaded WASM: %w", err)
+	}
+
+	// Defaults
+	if l.maxMemoryMB == 0 {
+		l.maxMemoryMB = 128
+	}
+	if l.msgPerSecond == 0 {
+		l.msgPerSecond = 1000
+	}
+
+	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities); err != nil {
+		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
+	}
+
+	p, ok := l.k.GetPlugin(id)
+	if !ok {
+		return nil, fmt.Errorf("plugin %s registered but could not be retrieved", id)
+	}
+
+	return p, nil
 }
 
 // WIT/WASM helpers

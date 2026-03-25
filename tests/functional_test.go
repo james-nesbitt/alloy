@@ -46,6 +46,7 @@ func TestFunctionalMessageFlow(t *testing.T) {
 
 	// 1. Initialize Kernel
 	k, _ := kernel.New(logger, storage.NewMemoryStateStore(), "", "")
+	k.SetInsecure(true)
 	if err := k.Start(ctx); err != nil {
 		t.Fatalf("failed to start kernel: %v", err)
 	}

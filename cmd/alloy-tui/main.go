@@ -3,13 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
-	"github.com/james-nesbitt/alloy/pkg/frontend"
 )
 
 func main() {

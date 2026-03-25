@@ -1,7 +1,5 @@
 {
   "plugins": [
-    {"id": "events", "type": "native"},
-    {"id": "kv", "type": "native"},
     {"id": "chat", "type": "wasm", "path": "build/dist/usr/lib/alloy/plugins/chat.wasm"},
     {"id": "buffer", "type": "wasm", "path": "build/dist/usr/lib/alloy/plugins/buffer.wasm"}
   ]

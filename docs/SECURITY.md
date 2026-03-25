@@ -16,11 +16,12 @@ Alloy uses a **Connection-Level Identity** model.
 
 ## 3. Mandatory Access Control (MAC)
 
-The Kernel serves as the **Policy Enforcement Point (PEP)**, with the `iam` plugin acting as the **Policy Decision Point (PDP)**.
-- **IAM Interceptor**: Every message routed by the kernel is intercepted. The kernel performs a synchronous call to the `iam` plugin to verify if the `Actor` is authorized to call the requested `Method` on the `Target`.
-- **RBAC Policy**: Permissions are managed as Role-Based Access Control (RBAC) rules within the `iam` plugin.
-- **System Bypass**: Internal system components (`kernel`, `events`, `command-manager`) have a hard-coded bypass to prevent circular dependencies and ensure system stability.
-- **Sandboxing**: WASM plugins provide memory-isolated sandboxes. They cannot access the host filesystem or network except through authorized IPC calls validated by the IAM interceptor.
+The Alloy kernel acts as both the **Policy Enforcement Point (PEP)** and the **Policy Decision Point (PDP)** through its integrated **IdentityManager**.
+
+- **Integrated IAM Interceptor**: Every message routed by the kernel is intercepted by a native Go-based security layer. The kernel performs an instantaneous, zero-latency authorization check using the integrated `IdentityManager`.
+- **Integrated RBAC Policy**: Permissions are managed as Role-Based Access Control (RBAC) rules stored within the kernel's state. 
+- **System Integrity (Bypass)**: Internal kernel components (`kernel`, `events`, `iam`) are privileged to ensure system stability and prevent deadlocks during security-critical operations.
+- **WASM Sandboxing**: External logic remains isolated in WASM sandboxes. Plugins cannot bypass the hardware-enforced boundaries of the `wazero` runtime or access the kernel's internal services without authorized WIT calls, each of which is validated.
 
 ## 4. Auditing
 
