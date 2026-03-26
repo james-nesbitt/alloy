@@ -1,9 +1,10 @@
 # ROADMAP: OPTIMAL OPERATIONS
 
 **PHASE 6: FOUNDATION (IN-PROGRESS)**
-- [ ] Universal Modal Engine (Vim/Helix)
+- [ ] Universal Modal Engine (Vim/Helix/Meow)
 - [ ] Resource Isolation (CPU/Mem limits)
 - [ ] Alloy Web (WASM-based access)
+- [ ] **Implementation Plan**: `docs/MODAL_ENGINE_PLAN.md`
 
 **PHASE 7: PROJECT ORCHESTRATION**
 - [ ] `alloy-project.json` manifest
