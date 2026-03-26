@@ -12,6 +12,18 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
+// OmniResult represents a result from the universal search
+type OmniResult struct {
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Type        string            `json:"type"`
+	Score       float64           `json:"score"`
+	Shortcut    string            `json:"shortcut,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
 // Model represents the overall UI state.
 type Model struct {
 	client   *frontend.Client
@@ -39,6 +51,10 @@ type Model struct {
 	statuses        map[string]string
 	selectedCmdIdx  int
 	leaderMenuWidth int
+
+	// Omni state
+	omniResults    []OmniResult
+	omniSelectedIdx int
 
 	ActiveProject *frontend.Project
 	Projects      []frontend.Project

@@ -122,6 +122,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			m = newM.(Model)
+
+		case tui.ModeOmni:
+			newM, cmd := m.handleOmniMode(msg, nil)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m = newM.(Model)
 		}
 
 	case discoveryMsg:
@@ -172,6 +179,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.fetchActiveProject())
 			}
 		}
+
+	case []OmniResult:
+		m.omniResults = msg
+		return m, nil
 
 	case messageMsg:
 		m2 := &m

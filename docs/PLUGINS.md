@@ -23,6 +23,8 @@ Application logic is implemented as independent WebAssembly binaries using the *
 | `ai` | WASM | LLM integration, tool-use orchestration, and AI workflows. |
 | `buffer` | WASM | Manages collaborative data streams and shared editing state. |
 | `chat` | WASM | Real-time messaging, channels, and presence tracking. |
+| `index` | WASM | **Knowledge Graph Indexer**: Unified activity indexing and team search. |
+| `omni-palette`| WASM| **Unified Search**: Single entry point for commands, files, and knowledge. |
 | `project` | WASM | Organizes resources (buffers, chats, files) into logical projects. |
 | `secrets` | WASM | Encrypted storage and policy-based retrieval of sensitive data. |
 | `tasks` | WASM | Background job management and scheduling. |

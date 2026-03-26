@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"gioui.org/app"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -47,7 +48,7 @@ func formatMessage(msg api.Message) string {
 	return fmt.Sprintf("[%s] %s: %s", ts, msg.Sender, string(msg.Payload))
 }
 
-func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.Client, gui *guiState, input *widget.Editor, sendButton *widget.Clickable, list *widget.List, projList *widget.List, projClicks []widget.Clickable, wsList *widget.List, wsClicks []widget.Clickable) layout.Dimensions {
+func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.Client, gui *guiState, input *widget.Editor, sendButton *widget.Clickable, list *widget.List, projList *widget.List, projClicks []widget.Clickable, wsList *widget.List, wsClicks []widget.Clickable, w *app.Window) layout.Dimensions {
 	return layout.Flex{
 		Axis: layout.Vertical,
 	}.Layout(gtx,
@@ -196,12 +197,16 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if gui.mode != ModeCommand {
+			if gui.mode != ModeCommand && gui.mode != ModeOmni {
 				return layout.Dimensions{}
 			}
 
 			content := input.Text()
-			gui.updateFiltered(content)
+			if gui.mode == ModeOmni {
+				gui.updateOmniFiltered(content, client, w)
+			} else {
+				gui.updateFiltered(content)
+			}
 
 			return widget.Border{
 				Color: color.NRGBA{A: 255},
@@ -216,72 +221,136 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 					}),
 					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 						var hints []layout.FlexChild
-						if gui.isLeader && content == "" {
+						
+						if gui.mode == ModeOmni {
 							hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								txt := "LEADER MODE"
-								if len(gui.breadcrumbs) > 0 {
-									txt += " > " + strings.Join(gui.breadcrumbs, " > ")
-								}
-								c := material.H6(th, txt)
-								c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
+								c := material.H6(th, "OMNI-PALETTE")
+								c.Color = color.NRGBA{R: 0, G: 200, B: 255, A: 255}
 								return layout.UniformInset(unit.Dp(12)).Layout(gtx, c.Layout)
 							}))
-						}
 
-						for i, item := range gui.filtered {
-							isSelected := i == gui.selectedIdx
-							hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.Stack{}.Layout(gtx,
-									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-										if !isSelected {
-											return layout.Dimensions{}
-										}
-										paint.FillShape(gtx.Ops, color.NRGBA{R: 60, G: 60, B: 60, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-										return layout.Dimensions{Size: gtx.Constraints.Min}
-									}),
-									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-										return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													if item.Group == "" {
-														return layout.Dimensions{}
-													}
-													return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-														return layout.Stack{}.Layout(gtx,
-															layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-																paint.FillShape(gtx.Ops, color.NRGBA{R: 80, G: 80, B: 100, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-																return layout.Dimensions{Size: gtx.Constraints.Min}
-															}),
-															layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-																c := material.Caption(th, strings.ToUpper(item.Group))
-																c.Font.Weight = 700
-																c.TextSize = unit.Sp(10)
-																c.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-																return layout.UniformInset(unit.Dp(3)).Layout(gtx, c.Layout)
-															}),
-														)
-													})
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													c := material.Caption(th, item.FullTitle)
-													c.Font.Weight = 700
-													if isSelected {
-														c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
-													}
-													return c.Layout(gtx)
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													c := material.Caption(th, item.Description)
-													c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
-													return c.Layout(gtx)
-												}),
-											)
-										})
-									}),
-								)
-							}))
+							for i, res := range gui.omniResults {
+								isSelected := i == gui.selectedIdx
+								hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Stack{}.Layout(gtx,
+										layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+											if !isSelected {
+												return layout.Dimensions{}
+											}
+											paint.FillShape(gtx.Ops, color.NRGBA{R: 60, G: 60, B: 60, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+											return layout.Dimensions{Size: gtx.Constraints.Min}
+										}),
+										layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+											return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												icon := "⚙️"
+												switch res.Type {
+												case "buffer": icon = "📄"
+												case "document": icon = "📚"
+												case "chat": icon = "💬"
+												}
+
+												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+													layout.Rigid(material.Body1(th, icon).Layout),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Caption(th, res.Title)
+														c.Font.Weight = 700
+														if isSelected {
+															c.Color = color.NRGBA{R: 0, G: 200, B: 255, A: 255}
+														}
+														return c.Layout(gtx)
+													}),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Caption(th, res.Description)
+														c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
+														return c.Layout(gtx)
+													}),
+													layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+														return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+															if res.Shortcut == "" {
+																return layout.Dimensions{}
+															}
+															c := material.Caption(th, "["+res.Shortcut+"]")
+															c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
+															return c.Layout(gtx)
+														})
+													}),
+												)
+											})
+										}),
+									)
+								}))
+							}
+						} else {
+							// ... (Existing Command Mode Hints)
+							if gui.isLeader && content == "" {
+								hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									txt := "LEADER MODE"
+									if len(gui.breadcrumbs) > 0 {
+										txt += " > " + strings.Join(gui.breadcrumbs, " > ")
+									}
+									c := material.H6(th, txt)
+									c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
+									return layout.UniformInset(unit.Dp(12)).Layout(gtx, c.Layout)
+								}))
+							}
+
+							for i, item := range gui.filtered {
+								isSelected := i == gui.selectedIdx
+								hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Stack{}.Layout(gtx,
+										layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+											if !isSelected {
+												return layout.Dimensions{}
+											}
+											paint.FillShape(gtx.Ops, color.NRGBA{R: 60, G: 60, B: 60, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+											return layout.Dimensions{Size: gtx.Constraints.Min}
+										}),
+										layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+											return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														if item.Group == "" {
+															return layout.Dimensions{}
+														}
+														return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+															return layout.Stack{}.Layout(gtx,
+																layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+																	paint.FillShape(gtx.Ops, color.NRGBA{R: 80, G: 80, B: 100, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+																	return layout.Dimensions{Size: gtx.Constraints.Min}
+																}),
+																layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+																	c := material.Caption(th, strings.ToUpper(item.Group))
+																	c.Font.Weight = 700
+																	c.TextSize = unit.Sp(10)
+																	c.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+																	return layout.UniformInset(unit.Dp(3)).Layout(gtx, c.Layout)
+																}),
+															)
+														})
+													}),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Caption(th, item.FullTitle)
+														c.Font.Weight = 700
+														if isSelected {
+															c.Color = color.NRGBA{R: 255, G: 200, B: 0, A: 255}
+														}
+														return c.Layout(gtx)
+													}),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														c := material.Caption(th, item.Description)
+														c.Color = color.NRGBA{R: 180, G: 180, B: 180, A: 255}
+														return c.Layout(gtx)
+													}),
+												)
+											})
+										}),
+									)
+								}))
+							}
 						}
 
 						if len(hints) == 0 {

@@ -29,6 +29,7 @@ const (
 	ModeForm
 	ModeAiSwitch
 	ModeAiQuery
+	ModeOmni
 )
 
 type discoveryMsg struct {
@@ -244,7 +245,7 @@ func run(w *app.Window, client *frontend.Client) error {
 
 			layout.Stack{Alignment: layout.Center}.Layout(gtx,
 				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					return renderMainLayout(gtx, th, client, &gui, &input, &sendButton, &list, &projList, projClicks, &wsList, wsClicks)
+					return renderMainLayout(gtx, th, client, &gui, &input, &sendButton, &list, &projList, projClicks, &wsList, wsClicks, w)
 				}),
 				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 					return renderModals(gtx, th, client, &gui)

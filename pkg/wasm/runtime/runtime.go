@@ -441,7 +441,11 @@ func (r *Runtime) writeMessage(ctx context.Context, mod wazeroapi.Module, ptr ui
 			mod.Memory().WriteUint32Le(fieldPtr+4, 0)
 			return
 		}
-		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		if err != nil || len(res) == 0 {
+			r.logger.Error("cabi_realloc failed in writeMessage", "id", mod.Name(), "error", err)
+			return
+		}
 		mod.Memory().Write(uint32(res[0]), []byte(s))
 		mod.Memory().WriteUint32Le(fieldPtr, uint32(res[0]))
 		mod.Memory().WriteUint32Le(fieldPtr+4, uint32(len(s)))
@@ -863,7 +867,10 @@ func (r *Runtime) writeWorkspace(ctx context.Context, mod wazeroapi.Module, ptr 
 			mod.Memory().WriteUint32Le(fieldPtr+4, 0)
 			return
 		}
-		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		if err != nil || len(res) == 0 {
+			return
+		}
 		mod.Memory().Write(uint32(res[0]), []byte(s))
 		mod.Memory().WriteUint32Le(fieldPtr, uint32(res[0]))
 		mod.Memory().WriteUint32Le(fieldPtr+4, uint32(len(s)))
@@ -1176,7 +1183,10 @@ func (r *Runtime) writeCapability(ctx context.Context, mod wazeroapi.Module, ptr
 			mod.Memory().WriteUint32Le(fieldPtr+4, 0)
 			return
 		}
-		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+		if err != nil || len(res) == 0 {
+			return
+		}
 		mod.Memory().Write(uint32(res[0]), []byte(s))
 		mod.Memory().WriteUint32Le(fieldPtr, uint32(res[0]))
 		mod.Memory().WriteUint32Le(fieldPtr+4, uint32(len(s)))
@@ -1234,7 +1244,10 @@ func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, 
 		if b, ok := r.buffers.GetBuffer(id); ok {
 			alloc := mod.ExportedFunction("cabi_realloc")
 			writeStr := func(ptr uint32, s string) {
-				res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+				res, err := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+				if err != nil || len(res) == 0 {
+					return
+				}
 				mod.Memory().Write(uint32(res[0]), []byte(s))
 				mod.Memory().WriteUint32Le(ptr, uint32(res[0]))
 				mod.Memory().WriteUint32Le(ptr+4, uint32(len(s)))

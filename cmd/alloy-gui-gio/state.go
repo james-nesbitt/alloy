@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -44,9 +45,21 @@ type guiState struct {
 	menuBtn         widget.Clickable
 	selectedIdx     int
 	filtered        []frontend.SearchItem
+	omniResults    []OmniResult
 	dashboardTiles  map[string]frontend.DashboardTile
 	tileOrder       []string
 	frequencies     map[string]int
+}
+
+type OmniResult struct {
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Type        string            `json:"type"`
+	Score       float64           `json:"score"`
+	Shortcut    string            `json:"shortcut,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type aiSwitchState struct {
@@ -66,6 +79,22 @@ type aiQueryState struct {
 func (g *guiState) handleEvent(ev key.Event, input *widget.Editor, client *frontend.Client, w *app.Window, gtx layout.Context) {
 	if ev.State != key.Press {
 		return
+	}
+
+	// Hotkeys
+	if ev.Modifiers == key.ModCtrl {
+		switch ev.Name {
+		case "P":
+			g.mode = ModeOmni
+			g.isLeader = false
+			g.selectedIdx = 0
+			input.SetText("")
+			if gtx.Ops != nil {
+				gtx.Execute(key.FocusCmd{Tag: input})
+			}
+			g.updateOmniFiltered("", client, w)
+			return
+		}
 	}
 
 	switch ev.Name {
@@ -278,6 +307,49 @@ func (g *guiState) updateFiltered(content string) {
 
 	if g.selectedIdx >= len(g.filtered) {
 		g.selectedIdx = 0
+	}
+}
+
+func (g *guiState) updateOmniFiltered(content string, client *frontend.Client, w *app.Window) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		bufID := ""
+		if g.activeWorkspace != nil {
+			// In GUI, activeWorkspace or current focused buf would go here
+		}
+
+		req := map[string]interface{}{
+			"query":     content,
+			"limit":     10,
+			"buffer_id": bufID,
+		}
+		reqPayload, _ := json.Marshal(req)
+
+		resp, err := client.Send(ctx, "omni-palette", "omni:search", reqPayload)
+		if err == nil {
+			var results []OmniResult
+			if err := json.Unmarshal(resp.Payload, &results); err == nil {
+				g.omniResults = results
+				w.Invalidate()
+			}
+		}
+	}()
+}
+
+func executeOmniResult(client *frontend.Client, gui *guiState, res OmniResult, w *app.Window) {
+	action := res.Metadata["action"]
+	switch action {
+	case "execute":
+		executeCommand(client, gui, res.ID, w)
+	case "switch", "open":
+		// GUI specialized handlers for switching/opening
+		if action == "switch" {
+			executeCommand(client, gui, "buffer read "+res.Metadata["buffer_id"], w)
+		} else {
+			executeCommand(client, gui, "buffer load "+res.Metadata["path"], w)
+		}
 	}
 }
 

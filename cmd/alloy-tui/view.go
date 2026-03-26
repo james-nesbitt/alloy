@@ -283,9 +283,66 @@ func (m Model) View() string {
 		listStr := "\n" + strings.Join(rows, "\n")
 		view = lipgloss.JoinVertical(lipgloss.Left, view, formStyle.Render(listStr))
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
+	} else if m.Mode == tui.ModeOmni {
+		view = lipgloss.JoinVertical(lipgloss.Left, view, m.omniPaletteView())
+		view = lipgloss.JoinVertical(lipgloss.Left, view, m.commandInput.View())
 	}
 
 	return view
+}
+
+func (m Model) omniPaletteView() string {
+	paletteStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("0")).
+		Foreground(lipgloss.Color("7")).
+		Width(m.width).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62"))
+
+	if len(m.omniResults) == 0 {
+		return paletteStyle.Render(" No results found. Start typing to search...")
+	}
+
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	shortcutStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Italic(true)
+
+	var rows []string
+	rows = append(rows, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(" OMNI-PALETTE "))
+
+	for i, res := range m.omniResults {
+		icon := "⚙️"
+		switch res.Type {
+		case "buffer":
+			icon = "📄"
+		case "document":
+			icon = "📚"
+		case "chat":
+			icon = "💬"
+		}
+
+		cursor := "  "
+		if i == m.omniSelectedIdx {
+			cursor = "> "
+		}
+
+		shortcut := ""
+		if res.Shortcut != "" {
+			shortcut = shortcutStyle.Render(" [" + res.Shortcut + "]")
+		}
+
+		line := fmt.Sprintf("%s%s %-30s %s", cursor, icon, res.Title, shortcut)
+		desc := dimStyle.Render(" - " + res.Description)
+
+		content := line + desc
+		if i == m.omniSelectedIdx {
+			rows = append(rows, selectedStyle.Width(m.width-4).Render(content))
+		} else {
+			rows = append(rows, content)
+		}
+	}
+
+	return paletteStyle.Render(strings.Join(rows, "\n"))
 }
 
 func (m Model) renderPaneContent(paneType int, width int, height int) string {

@@ -10,6 +10,7 @@ use (
 	./plugins/wasm/health
 	./plugins/wasm/iam
 	./plugins/wasm/index
+	./plugins/wasm/omni-palette
 	./plugins/wasm/presence
 	./plugins/wasm/project
 	./plugins/wasm/secrets

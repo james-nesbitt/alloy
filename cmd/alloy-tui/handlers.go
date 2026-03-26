@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -401,6 +402,15 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Mode = m.Panes[m.FocusIdx].Type
 		}
 		return m, nil
+	case "ctrl+p":
+		m.lastMainMode = m.Mode
+		m.Mode = tui.ModeOmni
+		m.isLeader = false
+		m.commandInput.SetValue("")
+		m.commandInput.Focus()
+		m.omniResults = nil
+		m.omniSelectedIdx = 0
+		return m, m.doOmniSearch("")
 	case "shift+tab":
 		if len(m.Panes) > 1 {
 			m.FocusIdx = (m.FocusIdx - 1 + len(m.Panes)) % len(m.Panes)
@@ -677,4 +687,95 @@ func (m Model) handleFormMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 		m.commandInput, ciCmd = m.commandInput.Update(msg)
 	}
 	return m, ciCmd
+}
+
+func (m Model) handleOmniMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlG:
+		m.Mode = m.lastMainMode
+		m.commandInput.Blur()
+		m.commandInput.SetValue("")
+		m.omniResults = nil
+		m.omniSelectedIdx = 0
+		return m, nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		if len(m.omniResults) > 0 {
+			m.omniSelectedIdx = (m.omniSelectedIdx + 1) % len(m.omniResults)
+		}
+		return m, nil
+	case tea.KeyUp, tea.KeyCtrlP:
+		if len(m.omniResults) > 0 {
+			m.omniSelectedIdx = (m.omniSelectedIdx - 1 + len(m.omniResults)) % len(m.omniResults)
+		}
+		return m, nil
+	case tea.KeyEnter:
+		if len(m.omniResults) > 0 {
+			res := m.omniResults[m.omniSelectedIdx]
+			return m.executeOmniResult(res)
+		}
+	case tea.KeyBackspace:
+		if m.commandInput.Value() == "" {
+			m.Mode = m.lastMainMode
+			m.commandInput.Blur()
+			return m, nil
+		}
+	}
+
+	old := m.commandInput.Value()
+	m.commandInput, ciCmd = m.commandInput.Update(msg)
+	if m.commandInput.Value() != old {
+		// Only search if length > 1 (or allow all if empty)
+		m.omniSelectedIdx = 0
+		return m, m.doOmniSearch(m.commandInput.Value())
+	}
+
+	return m, ciCmd
+}
+
+func (m Model) doOmniSearch(query string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+		defer cancel()
+
+		req := map[string]interface{}{
+			"query":     query,
+			"limit":     10,
+			"buffer_id": m.activeBuffer,
+		}
+		reqPayload, _ := json.Marshal(req)
+
+		resp, err := m.client.Send(ctx, "omni-palette", "omni:search", reqPayload)
+		if err != nil {
+			return nil // Silent fail for live search
+		}
+
+		var results []OmniResult
+		if err := json.Unmarshal(resp.Payload, &results); err != nil {
+			return nil
+		}
+		return results
+	}
+}
+
+func (m Model) executeOmniResult(res OmniResult) (tea.Model, tea.Cmd) {
+	m.Mode = m.lastMainMode
+	m.commandInput.Blur()
+	m.commandInput.SetValue("")
+	m.omniResults = nil
+	m.omniSelectedIdx = 0
+
+	action := res.Metadata["action"]
+	switch action {
+	case "execute":
+		return m.executeCommand(res.ID)
+	case "switch":
+		m.activeBuffer = res.Metadata["buffer_id"]
+		m.Mode = tui.ModeEdit
+		return m, m.fetchBufferContent(m.activeBuffer)
+	case "open":
+		// Assume opening a document means loading it into a buffer
+		// We can use buffer:load-file if it exists, or project:open-file
+		return m.executeCommand(fmt.Sprintf("buffer load %s", res.Metadata["path"]))
+	}
+	return m, nil
 }
