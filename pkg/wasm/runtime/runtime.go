@@ -41,6 +41,9 @@ type Runtime struct {
 	workspaces      map[string]api.Workspace
 	activeWorkspace string
 
+	// Buffer Views (pluginID -> bufferID -> guestPtr)
+	bufferViews map[string]map[string]uint32
+
 	// Dashboard management
 	widgets map[string]api.Widget
 }
@@ -138,9 +141,10 @@ func NewRuntime(
 		buffers:    bufferRegistry,
 		routerFn:   router,
 		callFn:     call,
-		plugins:    make(map[string]*Instance),
-		workspaces: make(map[string]api.Workspace),
-		widgets:    make(map[string]api.Widget),
+		plugins:     make(map[string]*Instance),
+		workspaces:  make(map[string]api.Workspace),
+		bufferViews: make(map[string]map[string]uint32),
+		widgets:     make(map[string]api.Widget),
 	}
 	rt.loadWorkspaces()
 
@@ -1548,12 +1552,47 @@ func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Modul
 	r.logger.Debug("get-buffer-view called", "plugin", mod.Name(), "id", id)
 
 	if r.buffers != nil {
-		if _, ok := r.buffers.GetBuffer(id); ok {
-			// (Implementation details for v0.1.2)
+		if b, ok := r.buffers.GetBuffer(id); ok {
+			alloc := mod.ExportedFunction("cabi_realloc")
+			data := b.GetData()
+			size := uint32(len(data))
+
+			// Check if we already have a view
+			r.mu.Lock()
+			if pluginViews, ok := r.bufferViews[mod.Name()]; ok {
+				if ptr, ok := pluginViews[id]; ok {
+					r.mu.Unlock()
+					// Already mapped
+					mod.Memory().WriteUint32Le(resultPtr, 1) // Some
+					mod.Memory().WriteUint32Le(resultPtr+4, ptr)
+					mod.Memory().WriteUint32Le(resultPtr+8, size)
+					return
+				}
+			} else {
+				r.bufferViews[mod.Name()] = make(map[string]uint32)
+			}
+			r.mu.Unlock()
+
+			// Initial allocation in guest
+			res, err := alloc.Call(ctx, 0, 0, 1, uint64(size))
+			if err == nil {
+				guestPtr := uint32(res[0])
+				// Initial copy into guest space
+				mod.Memory().Write(guestPtr, data)
+
+				r.mu.Lock()
+				r.bufferViews[mod.Name()][id] = guestPtr
+				r.mu.Unlock()
+
+				// Return the (pointer, size) back to guest
+				mod.Memory().WriteUint32Le(resultPtr, 1) // Some
+				mod.Memory().WriteUint32Le(resultPtr+4, guestPtr)
+				mod.Memory().WriteUint32Le(resultPtr+8, size)
+				return
+			}
 		}
 	}
 
-	// Stub: In v0.1.1, we'll return None (0)
-	// This signals to the guest SDK that it must fallback to the standard 'read-buffer' copy path.
+	// Stub: fallback or not found
 	mod.Memory().WriteUint32Le(resultPtr, 0) // None
 }

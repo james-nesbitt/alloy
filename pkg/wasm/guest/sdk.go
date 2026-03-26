@@ -3,6 +3,7 @@ package guest
 import (
 	"encoding/json"
 	"fmt"
+	"unsafe"
 )
 
 // Plugin represents an Alloy WASM plugin with ergonomic Go bindings.
@@ -396,12 +397,23 @@ func (p *Plugin) ReadBufferShared(id string) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	
-	// Implementation note: converting ptr/size to []byte safely requires 
-	// specific WASM memory flags. For now, this is a placeholder 
-	// until we finalize the Memory Layout for v0.1.2.
-	p.Log(LogLevelDebug, fmt.Sprintf("Shared buffer mapped at %d with size %d", ptr, size))
-	return nil, false 
+
+	// Implementation note: converting ptr/size to []byte safely requires
+	// specific WASM memory flags. For now, we use unsafe to wrap the
+	// allocated guest pointer.
+	p.Log(LogLevelDebug, fmt.Sprintf("Shared buffer mapped in guest memory at %d with size %d", ptr, size))
+
+	var data []byte
+	header := (*struct {
+		Data uintptr
+		Len  int
+		Cap  int
+	})(unsafe.Pointer(&data))
+	header.Data = uintptr(ptr)
+	header.Len = int(size)
+	header.Cap = int(size)
+
+	return data, true
 }
 
 func (p *Plugin) WriteBuffer(id string, content []byte) bool {
