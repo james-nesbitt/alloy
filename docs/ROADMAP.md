@@ -38,8 +38,8 @@ Expanding the feature set and user interaction.
 ## Phase 5: Team & Project Collaboration (In Progress)
 - [x] **Data-Driven Dashboard**: Summaries and action cards.
 - [x] **Unified Project Context**: Workspace registry and shared secrets.
-- [ ] **Multi-User Presence**: Visual indicators for team activity.
-- [ ] **Conflict Resolution**: OT/CRDT-lite for editor buffers.
+- [x] **Multi-User Presence**: Visual indicators for team activity.
+- [x] **Conflict Resolution**: OT/CRDT-lite for editor buffers.
 - [ ] **Knowledge Graph**: Semantic indexing and team-wide search.
 
 ## Phase 6: Advanced Refinement (In Progress)

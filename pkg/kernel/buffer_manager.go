@@ -23,6 +23,7 @@ type SharedBuffer struct {
 	Version      int
 	History      []api.BufferChange
 	mu           sync.RWMutex
+	onUpdate     []func(id string, offset int, length int)
 }
 
 // Satisfy SharedBuffer interface for api.SharedBuffer
@@ -35,11 +36,35 @@ func (b *SharedBuffer) Unlock()                { b.mu.Unlock() }
 func (b *SharedBuffer) GetVersion() int        { return b.Version }
 func (b *SharedBuffer) GetLastModified() int64 { return b.LastModified }
 
+func (b *SharedBuffer) OnUpdate(callback func(id string, offset int, length int)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onUpdate = append(b.onUpdate, callback)
+}
+
+func (b *SharedBuffer) triggerUpdate(offset, length int) {
+	// Assumes lock is already held if called from internal methods, 
+	// but we should be careful. 
+	// To be safe, we'll copy the slice under lock and then execute outside.
+	callbacks := make([]func(id string, offset int, length int), len(b.onUpdate))
+	copy(callbacks, b.onUpdate)
+
+	go func() {
+		for _, cb := range callbacks {
+			cb(b.ID, offset, length)
+		}
+	}()
+}
+
 // Resize increases the size of the shared buffer.
 func (b *SharedBuffer) Resize(newSize int) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.resize(newSize)
+	err := b.resize(newSize)
+	if err == nil {
+		b.triggerUpdate(0, newSize)
+	}
+	return err
 }
 
 func (b *SharedBuffer) resize(newSize int) error {
@@ -75,6 +100,30 @@ func (b *SharedBuffer) ApplyChange(change api.BufferChange) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Conflict Resolution Lite: LWW (Last Write Wins) with Overlap Check
+	if change.Version < b.Version {
+		// The change is based on an older version. Check if it overlaps with recent history.
+		overlap := false
+		for i := len(b.History) - 1; i >= 0; i-- {
+			hist := b.History[i]
+			if hist.Version < change.Version {
+				break
+			}
+			// Intersection check
+			if (change.Offset < hist.Offset+len(hist.Data)) && (change.Offset+len(change.Data) > hist.Offset) {
+				// We have an overlap. If the incoming change is physically older, we reject it.
+				if change.Timestamp < hist.Timestamp {
+					overlap = true
+					break
+				}
+			}
+		}
+
+		if overlap {
+			return fmt.Errorf("buffer conflict: stale change at offset %d overlaps with newer version", change.Offset)
+		}
+	}
+
 	if change.Offset+len(change.Data) > b.Size {
 		// Auto-resize for incoming changes
 		if err := b.resize(change.Offset + len(change.Data) + 1024); err != nil {
@@ -92,6 +141,7 @@ func (b *SharedBuffer) ApplyChange(change api.BufferChange) error {
 		b.History = b.History[1:]
 	}
 
+	b.triggerUpdate(change.Offset, len(change.Data))
 	return nil
 }
 
@@ -192,6 +242,7 @@ func (b *SharedBuffer) Write(offset int, content []byte) error {
 
 	copy(b.Data[offset:], content)
 	b.Version++
+	b.triggerUpdate(offset, len(content))
 	return nil
 }
 

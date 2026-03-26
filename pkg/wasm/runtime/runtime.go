@@ -1550,8 +1550,9 @@ func (r *Runtime) ListWidgets() []api.Widget {
 
 func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, resultPtr uint32) {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
+	pluginID := mod.Name()
 
-	r.logger.Debug("get-buffer-view called", "plugin", mod.Name(), "id", id)
+	r.logger.Debug("get-buffer-view called", "plugin", pluginID, "id", id)
 
 	if r.buffers != nil {
 		if b, ok := r.buffers.GetBuffer(id); ok {
@@ -1561,7 +1562,7 @@ func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Modul
 
 			// Check if we already have a view
 			r.mu.Lock()
-			if pluginViews, ok := r.bufferViews[mod.Name()]; ok {
+			if pluginViews, ok := r.bufferViews[pluginID]; ok {
 				if ptr, ok := pluginViews[id]; ok {
 					r.mu.Unlock()
 					// Already mapped
@@ -1571,9 +1572,47 @@ func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Modul
 					return
 				}
 			} else {
-				r.bufferViews[mod.Name()] = make(map[string]uint32)
+				r.bufferViews[pluginID] = make(map[string]uint32)
 			}
 			r.mu.Unlock()
+
+			// Register a watcher for this buffer to sync it to THIS plugin's view
+			b.OnUpdate(func(updatedID string, offset, length int) {
+				if updatedID != id {
+					return
+				}
+
+				r.mu.RLock()
+				instance, ok := r.plugins[pluginID]
+				pluginViews := r.bufferViews[pluginID]
+				r.mu.RUnlock()
+
+				if !ok || instance.mod == nil {
+					return
+				}
+
+				guestPtr, ok := pluginViews[id]
+				if !ok {
+					return
+				}
+
+				// Fetch fresh data from host buffer
+				hostData := b.GetData()
+				if offset+length > len(hostData) {
+					length = len(hostData) - offset
+				}
+
+				if offset < len(hostData) && length > 0 {
+					// Sync to guest memory
+					instance.mod.Memory().Write(guestPtr+uint32(offset), hostData[offset:offset+length])
+
+					// Optional: Notify guest of update if it exports 'on_buffer_update'
+					if onUpdate := instance.mod.ExportedFunction("on_buffer_update"); onUpdate != nil {
+						// Using context.Background() as we don't want to block the watcher too long
+						_, _ = onUpdate.Call(context.Background(), uint64(guestPtr), uint64(offset), uint64(length))
+					}
+				}
+			})
 
 			// Initial allocation in guest
 			res, err := alloc.Call(ctx, 0, 0, 1, uint64(size))
@@ -1583,7 +1622,7 @@ func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Modul
 				mod.Memory().Write(guestPtr, data)
 
 				r.mu.Lock()
-				r.bufferViews[mod.Name()][id] = guestPtr
+				r.bufferViews[pluginID][id] = guestPtr
 				r.mu.Unlock()
 
 				// Return the (pointer, size) back to guest

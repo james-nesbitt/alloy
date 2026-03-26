@@ -66,6 +66,19 @@ func main() {
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Knowledge Graph Indexer initializing")
 
+		// Subscribe to buffer updates for automatic indexing
+		subPayload, _ := json.Marshal(map[string]string{
+			"topic": "buffer:update",
+		})
+		plugin.RouteMessage(AlloyMessage{
+			Id:      "sub-buffer-updates",
+			MsgType: "request",
+			Method:  "subscribe",
+			Sender:  "index",
+			Target:  Some("events"),
+			Payload: subPayload,
+		})
+
 		// Register a dashboard widget
 		plugin.RegisterWidget(AlloyWidget{
 			Id:                "indexer-status",
@@ -76,6 +89,25 @@ func main() {
 		})
 
 		return nil
+	})
+
+	// Add event handler for the subscription
+	plugin.Handle("buffer:update", func(msg AlloyMessage) AlloyMessage {
+		var evt struct {
+			BufferID string `json:"buffer_id"`
+			Event    string `json:"event"`
+		}
+		if err := json.Unmarshal(msg.Payload, &evt); err == nil {
+			// Debounce/filter: only ingest on actual content updates
+			if evt.Event == "update" || evt.Event == "append" || evt.Event == "create" {
+				plugin.Log("debug", "Auto-indexing buffer: "+evt.BufferID)
+				
+				// Re-use ingest-buffer logic
+				ingestPayload, _ := json.Marshal(map[string]string{"id": evt.BufferID})
+				handleIngestBuffer(AlloyMessage{Payload: ingestPayload})
+			}
+		}
+		return AlloyMessage{} // No response needed for event
 	})
 
 	if err := plugin.Run(); err != nil {

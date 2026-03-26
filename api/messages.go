@@ -198,6 +198,7 @@ type SharedBuffer interface {
 	GetLastModified() int64
 	Resize(newSize int) error
 	ApplyChange(change BufferChange) error
+	OnUpdate(callback func(id string, offset int, length int))
 }
 
 // BufferChange represents a mutation to a buffer.

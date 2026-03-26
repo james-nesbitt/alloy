@@ -251,6 +251,11 @@ func handleUpdateCursor(msg guest.AlloyMessage) guest.AlloyMessage {
 		LastSeen: time.Now().Unix(),
 	}
 
+	// Sync presence to host-side semantic presence buffer
+	presenceID := "presence:" + req.ID
+	presenceData, _ := json.Marshal(b.UserCursors)
+	plugin.WriteBuffer(presenceID, presenceData)
+
 	notifyAll(req.ID, "cursor_update")
 
 	return plugin.Reply(msg, map[string]string{
