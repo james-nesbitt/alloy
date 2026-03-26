@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
@@ -27,6 +28,8 @@ type WebFrontend struct {
 
 	mu         sync.RWMutex
 	eventChans []chan api.Message
+
+	upgrader websocket.Upgrader
 }
 
 func main() {
@@ -51,6 +54,9 @@ func main() {
 		client:     client,
 		port:       *port,
 		eventChans: make([]chan api.Message, 0),
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true }, // Allow for exploration
+		},
 	}
 
 	client.OnMessage(func(msg api.Message) {
@@ -59,10 +65,8 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// API for the WASM/JS bridge
-	mux.HandleFunc("/api/send", wf.handleSend)
-	mux.HandleFunc("/api/events", wf.handleEvents)
 	mux.HandleFunc("/api/commands", wf.handleCommands)
+	mux.HandleFunc("/ws", wf.handleWS)
 
 	// Static assets
 	mux.Handle("/static/", http.FileServer(http.FS(content)))

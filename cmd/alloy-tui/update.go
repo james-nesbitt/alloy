@@ -15,6 +15,96 @@ import (
 	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
+func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch it := intent.(type) {
+	case modal.ModeIntent:
+		switch it.NewMode {
+		case modal.ModeNormal:
+			m.Mode = tui.ModeNormal
+			m.textarea.Blur()
+		case modal.ModeInsert:
+			// If we are in edit mode, just stay in edit mode's insert
+			// If in normal, switch to insert or edit
+			if m.Mode == tui.ModeNormal || m.Mode == tui.ModeDashboard {
+				if m.activeBuffer != "" {
+					m.Mode = tui.ModeEdit
+				} else {
+					m.Mode = tui.ModeInsert
+				}
+			}
+			m.textarea.Focus()
+		case modal.ModeCommand:
+			m.lastMainMode = m.Mode
+			m.Mode = tui.ModeCommand
+			m.commandInput.Focus()
+		}
+
+	case modal.MoveIntent:
+		switch it.Direction {
+		case "down":
+			m.textarea.SetCursor(m.textarea.Line()+1, 0)
+			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
+		case "up":
+			m.textarea.SetCursor(m.textarea.Line()-1, 0)
+			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
+		case "buffer-start":
+			m.textarea.SetCursor(0, 0)
+			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, 0, 0))
+		case "buffer-end":
+			lines := strings.Split(m.textarea.Value(), "\n")
+			m.textarea.SetCursor(len(lines)-1, 0)
+			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, len(lines)-1, 0))
+		}
+
+	case modal.WindowIntent:
+		switch it.Action {
+		case "split-v":
+			// Simple append logic
+			m.Panes = append(m.Panes, tui.Pane{Type: m.Mode, WidthPct: 0.5})
+			// Adjust others? For now just append
+		case "close":
+			if len(m.Panes) > 1 {
+				m.Panes = append(m.Panes[:m.FocusIdx], m.Panes[m.FocusIdx+1:]...)
+				m.FocusIdx = m.FocusIdx % len(m.Panes)
+				m.Mode = m.Panes[m.FocusIdx].Type
+			}
+		case "focus-left":
+			m.FocusIdx = (m.FocusIdx - 1 + len(m.Panes)) % len(m.Panes)
+			m.Mode = m.Panes[m.FocusIdx].Type
+		case "focus-right":
+			m.FocusIdx = (m.FocusIdx + 1) % len(m.Panes)
+			m.Mode = m.Panes[m.FocusIdx].Type
+		}
+
+	case modal.BufferIntent:
+		switch it.Action {
+		case "save":
+			cmds = append(cmds, m.sendBufferUpdate(m.activeBuffer, m.textarea.Value(), false))
+		case "fuzzy-find":
+			m.lastMainMode = m.Mode
+			m.Mode = tui.ModeOmni
+			m.commandInput.Focus()
+			cmds = append(cmds, m.doOmniSearch(""))
+		}
+
+	case modal.SearchIntent:
+		m.lastMainMode = m.Mode
+		m.Mode = tui.ModeOmni
+		m.commandInput.Focus()
+		cmds = append(cmds, m.doOmniSearch(""))
+
+	case modal.ActionIntent:
+		switch it.Verb {
+		case "save":
+			cmds = append(cmds, m.sendBufferUpdate(m.activeBuffer, m.textarea.Value(), false))
+		}
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -53,39 +143,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// PROCESS MODAL SYSTEM
 		mKey := modal.Key{
-			Code: msg.String(),
-			Alt:  msg.Alt,
-		}
-		if msg.Type == tea.KeyEsc {
-			mKey.Code = "esc"
+			Code:  msg.String(),
+			Alt:   msg.Alt,
+			Ctrl:  msg.Type >= tea.KeyCtrlA && msg.Type <= tea.KeyCtrlZ,
+			Shift: msg.Type == tea.KeyShiftTab, // simplified
 		}
 
-		// Sync current model mode into engine if they drifted
-		// (e.g., initial state or project-loaded triggers)
+		// Map special keys to consistent codes
+		switch msg.Type {
+		case tea.KeyEsc:
+			mKey.Code = "esc"
+		case tea.KeyEnter:
+			mKey.Code = "enter"
+		case tea.KeySpace:
+			mKey.Code = " "
+		case tea.KeyBackspace:
+			mKey.Code = "backspace"
+		case tea.KeyTab:
+			mKey.Code = "tab"
+		}
+
+		// If it's a Ctrl+ char, the String() is "ctrl+X". Let's also set Code to "X" if Ctrl is true
+		if mKey.Ctrl && strings.HasPrefix(mKey.Code, "ctrl+") {
+			mKey.Code = strings.TrimPrefix(mKey.Code, "ctrl+")
+		}
+
+		// Sync current model mode into engine
 		switch m.Mode {
+		case tui.ModeNormal, tui.ModeDashboard, tui.ModeInspector:
+			m.ModalEngine.State.Mode = modal.ModeNormal
 		case tui.ModeInsert, tui.ModeEdit, tui.ModeChat:
 			m.ModalEngine.State.Mode = modal.ModeInsert
-		case tui.ModeNormal, tui.ModeDashboard:
-			m.ModalEngine.State.Mode = modal.ModeNormal
-		case tui.ModeCommand:
+		case tui.ModeCommand, tui.ModeForm, tui.ModeOmni:
 			m.ModalEngine.State.Mode = modal.ModeCommand
 		}
 
 		intent, consumed := m.ModalEngine.Process(mKey)
-		if consumed && intent != nil {
-			switch intent := intent.(type) {
-			case modal.ModeIntent:
-				switch intent.NewMode {
-				case modal.ModeNormal:
-					m.Mode = tui.ModeNormal
-				case modal.ModeInsert:
-					m.Mode = tui.ModeInsert
-				case modal.ModeCommand:
-					m.Mode = tui.ModeCommand
-				}
-				// Handled mode switch
-				return m, nil
+		if intent != nil {
+			var cmd tea.Cmd
+			m, cmd = m.dispatchIntent(intent)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
 			}
+			return m, tea.Batch(cmds...)
+		}
+		if consumed {
+			return m, nil
 		}
 
 		// Handle keys based on mode (Legacy fallback)

@@ -57,7 +57,7 @@ type Model struct {
 	leaderMenuWidth int
 
 	// Omni state
-	omniResults    []OmniResult
+	omniResults     []OmniResult
 	omniSelectedIdx int
 
 	ActiveProject *frontend.Project

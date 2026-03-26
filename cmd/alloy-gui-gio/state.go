@@ -45,7 +45,7 @@ type guiState struct {
 	menuBtn         widget.Clickable
 	selectedIdx     int
 	filtered        []frontend.SearchItem
-	omniResults    []OmniResult
+	omniResults     []OmniResult
 	dashboardTiles  map[string]frontend.DashboardTile
 	tileOrder       []string
 	frequencies     map[string]int

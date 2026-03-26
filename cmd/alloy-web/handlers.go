@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -11,12 +10,6 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 )
-
-type SendRequest struct {
-	Target  string `json:"target"`
-	Method  string `json:"method"`
-	Payload string `json:"payload"`
-}
 
 func (wf *WebFrontend) handleIndex(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFS(content, "templates/index.html")
@@ -43,47 +36,17 @@ func (wf *WebFrontend) handleCommands(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp.Payload)
 }
 
-func (wf *WebFrontend) handleSend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req SendRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Warn("Failed to decode send request", "error", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	slog.Debug("Sending request to kernel", "target", req.Target, "method", req.Method)
-	_, err := wf.client.Send(ctx, req.Target, req.Method, []byte(req.Payload))
+func (wf *WebFrontend) handleWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := wf.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("Kernel call failed", "error", err, "target", req.Target, "method", req.Method)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Warn("Failed to upgrade websocket", "error", err)
 		return
 	}
+	defer conn.Close()
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "OK")
-}
+	slog.Info("New WebSocket client connected")
 
-func (wf *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	slog.Info("New SSE client connected")
-
+	// Host-to-Client channel
 	msgChan := make(chan api.Message, 100)
 	wf.mu.Lock()
 	wf.eventChans = append(wf.eventChans, msgChan)
@@ -98,21 +61,45 @@ func (wf *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		wf.mu.Unlock()
-		slog.Info("SSE client disconnected")
+		slog.Info("WebSocket client disconnected")
 	}()
 
-	ctx := r.Context()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-msgChan:
-			data, _ := json.Marshal(msg)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		case <-time.After(15 * time.Second):
-			fmt.Fprintf(w, "data: {\"type\": \"keepalive\"}\n\n")
-			flusher.Flush()
+	// Write loop (from Kernel/Host to Client)
+	go func() {
+		for msg := range msgChan {
+			if err := conn.WriteJSON(msg); err != nil {
+				return
+			}
 		}
+	}()
+
+	// Read loop (from Client to Host/Kernel)
+	for {
+		var msg api.Message
+		if err := conn.ReadJSON(&msg); err != nil {
+			break
+		}
+
+		// Ensure sender is set
+		if msg.Sender == "" {
+			msg.Sender = "web-client"
+		}
+
+		slog.Debug("WS Request from client", "target", msg.Target, "method", msg.Method)
+
+		go func(m api.Message) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := wf.client.Send(ctx, m.Target, m.Method, m.Payload)
+			if err != nil {
+				slog.Error("WS task failed", "error", err)
+				_ = conn.WriteJSON(api.Message{
+					ID:      m.ID + "-error",
+					Type:    api.TypeResponse,
+					Sender:  "kernel",
+					Payload: []byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())),
+				})
+			}
+		}(msg)
 	}
 }

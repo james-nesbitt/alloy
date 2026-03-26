@@ -221,7 +221,7 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 					}),
 					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 						var hints []layout.FlexChild
-						
+
 						if gui.mode == ModeOmni {
 							hints = append(hints, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								c := material.H6(th, "OMNI-PALETTE")
@@ -244,9 +244,12 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 											return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 												icon := "⚙️"
 												switch res.Type {
-												case "buffer": icon = "📄"
-												case "document": icon = "📚"
-												case "chat": icon = "💬"
+												case "buffer":
+													icon = "📄"
+												case "document":
+													icon = "📚"
+												case "chat":
+													icon = "💬"
 												}
 
 												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,

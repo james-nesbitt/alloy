@@ -18,7 +18,7 @@
         init: async () => {
             console.log("Alloy: Initializing Web Bridge...");
             bridge.setupKeyboard();
-            bridge.setupSSE();
+            bridge.setupWS();
             bridge.setupFormActions();
 
             // Check for WASM availability
@@ -46,21 +46,39 @@
             }
         },
 
-        // Handle incoming events from the Kernel
-        setupSSE: () => {
-            const eventSource = new EventSource("/api/events");
-            eventSource.onmessage = (event) => {
+        // Handle incoming messages from the Kernel via WebSocket
+        setupWS: () => {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+            bridge.socket = ws;
+
+            ws.onopen = () => {
+                console.log("WebSocket Connection Opened");
+                bridge.updateStatus('KERNEL', 'online');
+                bridge.state.connected = true;
+            };
+
+            ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                if (data.type === 'keepalive') return;
                 
-                // Dispatch to WASM
+                // Dispatch to WASM logic
                 if (window.alloy && window.alloy.handleEvent) {
                     window.alloy.handleEvent(event.data);
                 }
             };
-            eventSource.onerror = (e) => {
-                console.error("SSE Connection Lost:", e);
+
+            ws.onerror = (e) => {
+                console.error("WebSocket Error:", e);
                 bridge.updateStatus('KERNEL', 'offline');
+                bridge.state.connected = false;
+            };
+
+            ws.onclose = () => {
+                console.log("WebSocket Connection Closed");
+                bridge.updateStatus('KERNEL', 'offline');
+                bridge.state.connected = false;
+                // Retry after delay
+                setTimeout(bridge.setupWS, 5000);
             };
         },
 
@@ -261,22 +279,22 @@
         },
 
         executeCommand: (target, method, payload) => {
-            console.log("Executing command:", {target, method, payload});
+            console.log("Executing command via WebSocket:", {target, method, payload});
             
-            if (window.alloy && window.alloy.send) {
-                // window.alloy.send is provided by the Go/WASM host
-                window.alloy.send(target, method, JSON.stringify(payload));
+            const msg = {
+                id: `web-${Date.now()}`,
+                type: 'request',
+                sender: 'web-client',
+                target: target,
+                method: method,
+                payload: typeof payload === 'string' ? payload : JSON.stringify(payload)
+            };
+
+            if (bridge.socket && bridge.socket.readyState === WebSocket.OPEN) {
+                bridge.socket.send(JSON.stringify(msg));
                 bridge.notify(`Command sent: ${target}:${method}`, 'success');
             } else {
-                // Fallback to direct HTTP if WASM bridge isn't active
-                fetch('/api/send', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target, method, payload: JSON.stringify(payload) })
-                }).then(r => {
-                    if (r.ok) bridge.notify(`Command executed: ${target}:${method}`, 'success');
-                    else bridge.notify(`Failed to execute ${target}:${method}`, 'error');
-                });
+                bridge.notify(`WebSocket not connected, failed to send ${target}:${method}`, 'error');
             }
         },
 

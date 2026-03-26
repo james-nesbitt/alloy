@@ -24,15 +24,17 @@ var i32le = binary.LittleEndian
 
 // Runtime manages the WASM runtime environment.
 type Runtime struct {
-	runtime    wazero.Runtime
-	logger     *slog.Logger
-	kv         storage.StateStore
-	dataDir    string
-	routerFn   func(ctx context.Context, msg api.Message)
-	callFn     func(ctx context.Context, msg api.Message) (api.Message, error)
-	plugins    map[string]*Instance
-	mu         sync.RWMutex
-	hostModule wazeroapi.Module
+	baseRuntime      wazero.Runtime
+	rtConfig         wazero.RuntimeConfig
+	compilationCache wazero.CompilationCache
+	logger           *slog.Logger
+	kv               storage.StateStore
+	dataDir          string
+	routerFn         func(ctx context.Context, msg api.Message)
+	callFn           func(ctx context.Context, msg api.Message) (api.Message, error)
+	plugins          map[string]*Instance
+	mu               sync.RWMutex
+	hostModule       wazeroapi.Module
 
 	// Integrated Buffer Management
 	buffers api.MmapRegistry
@@ -50,15 +52,16 @@ type Runtime struct {
 
 // Instance represents a WASM plugin instance.
 type Instance struct {
-	id           string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mod          wazeroapi.Module
-	logger       *slog.Logger
-	msgChan      chan api.Message
-	capabilities []api.Capability
-	status       Status
-	metadata     api.PluginMetadata
+	id            string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mod           wazeroapi.Module
+	pluginRuntime wazero.Runtime
+	logger        *slog.Logger
+	msgChan       chan api.Message
+	capabilities  []api.Capability
+	status        Status
+	metadata      api.PluginMetadata
 
 	startedCh chan struct{}
 
@@ -69,31 +72,67 @@ type Instance struct {
 	// Resource limits
 	maxMemoryBytes uint32
 	msgPerSecond   int
-	msgCount       int
-	lastMsgReset   time.Time
-	rmu            sync.Mutex
+	bytesPerSecond int // New byte rate limit
+	fuelLimit      int // Execution limit proxy (ms)
+
+	// Throttling state
+	msgCount     int
+	byteCount    int
+	lastMsgReset time.Time
+	rmu          sync.Mutex
+
+	// Circuit breaker
+	crashCount  int
+	lastCrash   time.Time
+	circuitOpen bool
 }
 
-func (i *Instance) checkMessageThrottle() error {
-	if i.msgPerSecond <= 0 {
+func (i *Instance) checkThrottle(msgSize int) error {
+	if i.msgPerSecond <= 0 && i.bytesPerSecond <= 0 {
 		return nil
 	}
 
 	i.rmu.Lock()
 	defer i.rmu.Unlock()
 
+	if i.circuitOpen {
+		return fmt.Errorf("plugin circuit breaker is OPEN (too many crashes)")
+	}
+
 	now := time.Now()
 	if now.Sub(i.lastMsgReset) > time.Second {
 		i.msgCount = 0
+		i.byteCount = 0
 		i.lastMsgReset = now
 	}
 
-	if i.msgCount >= i.msgPerSecond {
+	if i.msgPerSecond > 0 && i.msgCount >= i.msgPerSecond {
 		return fmt.Errorf("message rate limit exceeded (max %d/sec)", i.msgPerSecond)
+	}
+	if i.bytesPerSecond > 0 && i.byteCount+msgSize >= i.bytesPerSecond {
+		return fmt.Errorf("byte rate limit exceeded (max %d bytes/sec)", i.bytesPerSecond)
 	}
 
 	i.msgCount++
+	i.byteCount += msgSize
 	return nil
+}
+
+func (i *Instance) recordCrash() {
+	i.rmu.Lock()
+	defer i.rmu.Unlock()
+
+	now := time.Now()
+	if now.Sub(i.lastCrash) > 60*time.Second {
+		i.crashCount = 0
+	}
+
+	i.crashCount++
+	i.lastCrash = now
+	if i.crashCount >= 3 {
+		i.circuitOpen = true
+		i.status = StatusCrashed
+	}
 }
 
 // Metadata returns the plugin's metadata.
@@ -105,7 +144,10 @@ func (i *Instance) Metadata() api.PluginMetadata {
 func (i *Instance) Close(ctx context.Context) error {
 	i.cancel()
 	if i.mod != nil {
-		return i.mod.Close(ctx)
+		_ = i.mod.Close(ctx)
+	}
+	if i.pluginRuntime != nil {
+		return i.pluginRuntime.Close(ctx)
 	}
 	return nil
 }
@@ -130,38 +172,42 @@ func NewRuntime(
 	router func(ctx context.Context, msg api.Message),
 	call func(ctx context.Context, msg api.Message) (api.Message, error),
 ) (*Runtime, error) {
-	r := wazero.NewRuntime(ctx)
+	cache := wazero.NewCompilationCache()
+	rtConfig := wazero.NewRuntimeConfig().WithCompilationCache(cache)
+	r := wazero.NewRuntimeWithConfig(ctx, rtConfig)
 	logger.Info("creating new WIT-based runtime (v2.9-async-compile)")
 
 	rt := &Runtime{
-		runtime:     r,
-		logger:      logger,
-		kv:          kv,
-		dataDir:     dataDir,
-		buffers:     bufferRegistry,
-		routerFn:    router,
-		callFn:      call,
-		plugins:     make(map[string]*Instance),
-		workspaces:  make(map[string]api.Workspace),
-		bufferViews: make(map[string]map[string]uint32),
-		widgets:     make(map[string]api.Widget),
+		baseRuntime:      r,
+		rtConfig:         rtConfig,
+		compilationCache: cache,
+		logger:           logger,
+		kv:               kv,
+		dataDir:          dataDir,
+		buffers:          bufferRegistry,
+		routerFn:         router,
+		callFn:           call,
+		plugins:          make(map[string]*Instance),
+		workspaces:       make(map[string]api.Workspace),
+		bufferViews:      make(map[string]map[string]uint32),
+		widgets:          make(map[string]api.Widget),
 	}
 	rt.loadWorkspaces()
 
-	// Instantiate the host module with functions
-	hostMod, err := rt.instantiateHostModule(ctx)
+	// Instantiate the host module into base with functions (for shared access if needed)
+	hostMod, err := rt.instantiateHostModuleInRuntime(ctx, rt.baseRuntime)
 	if err != nil {
 		return nil, err
 	}
 	rt.hostModule = hostMod
 
-	// Instantiate WASI
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
+	// Instantiate WASI into base
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt.baseRuntime); err != nil {
 		return nil, fmt.Errorf("failed to instantiate WASI: %w", err)
 	}
 
 	// Instantiate asyncify (dummy)
-	_, _ = r.NewHostModuleBuilder("asyncify").
+	_, _ = rt.baseRuntime.NewHostModuleBuilder("asyncify").
 		NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start").
 		NewFunctionBuilder().WithFunc(func() {}).Export("stop").
 		NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start_unwind").
@@ -173,9 +219,9 @@ func NewRuntime(
 	return rt, nil
 }
 
-// instantiateHostModule creates the host module with WIT functions.
-func (r *Runtime) instantiateHostModule(ctx context.Context) (wazeroapi.Module, error) {
-	builder := r.runtime.NewHostModuleBuilder("alloy")
+// instantiateHostModuleInRuntime creates the host module with WIT functions in a specific runtime.
+func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.Runtime) (wazeroapi.Module, error) {
+	builder := rt.NewHostModuleBuilder("alloy")
 
 	builder.NewFunctionBuilder().WithFunc(r.internalInit).Export("init")
 	builder.NewFunctionBuilder().WithFunc(r.internalHandleMessage).Export("handle-message")
@@ -504,7 +550,7 @@ func (r *Runtime) internalRouteMessage(
 	r.mu.RUnlock()
 
 	if ok {
-		if err := instance.checkMessageThrottle(); err != nil {
+		if err := instance.checkThrottle(int(payloadLen)); err != nil {
 			r.logger.Warn("plugin message throttled", "id", mod.Name(), "error", err)
 			return
 		}
@@ -525,7 +571,7 @@ func (r *Runtime) internalCall(
 	r.mu.RUnlock()
 
 	if ok {
-		if err := instance.checkMessageThrottle(); err != nil {
+		if err := instance.checkThrottle(int(payloadLen)); err != nil {
 			r.logger.Warn("plugin call throttled", "id", mod.Name(), "error", err)
 			r.writeMessage(ctx, mod, resultPtr, api.Message{
 				ID:      "throttle-err",
@@ -538,8 +584,20 @@ func (r *Runtime) internalCall(
 	}
 
 	apiMsg := r.readMessageFromArgs(mod, idPtr, idLen, typePtr, typeLen, methodPtr, methodLen, senderPtr, senderLen, targetSet, targetPtr, targetLen, payloadPtr, payloadLen, timestamp)
-	resp, err := r.callFn(ctx, apiMsg)
+
+	// Implementation of "Fuel" proxy: limited execution time for kernel calls
+	callCtx := ctx
+	if instance != nil && instance.fuelLimit > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, time.Duration(instance.fuelLimit)*time.Millisecond)
+		defer cancel()
+	}
+
+	resp, err := r.callFn(callCtx, apiMsg)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) && instance != nil {
+			instance.recordCrash()
+		}
 		resp = api.Message{
 			ID:      apiMsg.ID + "-resp",
 			Type:    api.TypeResponse,
@@ -565,6 +623,7 @@ func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Modu
 	select {
 	case msg := <-instance.msgChan:
 		r.logger.Debug("wasm plugin pulled message", "id", pluginID, "msgID", msg.ID)
+
 		mod.Memory().WriteUint32Le(resultPtr, 1) // is_some = true
 		r.writeMessage(ctx, mod, resultPtr+8, msg)
 	case <-time.After(100 * time.Millisecond):
@@ -649,6 +708,8 @@ func (r *Runtime) LoadPlugin(
 
 		maxMemoryBytes: maxMemoryMB * 1024 * 1024,
 		msgPerSecond:   msgPerSec,
+		bytesPerSecond: 10 * 1024 * 1024, // Default 10MB/s
+		fuelLimit:      1000,             // Default 1s execution proxy (ms)
 		lastMsgReset:   time.Now(),
 	}
 
@@ -660,15 +721,55 @@ func (r *Runtime) LoadPlugin(
 
 	// Compilation and Instantion happen in background to avoid blocking other plugins or host boot
 	go func() {
+		r.logger.Debug("instantiating wasm module", "id", id)
+
+		// Hardening: Per-plugin runtime for memory isolation
+		maxPages := instance.maxMemoryBytes / 65536
+		if maxPages == 0 && instance.maxMemoryBytes > 0 {
+			maxPages = 1
+		}
+		if maxPages == 0 {
+			maxPages = 2048 // Default 128MB limit
+		}
+
+		instRtConfig := wazero.NewRuntimeConfig().
+			WithCompilationCache(r.compilationCache). // Reuse the shared cache
+			WithMemoryLimitPages(maxPages)
+
+		pluginRuntime := wazero.NewRuntimeWithConfig(instCtx, instRtConfig)
+		instance.pluginRuntime = pluginRuntime
+
 		r.logger.Debug("compiling wasm module", "id", id, "bytes", len(wasmBytes))
-		compiled, err := r.runtime.CompileModule(instCtx, wasmBytes)
+		compiled, err := pluginRuntime.CompileModule(instCtx, wasmBytes)
 		if err != nil {
 			r.logger.Error("failed to compile module", "id", id, "error", err)
 			instCancel()
 			return
 		}
 
-		r.logger.Debug("instantiating wasm module", "id", id)
+		// Register host functions into THIS plugin's runtime
+		if _, err := r.instantiateHostModuleInRuntime(instCtx, pluginRuntime); err != nil {
+			r.logger.Error("failed to instantiate host module in plugin runtime", "id", id, "error", err)
+			instCancel()
+			return
+		}
+
+		// Instantiate WASI into plugin runtime
+		if _, err := wasi_snapshot_preview1.Instantiate(instCtx, pluginRuntime); err != nil {
+			r.logger.Error("failed to instantiate WASI in plugin runtime", "id", id, "error", err)
+			instCancel()
+			return
+		}
+
+		// Instantiate asyncify (dummy)
+		_, _ = pluginRuntime.NewHostModuleBuilder("asyncify").
+			NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start").
+			NewFunctionBuilder().WithFunc(func() {}).Export("stop").
+			NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start_unwind").
+			NewFunctionBuilder().WithFunc(func() {}).Export("stop_unwind").
+			NewFunctionBuilder().WithFunc(func(ptr uint32) {}).Export("start_rewind").
+			NewFunctionBuilder().WithFunc(func() {}).Export("stop_rewind").
+			Instantiate(instCtx)
 
 		// For the project manager plugin, we allow access to the base data directory
 		// to enable automatic discovery of project workspaces.
@@ -685,9 +786,13 @@ func (r *Runtime) LoadPlugin(
 			WithStderr(newLoggerWriter(r.logger, id, "stderr")).
 			WithFSConfig(fs)
 
-		mod, err := r.runtime.InstantiateModule(instCtx, compiled, config)
+		mod, err := pluginRuntime.InstantiateModule(instCtx, compiled, config)
 		if err != nil {
-			r.logger.Error("failed to instantiate module", "id", id, "error", err)
+			// Don't log error for normal context cancellation (shutdown)
+			if !errors.Is(err, context.Canceled) {
+				r.logger.Error("wasm module terminated with error", "id", id, "error", err)
+				instance.recordCrash()
+			}
 			instCancel()
 			return
 		}
@@ -728,13 +833,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 	defer r.mu.Unlock()
 
 	for _, instance := range r.plugins {
-		instance.cancel()
-		if instance.mod != nil {
-			_ = instance.mod.Close(ctx)
-		}
+		_ = instance.Close(ctx)
 	}
 
-	return r.runtime.Close(ctx)
+	return r.baseRuntime.Close(ctx)
 }
 
 func (r *Runtime) UnloadPlugin(ctx context.Context, id string) error {

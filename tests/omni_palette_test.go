@@ -74,7 +74,7 @@ func TestOmniPaletteSearch(t *testing.T) {
 		}`),
 	}
 	k.RouteMessage(context.Background(), ingestMsg)
-	
+
 	// Wait for ingestion to complete (it's async thru the router)
 	time.Sleep(500 * time.Millisecond)
 
@@ -86,7 +86,7 @@ func TestOmniPaletteSearch(t *testing.T) {
 		Method:  "omni:search",
 		Payload: []byte(`{"query": "omni", "limit": 10}`),
 	}
-	
+
 	respChan := make(chan api.Message, 1)
 	k.RegisterFrontend("test-client", respChan)
 
@@ -99,7 +99,7 @@ func TestOmniPaletteSearch(t *testing.T) {
 		Payload: []byte(`{"query": "omni", "limit": 10}`),
 	}
 	k.RouteMessage(context.Background(), idxSearchMsg)
-	
+
 	respIdx := <-respChan
 	fmt.Printf("Index search response: %s\n", string(respIdx.Payload))
 

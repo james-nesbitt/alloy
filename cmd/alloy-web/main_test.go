@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/james-nesbitt/alloy/api"
 )
 
@@ -52,43 +53,36 @@ func TestWebFrontendAPI(t *testing.T) {
 		}
 	})
 
-	// 2. Test Send API (Legacy or direct)
-	t.Run("API Send", func(t *testing.T) {
-		sendReq := `{"target": "project", "method": "create", "payload": "{\"name\": \"test\"}"}`
-		req := httptest.NewRequest("POST", "/api/send", strings.NewReader(sendReq))
-		w := httptest.NewRecorder()
-		wf.handleSend(w, req)
+	// 2. Test WS API
+	t.Run("WS Connection", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(wf.handleWS))
+		defer server.Close()
 
-		if w.Code != http.StatusOK {
-			t.Errorf("Expected status 200, got %d", w.Code)
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+		dialer := websocket.Dialer{}
+		conn, _, err := dialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("Failed to dial WS: %v", err)
 		}
+		defer conn.Close()
+
+		// Test sending a message through WS
+		testMsg := api.Message{
+			ID:     "ws-test-1",
+			Target: "project",
+			Method: "create",
+			Payload: []byte(`{"name": "test-ws"}`),
+		}
+		if err := conn.WriteJSON(testMsg); err != nil {
+			t.Fatalf("Failed to write to WS: %v", err)
+		}
+
+		// Since our handleWS executes target calls in background, 
+		// we might need a small wait or a more robust mock.
+		time.Sleep(100 * time.Millisecond)
+
 		if mock.lastTarget != "project" || mock.lastMethod != "create" {
-			t.Errorf("Expected project:create, got %s:%s", mock.lastTarget, mock.lastMethod)
-		}
-		if !strings.Contains(string(mock.lastPayload), "test") {
-			t.Errorf("Expected payload to contain 'test', got %s", string(mock.lastPayload))
-		}
-	})
-
-	// 3. Test SSE (Keepalive)
-	t.Run("API Events", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/events", nil)
-		w := httptest.NewRecorder()
-
-		// Use a context that cancels after 50ms to end the SSE loop
-		ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
-		defer cancel()
-		req = req.WithContext(ctx)
-
-		// We need a custom ResponseWriter that flushes to satisfy handleEvents
-		// httptest.ResponseRecorder implements Flusher as well.
-
-		// Actually, handleEvents blocks until context done or message.
-		// Since we have a keepalive timer at 15s, it will block for 50ms and return.
-		wf.handleEvents(w, req)
-
-		if w.Header().Get("Content-Type") != "text/event-stream" {
-			t.Errorf("Expected event-stream header, got %s", w.Header().Get("Content-Type"))
+			t.Errorf("Expected project:create via WS, got %s:%s", mock.lastTarget, mock.lastMethod)
 		}
 	})
 }
