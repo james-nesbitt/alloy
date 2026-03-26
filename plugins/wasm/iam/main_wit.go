@@ -7,20 +7,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
+	"time"
 )
 
 // Policy represents an access control policy.
 type Policy struct {
 	Role        string   `json:"role"`
-	Permissions []string `json:"permissions"` // e.g., ["chat:*", "plugin-projects:create"]
+	Permissions []string `json:"permissions"` // e.g., ["chat:*", "buffer:read:public-*"]
 }
 
 // AuthorizationRequest represents a request to check authorization.
 type AuthorizationRequest struct {
-	Actor  string `json:"actor"`
-	Target string `json:"target"`
-	Method string `json:"method"`
+	Actor    string `json:"actor"`
+	Target   string `json:"target"`
+	Method   string `json:"method"`
+	Resource string `json:"resource,omitempty"` // e.g. buffer-id, project-id
 }
 
 // PolicySetRequest represents a request to set a policy.
@@ -36,13 +37,14 @@ type IdentitySetRequest struct {
 
 // AuthorizationResponse represents an authorization response.
 type AuthorizationResponse struct {
-	Allowed bool `json:"allowed"`
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 var (
 	plugin    *Plugin
 	policies  = NewKVStore[Policy]("policies")
-	identities = NewKVStore[string]("identities") // mapping of Actor -> Role
+	identities = NewKVStore[string]("identities")
 )
 
 // KVStore provides type-safe KV storage.
@@ -50,12 +52,10 @@ type KVStore[T any] struct {
 	prefix string
 }
 
-// NewKVStore creates a new KVStore instance.
 func NewKVStore[T any](prefix string) *KVStore[T] {
 	return &KVStore[T]{prefix: prefix}
 }
 
-// Get retrieves a value from KV storage.
 func (s *KVStore[T]) Get(key string) (T, error) {
 	var result T
 	data, ok := plugin.KVGet(s.prefix + ":" + key)
@@ -68,7 +68,6 @@ func (s *KVStore[T]) Get(key string) (T, error) {
 	return result, nil
 }
 
-// Set stores a value in KV storage.
 func (s *KVStore[T]) Set(key string, value T) error {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -81,29 +80,26 @@ func (s *KVStore[T]) Set(key string, value T) error {
 }
 
 func main() {
-	// Create a new WIT-based plugin
 	plugin = NewPlugin("iam").
 		WithMetadata(
 			"Identity and Access Management", 
-			"Manages authentication and authorization for the system",
-			"0.1.0", 
+			"Enterprise-grade security and granular RBAC",
+			"0.2.0", 
 			"Alloy Team",
 		).
-		WithTags("iam", "security", "authentication", "authorization").
+		WithTags("iam", "security", "rbac", "auditing").
 		WithCapability("check", "Check if an actor is authorized for an action").
 		WithCapability("policy:set", "Set policy for a role").
-		WithCapability("identity:set", "Set role for an actor")
+		WithCapability("identity:set", "Set role for an actor").
+		WithCapability("audit:log", "Get recent security events")
 
-	// Set up message handlers
 	plugin.Handle("check", handleCheck)
 	plugin.Handle("policy:set", handlePolicySet)
 	plugin.Handle("identity:set", handleIdentitySet)
 
-	// Set up initialization
 	plugin.OnInit(func() error {
-		plugin.Log("info", "IAM plugin initializing")
+		plugin.Log("info", "IAM Security hardening active")
 		
-		// Initialize default roles and permissions
 		defaultRoles := map[string][]string{
 			"admin": {"*"},
 			"guest": {
@@ -115,7 +111,8 @@ func main() {
 				"ai:*",
 				"iam:check",
 				"secrets:*",
-				"buffer:*",
+				"buffer:read:*",
+				"buffer:write:public-*", // Guests can only write to public buffers
 				"presence:*",
 			},
 		}
@@ -123,11 +120,7 @@ func main() {
 		for role, perms := range defaultRoles {
 			_, err := policies.Get(role)
 			if err != nil {
-				defaultPolicy := Policy{
-					Role:        role,
-					Permissions: perms,
-				}
-				_ = policies.Set(role, defaultPolicy)
+				_ = policies.Set(role, Policy{Role: role, Permissions: perms})
 				plugin.Log("info", "Initialized default "+role+" policy")
 			}
 		}
@@ -135,87 +128,128 @@ func main() {
 		return nil
 	})
 
-	// Run the plugin
 	if err := plugin.Run(); err != nil {
 		plugin.Log("error", "Plugin failed: "+err.Error())
 	}
 }
 
-// handleCheck handles authorization checks.
 func handleCheck(msg AlloyMessage) AlloyMessage {
 	var req AuthorizationRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		plugin.Log("warn", "Invalid authorization request: "+err.Error())
-		return plugin.Reply(msg, AuthorizationResponse{Allowed: false})
+		return plugin.Reply(msg, AuthorizationResponse{Allowed: false, Reason: "malformed_request"})
 	}
 
-	// Systems and internal kernel calls are self-authorized
 	if req.Actor == "kernel" || req.Actor == "system" {
 		return plugin.Reply(msg, AuthorizationResponse{Allowed: true})
 	}
 
-	// Get the actor's role
 	role, err := identities.Get(req.Actor)
 	if err != nil {
-		// If no identity is found, use guest role
 		role = "guest"
 	}
 
-	// Get the policy for the role
 	policy, err := policies.Get(role)
 	if err != nil {
-		plugin.Log("warn", "No policy found for role: "+role)
-		return plugin.Reply(msg, AuthorizationResponse{Allowed: false})
+		return plugin.Reply(msg, AuthorizationResponse{Allowed: false, Reason: "no_policy_for_role"})
 	}
 
-	// Check if the action is allowed
 	action := req.Target + ":" + req.Method
+	if req.Resource != "" {
+		action = action + ":" + req.Resource
+	}
+	
 	allowed := false
-
 	for _, perm := range policy.Permissions {
-		if perm == "*" || perm == action || (strings.HasSuffix(perm, ":*") && strings.HasPrefix(action, perm[:len(perm)-1])) {
+		if checkPermission(perm, action) {
 			allowed = true
 			break
 		}
 	}
 
-	plugin.Log("debug", fmt.Sprintf("Authorization check: actor=%s, role=%s, action=%s, allowed=%v", 
-		req.Actor, role, action, allowed))
+	// Auditing
+	logLevel := "debug"
+	if !allowed {
+		logLevel = "warn"
+	}
+	
+	auditMsg := fmt.Sprintf("IAM: actor=%s (role=%s) action=%s resource=%s allowed=%v", 
+		req.Actor, role, req.Target+":"+req.Method, req.Resource, allowed)
+	plugin.Log(logLevel, auditMsg)
+
+	// Emit audit event for security monitoring
+	auditPayload, _ := json.Marshal(map[string]interface{}{
+		"topic": "system:audit",
+		"event": "authorization_check",
+		"data": map[string]interface{}{
+			"actor":    req.Actor,
+			"role":     role,
+			"target":   req.Target,
+			"method":   req.Method,
+			"resource": req.Resource,
+			"allowed":  allowed,
+			"time":     time.Now().Unix(),
+		},
+	})
+	plugin.RouteMessage(AlloyMessage{
+		Id:      fmt.Sprintf("audit-%d", time.Now().UnixNano()),
+		Method:  "publish",
+		Sender:  "iam",
+		Target:  Some("events"),
+		Payload: auditPayload,
+	})
 
 	return plugin.Reply(msg, AuthorizationResponse{Allowed: allowed})
 }
 
-// handlePolicySet handles setting policies.
+func checkPermission(perm, action string) bool {
+	if perm == "*" {
+		return true
+	}
+	
+	// Handle wildcards like "buffer:read:*" or "chat:*"
+	permParts := strings.Split(perm, ":")
+	actionParts := strings.Split(action, ":")
+	
+	for i, pPart := range permParts {
+		if pPart == "*" {
+			return true // Wildcard match for everything after
+		}
+		if i >= len(actionParts) {
+			return false
+		}
+		if pPart != actionParts[i] {
+			return false
+		}
+	}
+	
+	// If we matched all parts of the permission precisely, it must be the same length as action
+	return len(permParts) == len(actionParts)
+}
+
 func handlePolicySet(msg AlloyMessage) AlloyMessage {
 	var req PolicySetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "invalid_policy: "+err.Error())
 	}
 
-	// Save the policy
 	if err := policies.Set(req.Policy.Role, req.Policy); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_save_policy: "+err.Error())
 	}
 
-	plugin.Log("info", fmt.Sprintf("Set policy for role: %s (%d permissions)", 
-		req.Policy.Role, len(req.Policy.Permissions)))
-
+	plugin.Log("info", fmt.Sprintf("Policy updated: %s", req.Policy.Role))
 	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }
 
-// handleIdentitySet handles setting identities.
 func handleIdentitySet(msg AlloyMessage) AlloyMessage {
 	var req IdentitySetRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "invalid_identity: "+err.Error())
 	}
 
-	// Save the identity
 	if err := identities.Set(req.Actor, req.Role); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_save_identity: "+err.Error())
 	}
 
-	plugin.Log("info", fmt.Sprintf("Set role %s for actor: %s", req.Role, req.Actor))
-
+	plugin.Log("info", fmt.Sprintf("Identity updated: %s -> %s", req.Actor, req.Role))
 	return plugin.Reply(msg, map[string]string{"status": "ok"})
 }

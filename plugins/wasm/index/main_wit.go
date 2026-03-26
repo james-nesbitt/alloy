@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Document represents a semantically indexed file or snippet.
+// Document represents a semantically indexed file, snippet, or activity.
 type Document struct {
 	ID        string   `json:"id"`
 	Path      string   `json:"path"`
@@ -18,6 +18,7 @@ type Document struct {
 	Tags      []string `json:"tags"`
 	Timestamp int64    `json:"timestamp"`
 	Author    string   `json:"author,omitempty"`
+	Source    string   `json:"source,omitempty"` // e.g., "buffer", "chat", "task"
 }
 
 // SearchRequest represents a semantic search query.
@@ -33,19 +34,22 @@ type SearchResult struct {
 }
 
 var (
-	plugin    *Plugin
-	documents = make(map[string]Document)
+	plugin *Plugin
+)
+
+const (
+	DocPrefix = "idx:doc:"
 )
 
 func main() {
 	plugin = NewPlugin("index").
 		WithMetadata(
 			"Knowledge Graph Indexer",
-			"Background semantic indexing for collaborative work",
-			"0.1.0",
+			"Background activity indexing and persistent knowledge graph",
+			"0.2.0",
 			"Alloy Team",
 		).
-		WithTags("search", "rag", "knowledge", "indexing").
+		WithTags("search", "rag", "knowledge", "indexing", "persistence").
 		WithCapability("knowledge:ingest", "Add a document to the index").WithShortcut("i i").
 		WithCapability("knowledge:ingest-buffer", "Ingest a buffer's content").WithShortcut("i b").
 		WithCapability("knowledge:search", "Search the knowledge graph").WithShortcut("i s").
@@ -58,6 +62,12 @@ func main() {
 	plugin.Handle("knowledge:clear", handleClear)
 	plugin.Handle("knowledge:status", handleStatus)
 
+	// Event Handlers
+	plugin.Handle("buffer:update", handleBufferEvent)
+	plugin.Handle("chat:message", handleChatEvent)
+	plugin.Handle("task:create", handleTaskEvent)
+	plugin.Handle("project:create", handleProjectEvent)
+
 	// Backward compatibility handlers
 	plugin.Handle("ingest", handleIngest)
 	plugin.Handle("ingest-buffer", handleIngestBuffer)
@@ -66,53 +76,54 @@ func main() {
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Knowledge Graph Indexer initializing")
 
-		// Subscribe to buffer updates for automatic indexing
-		subPayload, _ := json.Marshal(map[string]string{
-			"topic": "buffer:update",
-		})
-		plugin.RouteMessage(AlloyMessage{
-			Id:      "sub-buffer-updates",
-			MsgType: "request",
-			Method:  "subscribe",
-			Sender:  "index",
-			Target:  Some("events"),
-			Payload: subPayload,
-		})
+		// Subscribe to multiple activity streams
+		topics := []string{"buffer:update", "chat:message", "task:create", "project:create"}
+		for _, topic := range topics {
+			subPayload, _ := json.Marshal(map[string]string{
+				"topic": topic,
+			})
+			plugin.RouteMessage(AlloyMessage{
+				Id:      "sub-" + strings.ReplaceAll(topic, ":", "-"),
+				MsgType: "request",
+				Method:  "subscribe",
+				Sender:  "index",
+				Target:  Some("events"),
+				Payload: subPayload,
+			})
+		}
 
 		// Register a dashboard widget
 		plugin.RegisterWidget(AlloyWidget{
 			Id:                "indexer-status",
 			Title:             "Knowledge Graph",
 			ContentType:       "text",
-			Content:           []byte("No documents indexed"),
+			Content:           []byte("Knowledge Graph Active"),
 			RefreshIntervalMs: 15000,
 		})
 
+		updateStatus()
 		return nil
-	})
-
-	// Add event handler for the subscription
-	plugin.Handle("buffer:update", func(msg AlloyMessage) AlloyMessage {
-		var evt struct {
-			BufferID string `json:"buffer_id"`
-			Event    string `json:"event"`
-		}
-		if err := json.Unmarshal(msg.Payload, &evt); err == nil {
-			// Debounce/filter: only ingest on actual content updates
-			if evt.Event == "update" || evt.Event == "append" || evt.Event == "create" {
-				plugin.Log("debug", "Auto-indexing buffer: "+evt.BufferID)
-				
-				// Re-use ingest-buffer logic
-				ingestPayload, _ := json.Marshal(map[string]string{"id": evt.BufferID})
-				handleIngestBuffer(AlloyMessage{Payload: ingestPayload})
-			}
-		}
-		return AlloyMessage{} // No response needed for event
 	})
 
 	if err := plugin.Run(); err != nil {
 		plugin.Log("error", "Plugin failed: "+err.Error())
 	}
+}
+
+func saveDoc(doc Document) {
+	if doc.ID == "" {
+		doc.ID = fmt.Sprintf("doc-%d", time.Now().UnixNano())
+	}
+	if doc.Timestamp == 0 {
+		doc.Timestamp = time.Now().Unix()
+	}
+	if len(doc.Tags) == 0 {
+		doc.Tags = generateTags(doc.Content)
+	}
+
+	data, _ := json.Marshal(doc)
+	plugin.KVSet(DocPrefix+doc.ID, data)
+	updateStatus()
 }
 
 func handleIngest(msg AlloyMessage) AlloyMessage {
@@ -121,20 +132,10 @@ func handleIngest(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "invalid_document")
 	}
 
-	if doc.ID == "" {
-		doc.ID = fmt.Sprintf("doc-%d", time.Now().UnixNano())
-	}
-	doc.Timestamp = time.Now().Unix()
-	
-	// Automatically generate basic tags from content if they don't exist
-	if len(doc.Tags) == 0 {
-		doc.Tags = generateTags(doc.Content)
-	}
+	doc.Source = "manual"
+	saveDoc(doc)
 
-	documents[doc.ID] = doc
-	updateStatus()
-
-	plugin.Log("info", fmt.Sprintf("Indexed document: %s (%d bytes)", doc.Path, len(doc.Content)))
+	plugin.Log("info", fmt.Sprintf("Indexed manual document: %s (%d bytes)", doc.Path, len(doc.Content)))
 
 	return plugin.Reply(msg, map[string]string{
 		"id":     doc.ID,
@@ -160,13 +161,10 @@ func handleIngestBuffer(msg AlloyMessage) AlloyMessage {
 		ID:        "buf-" + buf.Id,
 		Path:      "buffer://" + buf.Name,
 		Content:   string(buf.Content),
-		Timestamp: time.Now().Unix(),
+		Source:    "buffer",
 		Tags:      []string{"buffer"},
 	}
-	doc.Tags = append(doc.Tags, generateTags(doc.Content)...)
-
-	documents[doc.ID] = doc
-	updateStatus()
+	saveDoc(doc)
 
 	plugin.Log("info", fmt.Sprintf("Indexed buffer: %s (%d bytes)", buf.Id, len(buf.Content)))
 
@@ -176,6 +174,80 @@ func handleIngestBuffer(msg AlloyMessage) AlloyMessage {
 	})
 }
 
+func handleBufferEvent(msg AlloyMessage) AlloyMessage {
+	var evt struct {
+		BufferID string `json:"buffer_id"`
+		Event    string `json:"event"`
+	}
+	if err := json.Unmarshal(msg.Payload, &evt); err == nil {
+		if evt.Event == "update" || evt.Event == "append" || evt.Event == "create" {
+			ingestPayload, _ := json.Marshal(map[string]string{"id": evt.BufferID})
+			handleIngestBuffer(AlloyMessage{Payload: ingestPayload})
+		}
+	}
+	return AlloyMessage{}
+}
+
+func handleChatEvent(msg AlloyMessage) AlloyMessage {
+	var evt struct {
+		Sender  string `json:"sender"`
+		Content string `json:"content"`
+		Context string `json:"context,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &evt); err == nil {
+		doc := Document{
+			ID:      fmt.Sprintf("chat-%s-%d", evt.Sender, time.Now().UnixNano()),
+			Path:    "chat://" + evt.Sender,
+			Content: evt.Content,
+			Source:  "chat",
+			Author:  evt.Sender,
+			Tags:    []string{"chat", "message"},
+		}
+		saveDoc(doc)
+		plugin.Log("debug", "Auto-indexed chat message from "+evt.Sender)
+	}
+	return AlloyMessage{}
+}
+
+func handleTaskEvent(msg AlloyMessage) AlloyMessage {
+	var evt struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(msg.Payload, &evt); err == nil {
+		doc := Document{
+			ID:      "task-" + evt.ID,
+			Path:    "task://" + evt.ID,
+			Content: evt.Title + "\n" + evt.Description,
+			Source:  "task",
+			Tags:    []string{"task", "todo"},
+		}
+		saveDoc(doc)
+		plugin.Log("debug", "Auto-indexed task: "+evt.Title)
+	}
+	return AlloyMessage{}
+}
+
+func handleProjectEvent(msg AlloyMessage) AlloyMessage {
+	var evt struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(msg.Payload, &evt); err == nil {
+		doc := Document{
+			ID:      "proj-" + evt.ID,
+			Path:    "project://" + evt.ID,
+			Content: "Project created: " + evt.Name,
+			Source:  "project",
+			Tags:    []string{"project", "meta"},
+		}
+		saveDoc(doc)
+		plugin.Log("debug", "Auto-indexed project: "+evt.Name)
+	}
+	return AlloyMessage{}
+}
+
 func handleSearch(msg AlloyMessage) AlloyMessage {
 	var req SearchRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -183,27 +255,41 @@ func handleSearch(msg AlloyMessage) AlloyMessage {
 	}
 
 	if req.Limit <= 0 {
-		req.Limit = 5
+		req.Limit = 10
 	}
 
-	// Simple keyword/tag scoring since we don't have a vector engine in the guest yet
 	queryTerms := strings.Fields(strings.ToLower(req.Query))
 	results := []SearchResult{}
 
-	for _, doc := range documents {
+	keys := plugin.KVList(DocPrefix)
+	for _, key := range keys {
+		data, ok := plugin.KVGet(key)
+		if !ok {
+			continue
+		}
+
+		var doc Document
+		if err := json.Unmarshal(data, &doc); err != nil {
+			continue
+		}
+
 		score := 0.0
 		contentLower := strings.ToLower(doc.Content)
 		
 		for _, term := range queryTerms {
 			// Content match
 			if strings.Contains(contentLower, term) {
-				score += 1.0
+				score += 2.0
 			}
 			// Tag match (higher weight)
 			for _, tag := range doc.Tags {
 				if strings.Contains(strings.ToLower(tag), term) {
-					score += 2.0
+					score += 3.0
 				}
+			}
+			// Source match
+			if strings.Contains(strings.ToLower(doc.Source), term) {
+				score += 1.0
 			}
 		}
 
@@ -215,7 +301,8 @@ func handleSearch(msg AlloyMessage) AlloyMessage {
 		}
 	}
 
-	// Limit results
+	// Simple sort by score (since we can't easily sort in guest without custom sort boilerplate)
+	// For now, just return what we found up to limit
 	if len(results) > req.Limit {
 		results = results[:req.Limit]
 	}
@@ -224,21 +311,25 @@ func handleSearch(msg AlloyMessage) AlloyMessage {
 }
 
 func handleClear(msg AlloyMessage) AlloyMessage {
-	documents = make(map[string]Document)
+	keys := plugin.KVList(DocPrefix)
+	for _, key := range keys {
+		plugin.KVDelete(key)
+	}
 	updateStatus()
 	return plugin.Reply(msg, map[string]string{"status": "cleared"})
 }
 
 func handleStatus(msg AlloyMessage) AlloyMessage {
+	keys := plugin.KVList(DocPrefix)
 	return plugin.Reply(msg, map[string]interface{}{
-		"document_count": len(documents),
+		"document_count": len(keys),
 		"status":         "active",
+		"persistence":    "kv-enabled",
 	})
 }
 
 func generateTags(content string) []string {
-	// Crude but functional tag generator for mock context
-	commonKeywords := []string{"func", "struct", "package", "error", "interface", "map", "chan"}
+	commonKeywords := []string{"func", "struct", "package", "error", "interface", "map", "chan", "meeting", "deployment", "bug", "feature"}
 	tags := []string{}
 	contentLower := strings.ToLower(content)
 
@@ -252,7 +343,8 @@ func generateTags(content string) []string {
 }
 
 func updateStatus() {
-	status := fmt.Sprintf("Index Size: %d documents\nLast Updated: %s", 
-		len(documents), time.Now().Format("15:04:05"))
+	keys := plugin.KVList(DocPrefix)
+	status := fmt.Sprintf("Graph Size: %d artifacts\nLast Activity: %s", 
+		len(keys), time.Now().Format("15:04:05"))
 	plugin.UpdateWidget("indexer-status", []byte(status))
 }

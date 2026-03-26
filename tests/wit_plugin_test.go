@@ -143,6 +143,15 @@ func TestWITPlugins(t *testing.T) {
 			},
 			tests: testTasksPlugin,
 		},
+		{
+			name:     "index",
+			wasmFile: filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/index.wasm"),
+			caps: []api.Capability{
+				{Method: "knowledge:ingest", Description: "Ingest document"},
+				{Method: "knowledge:search", Description: "Search knowledge graph"},
+			},
+			tests: testIndexPlugin,
+		},
 	}
 
 	// Test each plugin
@@ -435,5 +444,65 @@ func testTasksPlugin(t *testing.T, manager *wasm.Manager) {
 
 	if result.Status != "created" {
 		t.Errorf("unexpected status: %s", result.Status)
+	}
+}
+
+func testIndexPlugin(t *testing.T, manager *wasm.Manager) {
+	// Test ingesting a document
+	testMsg := api.Message{
+		ID:      "test-index-ingest",
+		Method:  "knowledge:ingest",
+		Sender:  "test-client",
+		Target:  "index",
+		Payload: json.RawMessage(`{"path":"test.txt","content":"This is a test document about Alloy."}`),
+	}
+
+	err := manager.RouteMessage(context.Background(), "index", testMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := manager.GetResponse(context.Background(), "index", testMsg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "test-index-ingest-resp" {
+		t.Errorf("unexpected response ID: %s", resp.ID)
+	}
+
+	// Test searching the document
+	searchMsg := api.Message{
+		ID:      "test-index-search",
+		Method:  "knowledge:search",
+		Sender:  "test-client",
+		Target:  "index",
+		Payload: json.RawMessage(`{"query":"Alloy"}`),
+	}
+
+	err = manager.RouteMessage(context.Background(), "index", searchMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	searchResp, err := manager.GetResponse(context.Background(), "index", searchMsg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var results []struct {
+		Document struct {
+			Path string `json:"path"`
+		} `json:"document"`
+		Score float64 `json:"score"`
+	}
+	if err := json.Unmarshal(searchResp.Payload, &results); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) == 0 {
+		t.Error("search should return results")
+	} else if results[0].Document.Path != "test.txt" {
+		t.Errorf("unexpected document path: %s", results[0].Document.Path)
 	}
 }
