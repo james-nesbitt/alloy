@@ -50,23 +50,23 @@ Refining the core for multi-user, multi-modal interaction.
 - [x] **Hot-Reloading**: Seamless plugin updates without restart.
 - [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
 
-## Phase 7: Project Orchestration (The "What")
-Defining project scopes through manifests and archetypes.
+## Phase 7: Project Orchestration (The Shared Effort)
+Defining team-wide scopes through manifests and archetypes.
 - [ ] **Project Manifest Schema**: `alloy-project.json` for plugin and capability requirements.
-- [ ] **Archetype Bootstrapping**: Automated loading of plugin suites (Coding, Sales, Support, Ops).
-- [ ] **Capability-Based Discovery**: Decoupling functionality from specific plugin IDs using WIT interfaces.
+- [ ] **Archetype Bootstrapping**: Automated loading of project-specific plugin suites (Coding, Sales, Support, Ops).
+- [ ] **Capability-Based Discovery**: Decoupling project functionality from specific plugin IDs using WIT interfaces.
 
 ## Phase 8: Contextual Identity & Roles (The "Who")
-Mapping users to project roles and enforcing capability-based access.
-- [ ] **Project-Specific Role Mappings**: Contextual RBAC linking mTLS identities to roles (Editor, Planner, Reviewer).
-- [ ] **Role-Filtered Messaging**: IAM-level filtering of requests and events based on active role.
+Mapping mTLS identities to **Project Roles** and enforcing capability-based access.
+- [ ] **Project-Specific Role Mappings**: Contextual RBAC linking verified actors to project roles (Editor, Planner, Reviewer).
+- [ ] **Role-Filtered Messaging**: IAM-level filtering of requests and events based on active project roles.
 - [ ] **Capability Visibility**: Automatically hiding/disabling commands in the Omni-palette that exceed a user's role permissions.
 
-## Phase 9: Workspace Composition (The "Lens")
-Merging project requirements with user-specific preferences and private tools.
-- [ ] **Frontend Composition Engine**: Three-way merge of Project Substrate, Role Capabilities, and User Profile.
-- [ ] **User Plugin Side-cars**: Personal plugins running in the user context, isolated from the team core.
-- [ ] **Profile-Driven Interface**: User-selectable themes, keybinding drivers, and private dashboard widgets.
+## Phase 9: Workspace Composition (The User Synthesis)
+Merging **Project Tools** with **User Tools** and preferences.
+- [ ] **Workspace Composition Engine**: Three-way merge of Project Tools, Role Capabilities, and User Tools.
+- [ ] **User Plugin Side-cars**: Personal tools and plugins running in the user's frontend context.
+- [ ] **Workspace Evolution**: Persistence of per-project layouts, themes, and navigation drivers.
 
 ## Phase 10: Advanced Team UX (The "Cooperation")
 Refining the real-time collaborative experience.

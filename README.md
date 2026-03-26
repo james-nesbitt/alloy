@@ -1,23 +1,28 @@
 # Alloy: The Modular Team Coordination Framework
 
-Alloy is a secure, high-performance **Workspace Kernel** designed for multi-user, multi-role collaboration. It acts as a central coordinator that manages **Plugins, Messages, Security, Capabilities, and Events**, providing the platform for a team to cooperate in shared, extensible workspaces.
+Alloy is a secure, high-performance **Workspace Kernel** designed for multi-user, multi-role collaboration. It acts as a central coordinator that manages **Plugins, Messages, Security, Capabilities, and Events**, providing the foundation for how teams cooperate.
 
-## The Core: A Robust Coordination Kernel
+## Core Concepts
 
-Alloy's kernel is the stable "substrate" of the workspace. Its primary responsibility is to provide the critical infrastructure required for secure communication and state management.
+To understand how Alloy functions, we define three primary layers:
 
-- **Plugin Orchestration**: Dynamic loading, lifecycle management, and strict sandboxing of WASM-based application logic.
-- **Message Routing & Events**: A high-speed, identity-aware event bus for routing messages between plugins, frontends, and users.
-- **Security & IAM**: Integrated mTLS identity verification and role-based access control (RBAC) enforced at the kernel level for every interaction.
-- **Capability Discovery**: A WIT-based (Wasm Interface Type) registry that allows plugins to expose and consume capabilities across the system.
+### 1. The Project (Team-Wide)
+A **Project** defines the shared functionality and infrastructure for a team working on a single effort. It is the "Source of Truth" for collaboration, specifying:
+- **Shared Plugins**: The specific capability providers (e.g., Coding, Sales, or Ops tools) required for the effort.
+- **Shared State**: The data-streams, buffers, and knowledge graphs the team interacts with.
+- **Security & Roles**: The policies and identity mappings that define who can do what (Editors, Planners, Reviewers).
 
-## The Goal: Runtime Collaboration
+### 2. The Frontend (Interaction)
+A **Frontend** is how an individual user interacts with the backend kernel. Frontends provide the hardware-specific bridge between the user and the project data.
+- **TUI**: High-density terminal interface (Bubbletea).
+- **GUI**: Hardware-accelerated native interface (Gio).
+- **Web**: Remote access via a modern browser.
 
-While the kernel provides the foundation, Alloy’s value is delivered through **Runtime Plugins**. These plugins expand the core with domain-specific functionality to support the true goal of the system: **Team Cooperation**.
-
-1.  **Project-Specific Archetypes**: A single Alloy instance can host diverse project types simultaneously (Coding, Sales, Ops).
-2.  **Role-Based Interfaces**: Different users participate in a project through different lenses (Editor, Planner, Reviewer).
-3.  **User-Personalized Composition**: Frontends (TUI, GUI, Web) assemble these capabilities into a personalized workspace.
+### 3. The Workspace (User-Specific)
+A **Workspace** is the frontend's collection of **Project Tools** and **User Personal Tools** into a single, cohesive interface. It is the user's specific "Lens" into the project, merging:
+- **Project Tools**: Shared components defined by the team (e.g., Team Chat, Project Dashboard).
+- **User Tools**: Personal components and "side-cars" (e.g., Private Scratchpads, Personal TODOs).
+- **Personalization**: The user's preferred layout, theme, and navigation driver (Vim, Helix, or Meow).
 
 ## 🚀 Quick Start
 

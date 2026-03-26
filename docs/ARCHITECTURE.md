@@ -1,23 +1,30 @@
 # Alloy Architecture: The Coordination Kernel
 
-Alloy is architected as a **Modular Workspace Engine**. The **Alloy Kernel** acts as a central coordinator for **Plugins, Messages, Security, Capabilities, and Events**, providing a stable substrate for multi-user, multi-role collaboration.
+Alloy is architected as a **Modular Team Coordination Framework**. The **Alloy Kernel** acts as a central coordinator for **Plugins, Messages, Security, Capabilities, and Events**, enabling shared efforts between diverse users.
 
 ---
 
-## 1. The Coordination Kernel
+## 1. Core Architecture Layers
 
-The Alloy Kernel is responsible for the core lifecycle and "Operating System" layer of the workspace. It manages the following critical foundations:
+Alloy decomposes a collaborative environment into three distinct layers: the **Project**, the **Frontend**, and the **Workspace**.
 
-- **Security & Authorization (IAM)**: Every interaction is authorized by an integrated Identity and Access Management layer. Permissions are granular and contextual, mapping mTLS-verified actors to specific roles within a project.
-- **Message Bus & Router**: A high-performance IPC (Inter-Process Communication) and RPC (Remote Procedure Call) layer that facilitates communication between the kernel, plugins, and frontends.
-- **WASM Plugin Runtime**: A `wazero`-based engine for loading and executing isolated application logic using the WebAssembly Component Model (WIT).
-- **Event Bus (Pub/Sub)**: Real-time message distribution for asynchronous notifications, shared state updates, and team activity streams.
-- **Capability Discovery & Registry**: The "connective tissue" that maps system capabilities (defined via WIT) to their providers, allowing plugins to consume each other's services in a secure, decoupled manner.
-- **Telemetry & Logging**: Native monitoring of all system calls and plugin interactions for observability and auditing.
+### 1.1 The Project (The Shared Effort)
+A **Project** is the team-wide definition of a single coordination effort. It lives in the kernel's state (and optional `alloy-project.json`) and specifies:
+- **Capabilities & Plugins**: The required runtime plugins (e.g., `git`, `crm`, `chat`) needed to fulfill the project's goal.
+- **Roles & Identity**: The mapping of verified identities (via mTLS) to project-specific roles (Editor, Planner, Auditor).
+- **Shared Event Bus**: The real-time messaging substrate for cross-user state synchronization and system events.
 
----
+### 1.2 The Frontend (The Gateway)
+A **Frontend** is the translation layer between the user and the kernel. Each frontend (TUI, GUI, Web) is responsible for:
+- **IPC Protocol**: Communicating with the kernel via a secure (mTLS or PeerCreds) socket using the `api.Message` protocol.
+- **Hardware Abstraction**: Mapping data-streams from the kernel to the user's terminal, graphics card, or browser engine.
+- **Input Handling**: Managing raw keyboard/mouse events and passing them to the active **Modal Driver** (Neovim, Helix, or Meow).
 
-## 2. Runtime Plugins (Application Logic)
+### 1.3 The Workspace (The User's Interface)
+A **Workspace** is the synthesis of project-level tools and personal user tools into a cohesive UI.
+- **Project Tools**: Mandatory components assigned by the project's archetype (e.g., a "Team Task Board" or "Project Dashboard").
+- **User Tools**: Optional, personal components (e.g., "Private Notes", "Pomodoro Timer") that are only visible to the individual user.
+- **Composition Engine**: The frontend logic that merges the shared **Project Manifest** with the **User Profile** to produce a personalized, contextual environment.
 
 While the kernel provides the infrastructure, the true goals of the application—**Team Cooperation**—are delivered through **Runtime Plugins**. These plugins expand the core by adding domain-specific functionality.
 The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and a tiered ecosystem of services.

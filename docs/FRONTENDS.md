@@ -1,21 +1,24 @@
-# Frontend Philosophy: The Composition Engine
+# Frontend Philosophy: The Workspace Composition Engine
 
-Alloy's frontends (TUI, GUI, Web) are **Composition Engines**. They do not just "draw" pixels; they assemble a personal workspace by combining backend capabilities, role-specific tools, and user preferences.
+Alloy's frontends (TUI, GUI, Web) are **Workspace Composition Engines**. They do not just "draw" pixels; they assemble a personal workspace by combining **Project Tools** with **User Tools** into a single project interface.
 
-## 1. Composition Over Arbitration
+## 1. Defining the Workspace
 
-In Alloy, the UI is a **Dynamic Assembly** of three distinct layers of content:
+In Alloy, the UI is a **Personal Synthesis** of three distinct layers of functionality:
 
-1.  **Project Substrate (Shared)**: Components every participant sees regardless of their role (e.g., Team Chat, Project Dashboard, Activity Log).
-2.  **Role-Specific Capabilities**: Specialized tools enabled based on the user's role in the current project:
-    - **Developers**: Shared Buffers, Git Status, Tool-use AI.
-    - **Planners**: Task Boards, Resource Allocation, Gantt charts.
-    - **Support**: Multi-channel communication, knowledge base search.
-3.  **User Personalization**: Individualized layout adjustments, private plugins (Personal TODOs, Scratchpads), and theme choices.
+### 1.1 Project Tools (Shared Effort)
+Shared components used by everyone in the project (e.g., Team Chat, Project Dashboard, Activity Log). These are typically defined by a `Project Archetype` (Coding, Sales, etc.) and mandated by the project's manifest.
+
+### 1.2 User Tools (Personal Capability)
+User-specific components that are not visible to the team (e.g., Private Scratchpads, Personal TODO lists, or individual "side-car" plugins). The frontend is responsible for loading these from the user's local profile and integrating them into the active workspace layout.
+
+### 1.3 Personalization (The Experience)
+The user's preferred layout, theme, and navigation style (the **Modal Driver**).
 
 ---
 
-## 2. Interactive Modality
+## 2. Interaction & Modality
+A workspace isn't just a layout; it is an **Interaction Set**. All frontends provide a **Unified Interaction Bridge** where all tools (both project and user) respect a shared modal state (Neovim, Helix, or Meow).
 
 Alloy frontends provide a **Unified Interaction Bridge** where all components respect a shared modal state. This means you can use the same Neovim, Helix, or Meow navigation across different project views.
 
