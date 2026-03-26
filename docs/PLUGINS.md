@@ -24,7 +24,7 @@ Application logic is implemented as independent WebAssembly binaries using the *
 | `buffer` | WASM | Manages collaborative data streams and shared editing state. |
 | `chat` | WASM | Real-time messaging, channels, and presence tracking. |
 | `index` | WASM | **Knowledge Graph Indexer**: Unified activity indexing and team search. |
-| `omni-palette`| WASM| **Unified Search**: Single entry point for commands, files, and knowledge. |
+| `omni-palette`| WASM| **Universal Search**: Integrated command and knowledge exploration with contextual boosting and shortcut discovery. |
 | `project` | WASM | Organizes resources (buffers, chats, files) into logical projects. |
 | `secrets` | WASM | Encrypted storage and policy-based retrieval of sensitive data. |
 | `tasks` | WASM | Background job management and scheduling. |

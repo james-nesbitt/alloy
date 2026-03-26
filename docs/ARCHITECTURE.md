@@ -10,15 +10,17 @@ Alloy's architecture follows a **Pragmatic Hybrid Kernel** pattern. Unlike a tra
 The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and a tiered ecosystem of services.
 
 #### Tier 1: Integrated Core Services (Go-Native)
-- **Native Security Router**: A low-latency authorization layer inside the kernel (`pkg/kernel/iam.go`) that protects core message routing.
+- **Native Security Router**: A low-latency authorization layer inside the kernel (`pkg/kernel/iam.go`) that protects core message routing using mTLS-verified identities and peer-credential checks.
+- **Buffer Manager**: Integrated shared memory management (`pkg/kernel/buffer_manager.go`) that provides high-performance Mmap-based data synchronization for collaborative editing and real-time streams.
 - **Key-Value Store (KV)**: A high-performance, persistent state store integrated directly into the kernel to eliminate RPC overhead for frequent metadata reads/writes.
 - **Event Bus (Pub/Sub)**: The internal central nervous system for message routing and asynchronous event notification.
 - **Telemetry & Logging**: Native monitoring of all kernel and plugin interactions.
 
 #### Tier 2: Standard Library Plugins (WASM)
-While functionally core to the platform, these are implemented as WASM plugins for extensibility:
+While functionally core to the platform, these are implemented as WASM plugins for extensibility using the [Alloy Guest SDK](../pkg/wasm/guest/sdk.go):
 - **IAM Service**: Advanced, granular RBAC (Role-Based Access Control) with resource-level permissions and active security auditing.
 - **Knowledge Graph (Indexer)**: A unified activity indexer that listens to cross-plugin event streams (Chat, Buffers, Tasks, Projects) and maintains a persistent, searchable semantic graph.
+- **Omni-Palette**: Universal search and command entry point that aggregates results from all registered plugins and provides contextual command boosting.
 - **Storage Service**: Virtual Filesystem (WASI) provider and metadata management.
 - **Command Manager**: Central registry for all system capabilities and keyboard shortcuts.
 
@@ -66,10 +68,11 @@ Frontends provide user interaction and connect to the backend core via IPC. See 
     - **Self-Sourced Configuration**: Each frontend is responsible for loading its own configuration.
     - **Backend Orchestration**: When a frontend starts a new backend, it is responsible for passing the initial backend configuration, including the list of plugins to load and security policy restrictions.
     - **Policy Integration**: Backend and plugin policy restrictions are defined within the configuration and enforced by the kernel upon startup.
+- **Standard Security Integration**: All frontends use the `cmdutil` package's `RegisterSecurityFlags` to ensure consistent mTLS/PKI configuration and identity handling.
 - **Implementations**:
-  - **TUI (terminal)**: Written in Go (Bubbletea).
-  - **GUI (Wayland)**: Written in Go (Gio).
-  - **Web**: Go-based web server serving a JS/TS frontend.
+  - **TUI (terminal)**: A fully-featured, Vim-inspired client using `bubbletea` with integrated Modal editing and Omni-palette search.
+  - **GUI (Wayland/X11)**: A high-performance native client built with `Gio`, supporting hardware acceleration and advanced system-theme integration.
+  - **Web**: A modern web client providing access via a Go-WASM bridge, enabling remote workspace collaboration in the browser.
 
 ---
 

@@ -1,18 +1,19 @@
 # Alloy Security Framework
 
-Alloy is designed with a "Security-First" mindset, though several high-level security features (like mTLS and encrypted envelopes) are currently deferred during the initial development phase.
+Alloy enforces a **"Security-First"** architecture with built-in Mutual TLS (mTLS) and Peer-to-Peer identity verification at every layer.
 
-## 1. Identity Management
+## 1. Identity Management & PKI
 
-Alloy uses a **Connection-Level Identity** model. 
-- **Automated Identification**: The IPC server automatically extracts identity from the connection (e.g., mTLS Subject Common Name or peer UID/GID) and stamps it as the `Actor` on every message.
-- **Verification**: The `Sender` field in a message provides the claimed identity, while the `Actor` field (populated by the kernel) provides the *verified* identity used for authorization.
+Alloy uses a **Connection-Level Identity** model from its internal Public Key Infrastructure.
+- **Mutual TLS (mTLS)**: Every connection (TCP or Unix) requires a client certificate signed by the Alloy root CA. The Common Name (CN) or Serial is automatically extracted as the immutable `Actor` for all subsequent messages.
+- **Peer Verification**: On Unix Sockets, `PeerCredentials` (UID/GID) are used to confirm local client identity and map them to their configured system actor.
+- **Verification**: The `Sender` field in a message provides the claimed identity, while the `Actor` field (populated by the kernel) provides the *verified* identity used for all authorization decisions.
 
 ## 2. Secure Communication
 
-- **Mutual TLS (mTLS)**: Cross-process communication over TCP requires signed certificates.
-- **Local Hardening**: PeerCredential verification (UID/GID) is used for Unix Domain Sockets to confirm the identity of local clients.
-- **Insecure Development Mode**: A bootstrap mode is available for local testing where identity is inferred but skip-validated.
+- **Encrypted Channels**: All IPC traffic is encrypted with modern TLS 1.3 suites.
+- **Unified Security Flags**: Frontends and the kernel share a common `cmdutil` security suite (`RegisterSecurityFlags`) for certificate, socket, and actor configuration.
+- **PKI Lifecycle**: Simple CLI commands via the `alloy` tool manage the local Root CA, backend certificates, and user/frontend keys.
 
 ## 3. Mandatory Access Control (MAC)
 

@@ -36,18 +36,19 @@ This document outlines the design for the Alloy TUI (`alloy-tui`), focusing on a
 | `Ctrl-w` + `c` | Close current pane |
 | `Tab` | (In Command Bar) Auto-complete command |
 
-## Implementation Plan
+## Implementation Progress
 
-### Phase 1: Enhanced TUI Foundation
-- [ ] **State Machine**: Implement a robust mode-based state machine in `cmd/alloy-tui/main.go`.
-- [ ] **Command Bar Component**: Create a dedicated component for the minibuffer with history and completion.
-- [ ] **Layout Manager**: Implement a basic pane manager that can split the screen area between multiple `tea.Model` components.
+### Phase 1: Enhanced TUI Foundation (Complete)
+- [x] **State Machine**: Implement a robust mode-based state machine in `cmd/alloy-tui/main.go`.
+- [x] **Command Bar Component**: Create a dedicated component for the minibuffer with history and completion.
+- [x] **Layout Manager**: Implement a basic pane manager that can split the screen area between multiple `tea.Model` components.
 
-### Phase 2: Buffer Service Integration
-- [ ] **Buffer Listing**: Command `:ls` or `:buffers` calls `buffer:list`.
-- [ ] **Buffer Selection**: Command `:b <id>` calls `buffer:open`.
-- [ ] **Syncing events**: Handle `buffer:updated` events to refresh the active pane.
+### Phase 2: Buffer Service Integration (Complete)
+- [x] **Buffer Listing**: Command `:ls` or `:buffers` calls `buffer:list`.
+- [x] **Buffer Selection**: Command `:b <id>` calls `buffer:open`.
+- [x] **Syncing events**: Handle `buffer:updated` events to refresh the active pane.
 
-### Phase 3: Plugin Interaction
-- [ ] **Generic Plugin Proxy**: Any method discovered via `command-manager` can be called via `:call <plugin> <method> <payload>`.
-- [ ] **Specialized Views**: Create a "Chat View" for `chat` and a "Log View" for kernel logs.
+### Phase 3: Plugin Interaction & Advanced Search (Complete)
+- [x] **Generic Plugin Proxy**: Any method discovered via `command-manager` can be called via `:call <plugin> <method> <payload>`.
+- [x] **Omni-Palette Integration**: Unified search (`/` or `Ctrl-p`) communicating with the `omni-palette` WASM plugin.
+- [x] **Specialized Views**: Functional Chat view and dynamic Dashboard for registered widgets.

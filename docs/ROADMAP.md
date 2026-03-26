@@ -45,6 +45,8 @@ Expanding the feature set and user interaction.
 ## Phase 6: Advanced Refinement (In Progress)
 - [x] **Alloy GUI**: Stable Wayland-compatible client (Gio).
 - [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
-- [ ] **Omni-Palette**: Unified search and command entry.
+- [x] **Omni-Palette**: Unified search and command entry.
+- [ ] **Universal Modal Interface**: Unified navigation state across TUI, GUI, and Web.
+- [ ] **Configurable Modal Engine**: Choice of Neovim, Helix, or Emacs-Meow interaction sets.
 - [x] **Hot-Reloading**: Seamless plugin updates without restart.
 - [ ] **Resource Isolation**: Configurable CPU/Memory limits.

@@ -89,6 +89,7 @@ For more detailed information, see [Build and Plugin Guidelines](docs/BUILD_AND_
 - [Frontend Details](docs/FRONTENDS.md)
 - [Security Framework](docs/SECURITY.md)
 - [Implementation Roadmap](docs/ROADMAP.md)
+- [Modal Interaction Design](docs/MODAL_DESIGN.md)
 - [Coding Guidelines](docs/CODING_GUIDELINES.md)
 
 ## ⚖️ License
