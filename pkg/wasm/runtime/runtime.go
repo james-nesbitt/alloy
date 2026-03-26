@@ -34,6 +34,9 @@ type Runtime struct {
 	mu         sync.RWMutex
 	hostModule wazeroapi.Module
 
+	// Integrated Buffer Management
+	buffers api.MmapRegistry
+
 	// Workspace management
 	workspaces      map[string]api.Workspace
 	activeWorkspace string
@@ -120,6 +123,7 @@ func NewRuntime(
 	logger *slog.Logger,
 	kv storage.StateStore,
 	dataDir string,
+	bufferRegistry api.MmapRegistry,
 	router func(ctx context.Context, msg api.Message),
 	call func(ctx context.Context, msg api.Message) (api.Message, error),
 ) (*Runtime, error) {
@@ -131,6 +135,7 @@ func NewRuntime(
 		logger:     logger,
 		kv:         kv,
 		dataDir:    dataDir,
+		buffers:    bufferRegistry,
 		routerFn:   router,
 		callFn:     call,
 		plugins:    make(map[string]*Instance),
@@ -1220,7 +1225,38 @@ func (r *Runtime) writeCapability(ctx context.Context, mod wazeroapi.Module, ptr
 func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, resultPtr uint32) {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
 
-	// Synchronous call to buffer plugin
+	// Try Host Registry First
+	if r.buffers != nil {
+		if b, ok := r.buffers.GetBuffer(id); ok {
+			alloc := mod.ExportedFunction("cabi_realloc")
+			writeStr := func(ptr uint32, s string) {
+				res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+				mod.Memory().Write(uint32(res[0]), []byte(s))
+				mod.Memory().WriteUint32Le(ptr, uint32(res[0]))
+				mod.Memory().WriteUint32Le(ptr+4, uint32(len(s)))
+			}
+
+			mod.Memory().WriteUint32Le(resultPtr, 1) // Some
+			bufPtr := resultPtr + 8
+
+			writeStr(bufPtr, b.GetID())
+			writeStr(bufPtr+8, b.GetName())
+
+			// Content list
+			data := b.GetData()
+			cRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(data)))
+			mod.Memory().Write(uint32(cRes[0]), data)
+			mod.Memory().WriteUint32Le(bufPtr+16, uint32(cRes[0]))
+			mod.Memory().WriteUint32Le(bufPtr+20, uint32(len(data)))
+
+			mod.Memory().WriteUint64Le(bufPtr+24, uint64(b.GetLastModified()))
+			// Default Mime-type
+			writeStr(bufPtr+32, "application/octet-stream")
+			return
+		}
+	}
+
+	// Synchronous call to buffer plugin (Standard Path Fallback)
 	resp, err := r.callFn(ctx, api.Message{
 		ID:      fmt.Sprintf("read-buf-%d", time.Now().UnixNano()),
 		Type:    api.TypeRequest,
@@ -1275,6 +1311,34 @@ func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, 
 func (r *Runtime) internalWriteBuffer(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, contentPtr, contentLen uint32) uint32 {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
 	content, _ := mod.Memory().Read(contentPtr, contentLen)
+
+	// TRY Host Path first
+	if r.buffers != nil {
+		if mod.Name() == "buffer" {
+			// Special: the 'buffer' plugin is the authoritative source for these
+			b, err := r.buffers.CreateBuffer(id, id, int(contentLen))
+			if err == nil {
+				// Buffer might already exist, so we use Write logic (simple overwrite for now)
+				bData := b.GetData()
+				copy(bData, content)
+				b.Lock()
+				// Note: Interface does not currently define SetVersion,
+				// we'll assume the implementation handles it inside Write-like logic if we had it,
+				// or just use the lock.
+				b.Unlock()
+				return 1
+			}
+		} else {
+			// OTHER plugins can write via the buffer manager too if it's already there
+			if b, ok := r.buffers.GetBuffer(id); ok {
+				bData := b.GetData()
+				copy(bData, content)
+				b.Lock()
+				b.Unlock()
+				return 1
+			}
+		}
+	}
 
 	payload, _ := json.Marshal(map[string]any{
 		"id":      id,
@@ -1479,6 +1543,16 @@ func (r *Runtime) ListWidgets() []api.Widget {
 }
 
 func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, resultPtr uint32) {
+	id := r.readStringFromArgs(mod, idPtr, idLen)
+
+	r.logger.Debug("get-buffer-view called", "plugin", mod.Name(), "id", id)
+
+	if r.buffers != nil {
+		if _, ok := r.buffers.GetBuffer(id); ok {
+			// (Implementation details for v0.1.2)
+		}
+	}
+
 	// Stub: In v0.1.1, we'll return None (0)
 	// This signals to the guest SDK that it must fallback to the standard 'read-buffer' copy path.
 	mod.Memory().WriteUint32Le(resultPtr, 0) // None

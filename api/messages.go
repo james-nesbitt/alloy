@@ -179,3 +179,30 @@ type Project struct {
 	Layout      WorkspaceConfig `json:"layout,omitempty"`
 	Metadata    map[string]any  `json:"metadata,omitempty"`
 }
+
+// MmapRegistry defines the interface for mapping buffers in WASM.
+type MmapRegistry interface {
+	GetBuffer(id string) (SharedBuffer, bool)
+	CreateBuffer(id, name string, initialSize int) (SharedBuffer, error)
+}
+
+// SharedBuffer represents a host-side shared memory region.
+type SharedBuffer interface {
+	GetID() string
+	GetName() string
+	GetData() []byte
+	GetSize() int
+	Lock()
+	Unlock()
+	GetVersion() int
+	GetLastModified() int64
+}
+
+// Buffer reflects a handle to shared memory or file-backed storage
+type Buffer struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Content      []byte `json:"content"`
+	Size         int    `json:"size"`
+	LastModified int64  `json:"last_modified,omitempty"`
+}

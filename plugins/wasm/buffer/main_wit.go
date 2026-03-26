@@ -212,6 +212,11 @@ func handleCreate(msg guest.AlloyMessage) guest.AlloyMessage {
 	}
 	buffers[id] = b
 
+	// Create in Host if large/shared candidate
+	if len(req.Content) > 0 {
+		plugin.WriteBuffer(id, req.Content)
+	}
+
 	// Notify subscribers
 	notifyAll(id, "create")
 
@@ -262,27 +267,23 @@ func handleRead(msg guest.AlloyMessage) guest.AlloyMessage {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
+	// Try Direct Host Path first
+	if b, ok := plugin.ReadBuffer(req.ID); ok {
+		return plugin.Reply(msg, b)
+	}
+
+	// Fallback to internal tracker
 	root, ok := findRootBuffer(req.ID)
 	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	type readResponse struct {
-		ID      string            `json:"id"`
-		RootID  string            `json:"root_id"`
-		Content []byte            `json:"content"`
-		Version int               `json:"version"`
-		Cursors map[string]Cursor `json:"cursors,omitempty"`
-		Size    int               `json:"size"`
-	}
-
-	return plugin.Reply(msg, readResponse{
-		ID:      req.ID,
-		RootID:  root.ID,
-		Content: root.Data,
-		Version: root.Version,
-		Cursors: root.UserCursors,
-		Size:    len(root.Data),
+	return plugin.Reply(msg, guest.AlloyBuffer{
+		Id:           root.ID,
+		Name:         root.Name,
+		Content:      root.Data,
+		LastModified: uint64(root.Timestamp),
+		MimeType:     root.MimeType,
 	})
 }
 
@@ -411,6 +412,9 @@ func handleWrite(msg guest.AlloyMessage) guest.AlloyMessage {
 	if len(root.History) > 100 {
 		root.History = root.History[len(root.History)-100:]
 	}
+
+	// Sync with Host
+	plugin.WriteBuffer(req.ID, root.Data)
 
 	notifyAll(req.ID, "update")
 

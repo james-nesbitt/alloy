@@ -389,6 +389,21 @@ func (p *Plugin) ReadBuffer(id string) (AlloyBuffer, bool) {
 	return AlloyBuffer{}, false
 }
 
+// ReadBufferShared returns the direct host memory for a buffer if available.
+// This is the fastest possible data path.
+func (p *Plugin) ReadBufferShared(id string) ([]byte, bool) {
+	ptr, size, ok := p.host.GetBufferView(id)
+	if !ok {
+		return nil, false
+	}
+	
+	// Implementation note: converting ptr/size to []byte safely requires 
+	// specific WASM memory flags. For now, this is a placeholder 
+	// until we finalize the Memory Layout for v0.1.2.
+	p.Log(LogLevelDebug, fmt.Sprintf("Shared buffer mapped at %d with size %d", ptr, size))
+	return nil, false 
+}
+
 func (p *Plugin) WriteBuffer(id string, content []byte) bool {
 	return p.host.WriteBuffer(id, content)
 }

@@ -64,6 +64,7 @@ type Kernel struct {
 	network    *NetworkManager
 	cache      *CacheManager
 	doc        *DocStore
+	buffers    *BufferManager
 
 	// security configuration
 	insecure bool
@@ -97,8 +98,10 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 		tracer:        otel.Tracer(tracerName),
 	}
 
+	k.buffers = NewBufferManager(logger, dataDir)
+
 	// Create the WASM manager
-	wm, err := wasm.NewManager(logger, storage, dataDir, k.RouteMessage, k.HandleMessageSync)
+	wm, err := wasm.NewManager(logger, storage, dataDir, k.buffers, k.RouteMessage, k.HandleMessageSync)
 	if err != nil {
 		return nil, err
 	}

@@ -41,7 +41,7 @@ func TestManagerBasicOperations(t *testing.T) {
 	}
 
 	// Test 1: Create manager
-	manager, err := wasm.NewManager(logger, kv, tempDir, router, call)
+	manager, err := wasm.NewManager(logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestManagerPluginLifecycle(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm.NewManager(logger, kv, tempDir, router, call)
+	manager, err := wasm.NewManager(logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestManagerMessageRouting(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm.NewManager(logger, kv, tempDir, router, call)
+	manager, err := wasm.NewManager(logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

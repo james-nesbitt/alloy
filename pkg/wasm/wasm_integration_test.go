@@ -60,7 +60,7 @@ func TestWITRuntimeIntegration(t *testing.T) {
 	}
 
 	// Create runtime
-	runtime, err := runtime.NewRuntime(context.Background(), nil, kv, tempDir, router, call)
+	runtime, err := runtime.NewRuntime(context.Background(), nil, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -49,7 +49,7 @@ func TestRuntimeBasicOperations(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestRuntimePluginLifecycle(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestRuntimeMessageRouting(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestWorkspaceWIT(t *testing.T) {
 	}
 
 	// Create runtime
-	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, router, call)
+	rt, err := NewRuntime(context.Background(), logger, kv, tempDir, nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

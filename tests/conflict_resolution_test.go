@@ -38,7 +38,7 @@ func TestBufferConflictResolution(t *testing.T) {
 		return api.Message{}, nil
 	}
 
-	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

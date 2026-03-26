@@ -19,6 +19,9 @@ type Manager struct {
 	mu       sync.RWMutex
 	routerFn func(ctx context.Context, msg api.Message)
 	callFn   func(ctx context.Context, msg api.Message) (api.Message, error)
+
+	// Buffers (Integrated)
+	buffers api.MmapRegistry
 }
 
 // PluginInstance represents a loaded plugin instance.
@@ -35,11 +38,12 @@ func NewManager(
 	logger *slog.Logger,
 	kv storage.StateStore,
 	dataDir string,
+	bufferRegistry api.MmapRegistry,
 	router func(ctx context.Context, msg api.Message),
 	call func(ctx context.Context, msg api.Message) (api.Message, error),
 ) (*Manager, error) {
 	// Create the runtime
-	rt, err := runtime.NewRuntime(context.Background(), logger, kv, dataDir, router, call)
+	rt, err := runtime.NewRuntime(context.Background(), logger, kv, dataDir, bufferRegistry, router, call)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +54,7 @@ func NewManager(
 		plugins:  make(map[string]*PluginInstance),
 		routerFn: router,
 		callFn:   call,
+		buffers:  bufferRegistry,
 	}, nil
 }
 

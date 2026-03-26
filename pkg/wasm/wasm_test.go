@@ -51,7 +51,7 @@ func TestWITRuntime(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(logger, kv, filepath.Join(tempDir, "plugins"), nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

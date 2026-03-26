@@ -35,6 +35,11 @@ flatpak: build-all
 
 # --- CLEANUP ---
 
+# Format all Go source code
+fmt:
+    @echo ">> Formatting Go source code..."
+    go fmt ./...
+
 # Remove build artifacts and temporary files
 clean:
     rm -rf {{BUILD_DIR}}
