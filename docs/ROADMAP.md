@@ -43,33 +43,42 @@ Expanding the feature set and user interaction.
 - [x] **Knowledge Graph**: Semantic indexing and team-wide search.
 
 ## Phase 6: The Collaborative Foundation (In Progress)
-Refining the core for multi-user, multi-modal interaction.
+Hardening the core for multi-user, multi-modal interaction.
 - [x] **Omni-Palette**: Unified search and command entry.
 - [ ] **Universal Modal Engine**: Common state machine for Vim/Helix/Meow navigation.
-- [ ] **Resource Isolation**: Strict CPU/Memory limits for plugin stability.
+- [ ] **Resource Isolation**: Strict CPU/Memory limits to protect shared workspaces.
 - [x] **Hot-Reloading**: Seamless plugin updates without restart.
 - [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
 
 ## Phase 7: Project Orchestration (The Shared Effort)
-Defining team-wide scopes through manifests and archetypes.
+Defining the "What": The contract for a team’s coordination.
 - [ ] **Project Manifest Schema**: `alloy-project.json` for plugin and capability requirements.
 - [ ] **Archetype Bootstrapping**: Automated loading of project-specific plugin suites (Coding, Sales, Support, Ops).
-- [ ] **Capability-Based Discovery**: Decoupling project functionality from specific plugin IDs using WIT interfaces.
+- [ ] **Capability Negotiation & Fallbacks**: Matching project requirements to the best available providers (e.g., Semantic vs. Basic search).
+- [ ] **Heuristic Discovery**: Zero-config project detection based on existing local files (e.g., `go.mod`, `.git`).
 
 ## Phase 8: Contextual Identity & Roles (The "Who")
-Mapping mTLS identities to **Project Roles** and enforcing capability-based access.
-- [ ] **Project-Specific Role Mappings**: Contextual RBAC linking verified actors to project roles (Editor, Planner, Reviewer).
-- [ ] **Role-Filtered Messaging**: IAM-level filtering of requests and events based on active project roles.
-- [ ] **Capability Visibility**: Automatically hiding/disabling commands in the Omni-palette that exceed a user's role permissions.
+Defining the "Participants": Mapping verified actors to project-specific permissions.
+- [ ] **Contextual Role Mapping**: Linking mTLS/Peer identities to project-specific roles (Editor, Planner, Reviewer).
+- [ ] **Role-Filtered Messaging**: IAM-level filtering of events and RPC calls based on the active role.
+- [ ] **Capability Visibility**: Automatically masking UI elements and commands based on role permissions.
 
-## Phase 9: Workspace Composition (The User Synthesis)
-Merging **Project Tools** with **User Tools** and preferences.
-- [ ] **Workspace Composition Engine**: Three-way merge of Project Tools, Role Capabilities, and User Tools.
-- [ ] **User Plugin Side-cars**: Personal tools and plugins running in the user's frontend context.
-- [ ] **Workspace Evolution**: Persistence of per-project layouts, themes, and navigation drivers.
+## Phase 9: Workspace Synthesis (The "Lens")
+Defining the "Personal View": Merging project tools with user-specific preferences.
+- [ ] **Workspace Composition Engine**: Frontend logic to merge the **Project Substrate** with the **User Profile**.
+- [ ] **User Plugin Side-cars**: Personal tools (Private Notes, Time Trackers) running in the user’s local context.
+- [ ] **Multi-Project Switcher**: UI layer for bridging multiple active efforts (projects) in a single frontend session.
 
-## Phase 10: Advanced Team UX (The "Cooperation")
-Refining the real-time collaborative experience.
-- [ ] **Collaborative Workspace Editing**: Tooling for admins to live-edit the shared project dashboard.
+## Phase 10: Advanced Team Dynamics (The "Cooperation")
+Refining real-time interaction and automated coordination.
+- [ ] **Intent-Based Routing**: Shifting from "Call Plugin X" to "Fulfill Intent Y" (e.g., `intent:request-review`).
+- [ ] **Headless Actor Framework**: First-class support for AI agents and automation scripts as project participants.
 - [ ] **Presence & Activity Sync**: Real-time visualization of team focus and idle states across archetypes.
-- [ ] **Shared State persistence**: CRDT-lite synchronization for structured data (tasks, leads, schedules).
+- [ ] **Omni-Channel Bridging**: Standardized adapters for external tools (GitHub, Slack, Discord).
+
+## Phase 11: Lifecycle & Audit (The "History")
+Ensuring the sustainability and traceability of the shared effort.
+- [ ] **The Librarian Service**: Cross-plugin semantic indexing of project decisions and change history.
+- [ ] **Temporal Playback (Time Travel)**: Viewports to rewind and audit a project's event stream.
+- [ ] **Workspace Archival (.ark)**: One-click extraction of project state, buffers, and metadata into a portable format.
+- [ ] **Resource Token Delegation**: Secure, time-limited lending of personal credentials (API keys) for project tasks.
