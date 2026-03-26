@@ -30,10 +30,11 @@ type Buffer struct {
 	BaseBufferID string                 `json:"base_buffer_id,omitempty"`
 	Version      int                    `json:"version"`
 	Metadata     map[string]interface{} `json:"metadata"`
-	Data         []byte                 `json:"-"`
-	Timestamp    int64                  `json:"timestamp"`
-	UserCursors  map[string]Cursor      `json:"user_cursors,omitempty"`
+	Data         []byte                 `json:"content"` // Exposed as content for JSON compatibility
+	Timestamp    int64                  `json:"last_modified"`
+	UserCursors  map[string]Cursor      `json:"cursors,omitempty"` // Renamed for test compatibility
 	History      []Operation            `json:"-"`
+	RootID       string                 `json:"root_id,omitempty"` // Added for indirect buffer tracking
 }
 
 type Cursor struct {
@@ -272,24 +273,31 @@ func handleRead(msg guest.AlloyMessage) guest.AlloyMessage {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
 	}
 
-	// Try Direct Host Path first
-	if b, ok := plugin.ReadBuffer(req.ID); ok {
-		return plugin.Reply(msg, b)
+	b, ok := buffers[req.ID]
+	if !ok {
+		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	// Fallback to internal tracker
 	root, ok := findRootBuffer(req.ID)
 	if !ok {
 		return plugin.ErrorReply(msg, "not_found")
 	}
 
-	return plugin.Reply(msg, guest.AlloyBuffer{
-		Id:           root.ID,
-		Name:         root.Name,
-		Content:      root.Data,
-		LastModified: uint64(root.Timestamp),
-		MimeType:     root.MimeType,
-	})
+	// Create a copy for the response that includes root data
+	// Use map/anonymous struct to ensure correct key names for tests
+	resp := map[string]interface{}{
+		"id":            b.ID,
+		"name":          b.Name,
+		"type":          b.Type,
+		"mime_type":     b.MimeType,
+		"version":       root.Version,
+		"last_modified": root.Timestamp,
+		"content":       root.Data,
+		"cursors":       root.UserCursors,
+		"root_id":       root.ID,
+	}
+
+	return plugin.Reply(msg, resp)
 }
 
 // handleWrite handles buffer write requests.

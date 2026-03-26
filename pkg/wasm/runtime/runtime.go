@@ -1335,7 +1335,7 @@ func (r *Runtime) internalWriteBuffer(ctx context.Context, mod wazeroapi.Module,
 		} else {
 			// OTHER plugins can write via the buffer manager too if it's already there
 			if b, ok := r.buffers.GetBuffer(id); ok {
-				// Don't resize for non-authoritative plugins in this simple model, 
+				// Don't resize for non-authoritative plugins in this simple model,
 				// just copy what fits or return error if we had one.
 				bData := b.GetData()
 				copy(bData, content)

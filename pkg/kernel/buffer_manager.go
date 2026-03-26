@@ -43,8 +43,8 @@ func (b *SharedBuffer) OnUpdate(callback func(id string, offset int, length int)
 }
 
 func (b *SharedBuffer) triggerUpdate(offset, length int) {
-	// Assumes lock is already held if called from internal methods, 
-	// but we should be careful. 
+	// Assumes lock is already held if called from internal methods,
+	// but we should be careful.
 	// To be safe, we'll copy the slice under lock and then execute outside.
 	callbacks := make([]func(id string, offset int, length int), len(b.onUpdate))
 	copy(callbacks, b.onUpdate)
