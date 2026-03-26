@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -64,8 +65,16 @@ func TestWorkspacePersistenceIntegration(t *testing.T) {
 		"--data-dir", dataDir,
 		"--insecure",
 	)
-	cmd2.Stdout = os.Stdout
-	cmd2.Stderr = os.Stderr
+	cmd2.Env = append(os.Environ(), "ALLOY_TEST_MODE=true")
+	cmd2.SysProcAttr = &syscall.SysProcAttr{
+		Pdeathsig: syscall.SIGKILL,
+	}
+
+	if testing.Verbose() {
+		cmd2.Stdout = os.Stdout
+		cmd2.Stderr = os.Stderr
+	}
+
 	if err := cmd2.Start(); err != nil {
 		t.Fatalf("failed to restart core: %v", err)
 	}

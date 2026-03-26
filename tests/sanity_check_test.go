@@ -52,7 +52,10 @@ func TestUnifiedSanity(t *testing.T) {
 	defer cancel()
 
 	os.Setenv("ALLOY_TEST_MODE", "true")
-	kernelCmd := exec.CommandContext(ctx, "go", "run", filepath.Join(root, "cmd/alloy-core"),
+	cwd, _ = os.Getwd()
+	corePath := filepath.Join(filepath.Dir(cwd), "build/dist/usr/libexec/alloy/alloy-core")
+
+	kernelCmd := exec.CommandContext(ctx, corePath,
 		"--listen", "unix://"+socket,
 		"--insecure",
 		"--provision", provisionPath,

@@ -57,8 +57,10 @@ func TestWITRuntime(t *testing.T) {
 	}
 	defer manager.Close(context.Background())
 
-	// Start monitor
-	manager.StartMonitor(context.Background(), 30*time.Second)
+	// Start monitor with cancellable context
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	defer monitorCancel()
+	manager.StartMonitor(monitorCtx, 30*time.Second)
 
 	// Test would continue with actual WASM loading and interaction
 	// For now, just verify the manager was created successfully

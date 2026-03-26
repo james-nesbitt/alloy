@@ -29,8 +29,11 @@ func StartCore(t *testing.T, corePath string, args []string) *exec.Cmd {
 	}
 
 	// For simple tests, let's keep the output as it might be useful for debugging
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// but only if verbose mode is on to avoid hanging the test runner on I/O
+	if testing.Verbose() {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start core: %v", err)

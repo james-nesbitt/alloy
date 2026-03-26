@@ -21,14 +21,12 @@ func TestEmptyBoot(t *testing.T) {
 	corePath := "../build/dist/usr/libexec/alloy/alloy-core"
 
 	// Start core WITHOUT --provision and WITHOUT --wasm-plugins
-	coreProcess := StartCore(t, corePath, []string{
+	_ = StartCore(t, corePath, []string{
 		"--listen", "unix://" + socketPath,
 		"--data-dir", homeDir,
 		"--insecure",
 		"--debug",
 	})
-	coreProcess.Stdout = os.Stdout
-	coreProcess.Stderr = os.Stderr
 
 	// Wait for socket
 	for i := 0; i < 10; i++ {
