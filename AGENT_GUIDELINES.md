@@ -37,7 +37,7 @@ Before edits, MUST read:
 
 **REVIEWER (Quality/Merge Guard)**
 - *Task*: Critique code on a `feat/` or `fix/` branch before merge.
-- *Rule*: Verify logic, test coverage, and documentation parity. Suggest fixes.
+- *Rule*: ENFORCE test success and coverage. Verify logic, and documentation parity. Suggest fixes.
 
 **AUDITOR (Security/Fundamentals)**
 - *Task*: Evaluate current state for security holes, performance leaks, or bad Go patterns.
