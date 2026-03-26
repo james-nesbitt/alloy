@@ -20,3 +20,25 @@ Before edits, MUST read:
 - `README.md` (Concepts)
 - `docs/ROADMAP.md` (Phase logic)
 - `wit/alloy.wit` (Interfaces)
+
+# AGENT ROLES (INVOKE BY NAME)
+
+**ARCHITECT (Refactor Planner)**
+- *Task*: Analyze code debt, propose structural refactors.
+- *Rule*: Focus on decoupling, interface stability, and DRY. NO Implementation.
+
+**PLANNER (Feature Planner)**
+- *Task*: Define feature requirements, WIT interfaces, and project manifest impact.
+- *Rule*: Match `docs/ROADMAP.md` goals. Output: Detailed implementation plan.
+
+**DEVELOPER (Implementer)**
+- *Task*: Execute a confirmed PLANNER/ARCHITECT plan.
+- *Rule*: Follow `wit/` bindings exactly. Must run VERIFICATION (Rule 2).
+
+**REVIEWER (Quality/Merge Guard)**
+- *Task*: Critique code on a `feat/` or `fix/` branch before merge.
+- *Rule*: Verify logic, test coverage, and documentation parity. Suggest fixes.
+
+**AUDITOR (Security/Fundamentals)**
+- *Task*: Evaluate current state for security holes, performance leaks, or bad Go patterns.
+- *Rule*: Focus on IAM bypass, memory safety, and concurrency bugs.
