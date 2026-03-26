@@ -21,6 +21,7 @@ type SharedBuffer struct {
 	File         *os.File
 	LastModified int64
 	Version      int
+	History      []api.BufferChange
 	mu           sync.RWMutex
 }
 
@@ -38,7 +39,10 @@ func (b *SharedBuffer) GetLastModified() int64 { return b.LastModified }
 func (b *SharedBuffer) Resize(newSize int) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.resize(newSize)
+}
 
+func (b *SharedBuffer) resize(newSize int) error {
 	if newSize <= b.Size {
 		return nil
 	}
@@ -63,6 +67,31 @@ func (b *SharedBuffer) Resize(newSize int) error {
 
 	b.Data = data
 	b.Size = newSize
+	return nil
+}
+
+// ApplyChange updates the buffer data and tracks the history for conflict resolution.
+func (b *SharedBuffer) ApplyChange(change api.BufferChange) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if change.Offset+len(change.Data) > b.Size {
+		// Auto-resize for incoming changes
+		if err := b.resize(change.Offset + len(change.Data) + 1024); err != nil {
+			return err
+		}
+	}
+
+	copy(b.Data[change.Offset:], change.Data)
+	b.Version++
+	b.LastModified = change.Timestamp
+
+	// Track in history (Limited to last 100 changes for "lite" model)
+	b.History = append(b.History, change)
+	if len(b.History) > 100 {
+		b.History = b.History[1:]
+	}
+
 	return nil
 }
 

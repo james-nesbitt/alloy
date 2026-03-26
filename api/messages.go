@@ -197,6 +197,16 @@ type SharedBuffer interface {
 	GetVersion() int
 	GetLastModified() int64
 	Resize(newSize int) error
+	ApplyChange(change BufferChange) error
+}
+
+// BufferChange represents a mutation to a buffer.
+type BufferChange struct {
+	Offset    int    `json:"offset"`
+	Data      []byte `json:"data"`
+	Version   int    `json:"version"`
+	Actor     string `json:"actor"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // Buffer reflects a handle to shared memory or file-backed storage

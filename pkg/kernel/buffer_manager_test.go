@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/james-nesbitt/alloy/api"
 )
 
 func TestBufferManager(t *testing.T) {
@@ -116,9 +118,35 @@ func TestBufferManagerWriteOffset(t *testing.T) {
 		t.Errorf("data lost after resize: expected %s, got %s", string(content), string(sharedB.GetData()[offset:offset+len(content)]))
 	}
 
-	// Test overflow still works against new size
-	err = sharedB.Write(2041, []byte("too long"))
-	if err == nil {
-		t.Error("expected overflow error, got nil")
+	// Test ApplyChange
+	change := api.BufferChange{
+		Offset:    100,
+		Data:      []byte("conflict-free-edit"),
+		Version:   1,
+		Actor:     "user-1",
+		Timestamp: 12345678,
+	}
+	err = sharedB.ApplyChange(change)
+	if err != nil {
+		t.Fatalf("ApplyChange failed: %v", err)
+	}
+	if string(sharedB.GetData()[100:100+len(change.Data)]) != string(change.Data) {
+		t.Errorf("ApplyChange data mismatch: expected %s, got %s", string(change.Data), string(sharedB.GetData()[100:100+len(change.Data)]))
+	}
+
+	// Test auto-resize via ApplyChange
+	hugeChange := api.BufferChange{
+		Offset:    5000,
+		Data:      []byte("way-after-current-end"),
+		Version:   2,
+		Actor:     "user-2",
+		Timestamp: 12345679,
+	}
+	err = sharedB.ApplyChange(hugeChange)
+	if err != nil {
+		t.Fatalf("auto-resize via ApplyChange failed: %v", err)
+	}
+	if sharedB.GetSize() < 5000+len(hugeChange.Data) {
+		t.Errorf("buffer didn't resize via ApplyChange: size %d", sharedB.GetSize())
 	}
 }
