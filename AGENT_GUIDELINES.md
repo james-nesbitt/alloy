@@ -1,45 +1,58 @@
-# Alloy Agent & Development Guidelines
+# Alloy Agent Development Guidelines
 
-This document outlines the **mandatory** workflow for all agents (AI or human) contributing to this repository.
+This document outlines the **mandatory** workflow for all AI and human agents contributing to the Alloy repository. These rules are designed to maintain repository integrity, ensure positive control, and prevent "hallucination-driven" regressions.
 
 ---
 
 ## 🚨 CRITICAL: POSITIVE CONTROL (MANDATORY) 🚨
 
-These rules ensure repository integrity. **Failure to follow these rules is considered a critical error.**
+The following rules are non-negotiable. **Any deviation is a critical operational failure.**
 
-### 1. The "No-Main" Branching Rule
-*   **NEVER WORK ON MAIN**: All development **MUST** happen on a `feature/` or `fix/` branch.
-*   **NEVER COMMIT TO MAIN**: You must not commit or push to `main` directly.
+### 1. The Branching Requirement
+*   **NEVER WORK ON MAIN**: All development **MUST** happen on a dedicated branch prefixed with `feat/`, `fix/`, or `docs/`.
+*   **NEVER COMMIT TO MAIN**: Directly pushing or committing to the `main` branch is strictly prohibited.
 
-### 2. The "Stop-and-Wait" Merge Procedure
-1.  **Work and Validate**: Complete the task on your branch. Run `just fmt` and `just test`.
-2.  **Summary Phase**: Provide a concise summary of your changes and test results.
-3.  **The Question**: Ask: **"Work is complete on branch `feature/xyz`. May I merge this into `main`?"**
-4.  **Positive Affirmation**: You **MUST NOT** merge until you receive an explicit "Yes", "Merge it", or similar affirmative response. **Silence is NOT permission.**
+### 2. The Verification Suite
+Before any merge can be considered, the following **MUST** be executed and pass in the current environment:
+*   `just fmt`: All source code must be formatted.
+*   `just build-all`: Every component (Core, Plugins, Frontends) must compile.
+*   `just test`: Every unit and integration test must pass.
 
----
+### 3. The Merge & Push Protocol
+You may only merge a branch into `main` and push to the remote if **one** of the following conditions is met:
 
-## 🛠 Interaction Workflow
+#### Condition A: Explicit Human Affirmation
+1.  Provide a concise summary of the changes and the successful `just test` results.
+2.  Ask: **"Work is complete on branch `xyz`. May I merge this into `main` and push?"**
+3.  Receive an **explicit "Yes" or "Merge it"** from the human user. Silence is not permission.
 
-### 1. Read-Before-Write
-Read existing documentation and relevant code before proposing changes to ensure consistency with Alloy's architecture.
-
-### 2. Validation Suite
-Before asking to merge, you must verify:
-*   **Formatting**: `just fmt` passes.
-*   **Compilation**: `just build-all` (Builds Core and WASM plugins).
-*   **Testing**: `just test` passes (Functional and unit tests).
-
-### 3. Documentation
-Update the relevant files in `docs/` for any changes to architecture, protocol, or standards.
+#### Condition B: Full Automated Validation
+1.  You have successfully executed `just fmt`, `just build-all`, and `just test` in the terminal during the current session.
+2.  All tests passed with zero failures.
+3.  The user has previously authorized "Test-Driven Autonomy" for the current task.
 
 ---
 
-## 📁 Repository Reference
+## 🛠 Operational Workflow (The "Loop")
 
-*   **`pkg/kernel/`**: Core Go-native services (IAM, KV, Events).
-*   **`pkg/wasm/`**: WASM runtime and Go Guest SDK.
-*   **`plugins/wasm/`**: Isolated application logic components.
-*   **`api/`**: Shared IPC message schemas.
-*   **`docs/`**: Deep-dive project documentation.
+### 1. Contextual Loading (Read-Before-Write)
+Before proposing or implementing ANY change:
+*   **Read the Roadmap**: Ensure the change aligns with the current Phase in `docs/ROADMAP.md`.
+*   **Read the Architecture**: Verify the change respects the "Coordination Kernel" model in `docs/ARCHITECTURE.md`.
+*   **Scan the Bindings**: If changing plugin logic, review `wit/alloy.wit` to ensure interface compatibility.
+
+### 2. Incremental Commits
+Do not wait until the end of a task to commit. Commit logical milestones frequently with descriptive messages. This allows for easier "rewinds" if a technical path proves non-viable.
+
+### 3. Documentation Parity
+Any change to core logic, plugin interfaces, or coordination patterns **MUST** be accompanied by a corresponding update in the `docs/` directory within the same branch.
+
+---
+
+## 📁 Critical File Manifest
+
+*   **`pkg/kernel/`**: Native coordination services (Security, Events, Registry).
+*   **`pkg/wasm/`**: Plugin runtime and the WIT-based Host/Guest bridge.
+*   **`plugins/wasm/`**: Application-specific "Shared Effort" components.
+*   **`api/`**: Kernel↔Frontend message schemas.
+*   **`docs/`**: The authoritative source for system goals and constraints.
