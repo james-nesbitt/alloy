@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
+	"github.com/james-nesbitt/alloy/pkg/frontend/modal"
 	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
@@ -50,7 +51,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Handle keys based on mode
+		// PROCESS MODAL SYSTEM
+		mKey := modal.Key{
+			Code: msg.String(),
+			Alt:  msg.Alt,
+		}
+		if msg.Type == tea.KeyEsc {
+			mKey.Code = "esc"
+		}
+
+		// Sync current model mode into engine if they drifted
+		// (e.g., initial state or project-loaded triggers)
+		switch m.Mode {
+		case tui.ModeInsert, tui.ModeEdit, tui.ModeChat:
+			m.ModalEngine.State.Mode = modal.ModeInsert
+		case tui.ModeNormal, tui.ModeDashboard:
+			m.ModalEngine.State.Mode = modal.ModeNormal
+		case tui.ModeCommand:
+			m.ModalEngine.State.Mode = modal.ModeCommand
+		}
+
+		intent, consumed := m.ModalEngine.Process(mKey)
+		if consumed && intent != nil {
+			switch intent := intent.(type) {
+			case modal.ModeIntent:
+				switch intent.NewMode {
+				case modal.ModeNormal:
+					m.Mode = tui.ModeNormal
+				case modal.ModeInsert:
+					m.Mode = tui.ModeInsert
+				case modal.ModeCommand:
+					m.Mode = tui.ModeCommand
+				}
+				// Handled mode switch
+				return m, nil
+			}
+		}
+
+		// Handle keys based on mode (Legacy fallback)
 		switch m.Mode {
 		case tui.ModeNormal, tui.ModeDashboard:
 			newM, cmd := m.handleNormalMode(msg)

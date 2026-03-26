@@ -1,7 +1,5 @@
 package modal
 
-import "fmt"
-
 // Mode represents the current state of the interaction model (e.g., Normal, Insert, Selection)
 type Mode string
 

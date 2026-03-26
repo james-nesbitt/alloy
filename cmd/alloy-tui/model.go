@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
+	"github.com/james-nesbitt/alloy/pkg/frontend/modal"
 	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
@@ -36,6 +37,9 @@ type Model struct {
 	height   int
 	ready    bool
 	msgCh    chan api.Message
+
+	// Modal engine
+	ModalEngine *modal.Engine
 
 	// Modal interface state
 	Mode            int
@@ -137,11 +141,15 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 	ci.Placeholder = ":"
 	ci.SetHeight(1)
 
+	// Default to Vim philosophy
+	engine := modal.NewEngine(modal.NewVimDriver())
+
 	return Model{
 		client:         client,
 		textarea:       ta,
 		commandInput:   ci,
 		msgCh:          msgCh,
+		ModalEngine:    engine,
 		ActiveChannel:  "general",
 		Mode:           tui.ModeDashboard,
 		subscriptions:  make(map[string]bool),
