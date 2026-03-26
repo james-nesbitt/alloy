@@ -1,27 +1,23 @@
 # Alloy: The Modular Team Coordination Framework
 
-Alloy is a secure, high-performance coordination framework designed for multi-user, multi-role collaboration. It acts as a **Modular Workspace Engine** that composes backend capabilities (via WASM plugins) into specialized interfaces tailored to specific project types and user roles.
+Alloy is a secure, high-performance **Workspace Kernel** designed for multi-user, multi-role collaboration. It acts as a central coordinator that manages **Plugins, Messages, Security, Capabilities, and Events**, providing the platform for a team to cooperate in shared, extensible workspaces.
 
-## The Philosophy: Unified Core, Specialized Workspaces
+## The Core: A Robust Coordination Kernel
 
-Alloy is more than a development tool; it is a platform for **Team Orchestration**. While the backend provides a stable foundation for identity, state, and eventing, the frontends (TUI, GUI, Web) are responsible for assembling these capabilities into a coherent environment that matches the user's current goal.
+Alloy's kernel is the stable "substrate" of the workspace. Its primary responsibility is to provide the critical infrastructure required for secure communication and state management.
 
-### 1. Project-Specific Archetypes
-A single Alloy instance can host diverse project types simultaneously. The layout, available tools, and data-views change based on the **Project Archetype**:
-- **Coding**: Focused on buffers, Git integration, and AI-assisted refactoring.
-- **Sales/CRM**: Prioritizes lead tracking, communication history, and shared notes.
-- **Operations**: Centers on real-time log streams, health metrics, and task queues.
-- **Support**: Combines chat, ticket management, and knowledge-base search.
+- **Plugin Orchestration**: Dynamic loading, lifecycle management, and strict sandboxing of WASM-based application logic.
+- **Message Routing & Events**: A high-speed, identity-aware event bus for routing messages between plugins, frontends, and users.
+- **Security & IAM**: Integrated mTLS identity verification and role-based access control (RBAC) enforced at the kernel level for every interaction.
+- **Capability Discovery**: A WIT-based (Wasm Interface Type) registry that allows plugins to expose and consume capabilities across the system.
 
-### 2. Role-Based Interfaces
-Different users participate in a project through different lenses. Alloy's frontend dynamically adjusts the UI based on the **User Role**:
-- **The Editor**: Full-screen focus on creation, high-performance modal interaction, and active feedback loops.
-- **The Planner**: Overview-heavy layout with task boards, timelines, and resource allocation widgets.
-- **The Reviewer**: Comparative views, annotation tools, and audit logs.
-- **The Support Agent**: Multi-channel communication streams and quick-access documentation cards.
+## The Goal: Runtime Collaboration
 
-### 3. User-Personalized Composition
-Alloy empowers users to define their own **Workspace Composition**. You can mix project-wide components (like a shared team chat) with user-specific content (like a private scratchpad or a customized dashboard) to create the environment that best supports your workflow.
+While the kernel provides the foundation, Alloy’s value is delivered through **Runtime Plugins**. These plugins expand the core with domain-specific functionality to support the true goal of the system: **Team Cooperation**.
+
+1.  **Project-Specific Archetypes**: A single Alloy instance can host diverse project types simultaneously (Coding, Sales, Ops).
+2.  **Role-Based Interfaces**: Different users participate in a project through different lenses (Editor, Planner, Reviewer).
+3.  **User-Personalized Composition**: Frontends (TUI, GUI, Web) assemble these capabilities into a personalized workspace.
 
 ## 🚀 Quick Start
 

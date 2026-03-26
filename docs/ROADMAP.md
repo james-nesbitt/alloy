@@ -42,17 +42,34 @@ Expanding the feature set and user interaction.
 - [x] **Conflict Resolution**: OT/CRDT-lite for editor buffers.
 - [x] **Knowledge Graph**: Semantic indexing and team-wide search.
 
-## Phase 6: Advanced Refinement (In Progress)
-- [x] **Alloy GUI**: Stable Wayland-compatible client (Gio).
-- [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
+## Phase 6: The Collaborative Foundation (In Progress)
+Refining the core for multi-user, multi-modal interaction.
 - [x] **Omni-Palette**: Unified search and command entry.
-- [ ] **Universal Modal Interface**: Unified navigation state across TUI, GUI, and Web.
-- [ ] **Configurable Modal Engine**: Choice of Neovim, Helix, or Emacs-Meow interaction sets.
+- [ ] **Universal Modal Engine**: Common state machine for Vim/Helix/Meow navigation.
+- [ ] **Resource Isolation**: Strict CPU/Memory limits for plugin stability.
 - [x] **Hot-Reloading**: Seamless plugin updates without restart.
-- [ ] **Resource Isolation**: Configurable CPU/Memory limits.
+- [ ] **Alloy Web**: Browser-based access via Go-WASM bridge.
 
-## Phase 7: The Team Coordination Framework (Proposed)
-- [ ] **Interchangeable Project Archetypes**: Support for non-coding project types (Sales, Support, Ops).
-- [ ] **User Role Mappings**: Contextual permission and UI capability inheritance based on role.
-- [ ] **Multi-User Sync (CRDT-lite)**: Expanded shared editing state across all project types.
-- [ ] **Collaborative Workspace Composition**: Shared vs. Private dashboard layouts and widget pinboard.
+## Phase 7: Project Orchestration (The "What")
+Defining project scopes through manifests and archetypes.
+- [ ] **Project Manifest Schema**: `alloy-project.json` for plugin and capability requirements.
+- [ ] **Archetype Bootstrapping**: Automated loading of plugin suites (Coding, Sales, Support, Ops).
+- [ ] **Capability-Based Discovery**: Decoupling functionality from specific plugin IDs using WIT interfaces.
+
+## Phase 8: Contextual Identity & Roles (The "Who")
+Mapping users to project roles and enforcing capability-based access.
+- [ ] **Project-Specific Role Mappings**: Contextual RBAC linking mTLS identities to roles (Editor, Planner, Reviewer).
+- [ ] **Role-Filtered Messaging**: IAM-level filtering of requests and events based on active role.
+- [ ] **Capability Visibility**: Automatically hiding/disabling commands in the Omni-palette that exceed a user's role permissions.
+
+## Phase 9: Workspace Composition (The "Lens")
+Merging project requirements with user-specific preferences and private tools.
+- [ ] **Frontend Composition Engine**: Three-way merge of Project Substrate, Role Capabilities, and User Profile.
+- [ ] **User Plugin Side-cars**: Personal plugins running in the user context, isolated from the team core.
+- [ ] **Profile-Driven Interface**: User-selectable themes, keybinding drivers, and private dashboard widgets.
+
+## Phase 10: Advanced Team UX (The "Cooperation")
+Refining the real-time collaborative experience.
+- [ ] **Collaborative Workspace Editing**: Tooling for admins to live-edit the shared project dashboard.
+- [ ] **Presence & Activity Sync**: Real-time visualization of team focus and idle states across archetypes.
+- [ ] **Shared State persistence**: CRDT-lite synchronization for structured data (tasks, leads, schedules).

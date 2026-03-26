@@ -1,6 +1,6 @@
 # Alloy Build & Plugin Guide
 
-This document provides a concise reference for building and managing the Alloy hybrid system.
+This document provides a concise reference for building and managing the Alloy **Modular Workspace Engine**.
 
 ---
 
@@ -29,9 +29,9 @@ Alloy follows a standard FHS-like layout for builds:
 - `lib/alloy/plugins/*.wasm`: Compiled application logic.
 
 ## 🔌 Plugin Architecture
-Alloy uses a **Pragmatic Hybrid Kernel**:
-- **Native Go (Kernel)**: High-performance infrastructure (IAM, KV, Events, Telemetry).
-- **WASM (Plugins)**: Isolated application logic (AI, Chat, Buffer, Projects).
+Alloy is a **Modular Workspace Engine**:
+- **Coordination Kernel (Go)**: High-performance infrastructure (IAM, KV, Messages, Events, Capabilities).
+- **Runtime Plugins (WASM)**: Isolated application logic for **Team Cooperation** (AI, Chat, Buffer, Projects).
 
 ### Strategy & Discovery
 1. **Directory-based**: The kernel scans `--wasm-plugins` or uses a `provision.json` manifest.

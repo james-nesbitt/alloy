@@ -1,23 +1,25 @@
-# Alloy Architecture: The Multi-User Coordination Engine
+# Alloy Architecture: The Coordination Kernel
 
-Alloy is architected as a **Modular Workspace Engine**. It decouples the core infrastructure (Identity, State, Events) from application-specific experiences and user-defined layouts, enabling a single backend to serve diverse project types and user roles.
-
----
-
-## 1. Core Philosophy: Pragmatic Hybrid Kernel
-
-Alloy's architecture follows a **Pragmatic Hybrid Kernel** pattern. Unlike a traditional micro-kernel where all services are external, Alloy integrates its most critical "infrastructure" services—**IAM, KV, Events, and Telemetry**—directly into the Go-based core. This ensures the performance and integrity of a monolith for system operations while preserving the isolation and extensibility of a micro-kernel for domain-specific logic.
-
-### 1.1 Team Coordination Substrate
-The Go kernel is the stable "substrate" upon which collaboration occurs. 
-
-- **Role-Based Identity**: Every message and state change is stamped with an **mTLS-verified Actor**. Roles are contextual: a user may be a **Project Lead** in one workspace but an **Observer** in another.
-- **Unified Event Bus**: Messages are routed across the team in real-time, enabling synchronized state updates between different users' frontends.
-- **Shared vs. Private State**: The kernel manages a hierarchy of data access—Global Project Data, Role-Specific tool state, and Private User Preferences.
+Alloy is architected as a **Modular Workspace Engine**. The **Alloy Kernel** acts as a central coordinator for **Plugins, Messages, Security, Capabilities, and Events**, providing a stable substrate for multi-user, multi-role collaboration.
 
 ---
 
-## 2. Kernel Components (Integrated)
+## 1. The Coordination Kernel
+
+The Alloy Kernel is responsible for the core lifecycle and "Operating System" layer of the workspace. It manages the following critical foundations:
+
+- **Security & Authorization (IAM)**: Every interaction is authorized by an integrated Identity and Access Management layer. Permissions are granular and contextual, mapping mTLS-verified actors to specific roles within a project.
+- **Message Bus & Router**: A high-performance IPC (Inter-Process Communication) and RPC (Remote Procedure Call) layer that facilitates communication between the kernel, plugins, and frontends.
+- **WASM Plugin Runtime**: A `wazero`-based engine for loading and executing isolated application logic using the WebAssembly Component Model (WIT).
+- **Event Bus (Pub/Sub)**: Real-time message distribution for asynchronous notifications, shared state updates, and team activity streams.
+- **Capability Discovery & Registry**: The "connective tissue" that maps system capabilities (defined via WIT) to their providers, allowing plugins to consume each other's services in a secure, decoupled manner.
+- **Telemetry & Logging**: Native monitoring of all system calls and plugin interactions for observability and auditing.
+
+---
+
+## 2. Runtime Plugins (Application Logic)
+
+While the kernel provides the infrastructure, the true goals of the application—**Team Cooperation**—are delivered through **Runtime Plugins**. These plugins expand the core by adding domain-specific functionality.
 The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and a tiered ecosystem of services.
 
 #### Tier 1: Integrated Core Services (Go-Native)
