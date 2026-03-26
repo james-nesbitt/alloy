@@ -134,13 +134,13 @@ func NewRuntime(
 	logger.Info("creating new WIT-based runtime (v2.9-async-compile)")
 
 	rt := &Runtime{
-		runtime:    r,
-		logger:     logger,
-		kv:         kv,
-		dataDir:    dataDir,
-		buffers:    bufferRegistry,
-		routerFn:   router,
-		callFn:     call,
+		runtime:     r,
+		logger:      logger,
+		kv:          kv,
+		dataDir:     dataDir,
+		buffers:     bufferRegistry,
+		routerFn:    router,
+		callFn:      call,
 		plugins:     make(map[string]*Instance),
 		workspaces:  make(map[string]api.Workspace),
 		bufferViews: make(map[string]map[string]uint32),
@@ -1322,19 +1322,21 @@ func (r *Runtime) internalWriteBuffer(ctx context.Context, mod wazeroapi.Module,
 			// Special: the 'buffer' plugin is the authoritative source for these
 			b, err := r.buffers.CreateBuffer(id, id, int(contentLen))
 			if err == nil {
-				// Buffer might already exist, so we use Write logic (simple overwrite for now)
+				// Ensure host-side buffer is large enough for the authoritative state
+				if int(contentLen) > b.GetSize() {
+					_ = b.Resize(int(contentLen))
+				}
 				bData := b.GetData()
 				copy(bData, content)
 				b.Lock()
-				// Note: Interface does not currently define SetVersion,
-				// we'll assume the implementation handles it inside Write-like logic if we had it,
-				// or just use the lock.
 				b.Unlock()
 				return 1
 			}
 		} else {
 			// OTHER plugins can write via the buffer manager too if it's already there
 			if b, ok := r.buffers.GetBuffer(id); ok {
+				// Don't resize for non-authoritative plugins in this simple model, 
+				// just copy what fits or return error if we had one.
 				bData := b.GetData()
 				copy(bData, content)
 				b.Lock()

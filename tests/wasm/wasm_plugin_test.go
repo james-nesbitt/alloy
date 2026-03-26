@@ -60,7 +60,7 @@ func TestWITPluginIntegration(t *testing.T) {
 	}
 
 	// Create manager
-	manager, err := wasm.NewManager(nil, kv, filepath.Join(tempDir, "plugins"), router, call)
+	manager, err := wasm.NewManager(nil, kv, filepath.Join(tempDir, "plugins"), nil, router, call)
 	if err != nil {
 		t.Fatal(err)
 	}

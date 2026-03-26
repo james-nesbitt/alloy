@@ -458,6 +458,10 @@ func handleAppend(msg guest.AlloyMessage) guest.AlloyMessage {
 	}
 
 	root.Timestamp = time.Now().Unix()
+
+	// Sync with Host
+	plugin.WriteBuffer(req.ID, root.Data)
+
 	notifyAll(req.ID, "append")
 
 	return plugin.Reply(msg, map[string]string{
@@ -528,6 +532,10 @@ func handleClear(msg guest.AlloyMessage) guest.AlloyMessage {
 	}
 
 	root.Data = []byte{}
+
+	// Sync with Host
+	plugin.WriteBuffer(req.ID, root.Data)
+
 	notifyAll(req.ID, "clear")
 
 	return plugin.Reply(msg, map[string]string{
