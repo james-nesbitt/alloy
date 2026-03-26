@@ -45,6 +45,7 @@ var (
 	plugin    *Plugin
 	policies  = NewKVStore[Policy]("policies")
 	identities = NewKVStore[string]("identities")
+	auditHits  = NewKVStore[int]("audit_hits")
 )
 
 // KVStore provides type-safe KV storage.
@@ -82,24 +83,34 @@ func (s *KVStore[T]) Set(key string, value T) error {
 func main() {
 	plugin = NewPlugin("iam").
 		WithMetadata(
-			"Identity and Access Management", 
+			"Identity and Access Management",
 			"Enterprise-grade security and granular RBAC",
-			"0.2.0", 
+			"0.2.1",
 			"Alloy Team",
 		).
 		WithTags("iam", "security", "rbac", "auditing").
 		WithCapability("check", "Check if an actor is authorized for an action").
 		WithCapability("policy:set", "Set policy for a role").
 		WithCapability("identity:set", "Set role for an actor").
-		WithCapability("audit:log", "Get recent security events")
+		WithCapability("audit:stats", "Get security hit statistics")
 
 	plugin.Handle("check", handleCheck)
 	plugin.Handle("policy:set", handlePolicySet)
 	plugin.Handle("identity:set", handleIdentitySet)
+	plugin.Handle("audit:stats", handleAuditStats)
 
 	plugin.OnInit(func() error {
 		plugin.Log("info", "IAM Security hardening active")
-		
+
+		// Register dashboard widget
+		plugin.RegisterWidget(AlloyWidget{
+			Id:                "iam-status",
+			Title:             "Security (IAM)",
+			ContentType:       "text",
+			Content:           []byte("IAM Active\nNo activity yet"),
+			RefreshIntervalMs: 5000,
+		})
+
 		defaultRoles := map[string][]string{
 			"admin": {"*"},
 			"guest": {
@@ -175,6 +186,17 @@ func handleCheck(msg AlloyMessage) AlloyMessage {
 	auditMsg := fmt.Sprintf("IAM: actor=%s (role=%s) action=%s resource=%s allowed=%v", 
 		req.Actor, role, req.Target+":"+req.Method, req.Resource, allowed)
 	plugin.Log(logLevel, auditMsg)
+
+	// Update stats
+	key := "total"
+	if !allowed {
+		key = "denied"
+	} else {
+		key = "allowed"
+	}
+	count, _ := auditHits.Get(key)
+	_ = auditHits.Set(key, count+1)
+	updateIAMWidget()
 
 	// Emit audit event for security monitoring
 	auditPayload, _ := json.Marshal(map[string]interface{}{
@@ -252,4 +274,36 @@ func handleIdentitySet(msg AlloyMessage) AlloyMessage {
 
 	plugin.Log("info", fmt.Sprintf("Identity updated: %s -> %s", req.Actor, req.Role))
 	return plugin.Reply(msg, map[string]string{"status": "ok"})
+}
+
+func handleAuditStats(msg AlloyMessage) AlloyMessage {
+	allowed, _ := auditHits.Get("allowed")
+	denied, _ := auditHits.Get("denied")
+	return plugin.Reply(msg, map[string]int{
+		"allowed": allowed,
+		"denied":  denied,
+		"total":   allowed + denied,
+	})
+}
+
+func updateIAMWidget() {
+	allowed, _ := auditHits.Get("allowed")
+	denied, _ := auditHits.Get("denied")
+	status := fmt.Sprintf("Security Monitor\nAllowed: %d\nDenied: %d\nHealth: %s",
+		allowed, denied, getSecurityHealth(allowed, denied))
+	plugin.UpdateWidget("iam-status", []byte(status))
+}
+
+func getSecurityHealth(allowed, denied int) string {
+	if denied == 0 {
+		return "EXCELLENT"
+	}
+	ratio := float64(denied) / float64(allowed+denied)
+	if ratio > 0.1 {
+		return "CRITICAL"
+	}
+	if ratio > 0.01 {
+		return "WARNING"
+	}
+	return "STABLE"
 }

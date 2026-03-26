@@ -46,7 +46,7 @@ func main() {
 		WithMetadata(
 			"Knowledge Graph Indexer",
 			"Background activity indexing and persistent knowledge graph",
-			"0.2.0",
+			"0.2.1",
 			"Alloy Team",
 		).
 		WithTags("search", "rag", "knowledge", "indexing", "persistence").
@@ -344,7 +344,23 @@ func generateTags(content string) []string {
 
 func updateStatus() {
 	keys := plugin.KVList(DocPrefix)
-	status := fmt.Sprintf("Graph Size: %d artifacts\nLast Activity: %s", 
-		len(keys), time.Now().Format("15:04:05"))
+	
+	sources := make(map[string]int)
+	for _, key := range keys {
+		data, ok := plugin.KVGet(key)
+		if ok {
+			var doc Document
+			if err := json.Unmarshal(data, &doc); err == nil {
+				sources[doc.Source]++
+			}
+		}
+	}
+
+	status := fmt.Sprintf("Knowledge Graph: %d artifacts\n", len(keys))
+	for src, count := range sources {
+		status += fmt.Sprintf("  - %s: %d\n", src, count)
+	}
+	status += fmt.Sprintf("Last Ingest: %s", time.Now().Format("15:04:05"))
+	
 	plugin.UpdateWidget("indexer-status", []byte(status))
 }

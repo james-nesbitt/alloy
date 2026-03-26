@@ -35,12 +35,12 @@ Expanding the feature set and user interaction.
 - [x] **AI Agent**: LLM tool-use orchestration.
 - [x] **Command Trees**: Hierarchical key sequences.
 
-## Phase 5: Team & Project Collaboration (In Progress)
+## Phase 5: Team & Project Collaboration (Complete)
 - [x] **Data-Driven Dashboard**: Summaries and action cards.
 - [x] **Unified Project Context**: Workspace registry and shared secrets.
 - [x] **Multi-User Presence**: Visual indicators for team activity.
 - [x] **Conflict Resolution**: OT/CRDT-lite for editor buffers.
-- [ ] **Knowledge Graph**: Semantic indexing and team-wide search.
+- [x] **Knowledge Graph**: Semantic indexing and team-wide search.
 
 ## Phase 6: Advanced Refinement (In Progress)
 - [x] **Alloy GUI**: Stable Wayland-compatible client (Gio).

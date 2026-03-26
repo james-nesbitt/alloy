@@ -16,13 +16,23 @@ Alloy uses a **Connection-Level Identity** model.
 
 ## 3. Mandatory Access Control (MAC)
 
-The Alloy kernel acts as both the **Policy Enforcement Point (PEP)** and the **Policy Decision Point (PDP)** through its integrated **IdentityManager**.
+The Alloy kernel acts as both the **Policy Enforcement Point (PEP)** and the **Policy Decision Point (PDP)** through a tiered security architecture.
 
-- **Integrated IAM Interceptor**: Every message routed by the kernel is intercepted by a native Go-based security layer. The kernel performs an instantaneous, zero-latency authorization check using the integrated `IdentityManager`.
-- **Integrated RBAC Policy**: Permissions are managed as Role-Based Access Control (RBAC) rules stored within the kernel's state. 
-- **System Integrity (Bypass)**: Internal kernel components (`kernel`, `events`, `iam`) are privileged to ensure system stability and prevent deadlocks during security-critical operations.
-- **WASM Sandboxing**: External logic remains isolated in WASM sandboxes. Plugins cannot bypass the hardware-enforced boundaries of the `wazero` runtime or access the kernel's internal services without authorized WIT calls, each of which is validated.
+### 3.1 Tier 1: Native Kernel Router Protection
+- **Low-Latency Authorization**: Every message routed by the kernel is intercepted by a native Go-based security layer (`pkg/kernel/iam.go`).
+- **Integrated RBAC Policy**: High-level permissions are managed within the kernel's state for core service access. 
+- **System Integrity**: Internal kernel components (`kernel`, `events`, `iam-native`) are privileged to prevent deadlocks.
+
+### 3.2 Tier 2: Pluggable WASM IAM (Advanced RBAC)
+- **Granular Control**: Advanced security logic (e.g., resource-specific rules like `buffer:write:public-*`) is handled by the `iam` WASM plugin.
+- **Dynamic Policy Management**: Roles and permissions can be updated on-the-fly without kernel restarts.
+- **Persistence**: Policies and identities are stored in the `alloy-kv` store.
+- **Active Auditing**: The IAM plugin maintains security health metrics and emits audit events to the `events` service for real-time monitoring.
+
+### 3.3 WASM Sandboxing
+- **Isolation**: External application logic remains isolated in WASM sandboxes. Plugins cannot bypass the hardware-enforced boundaries of the `wazero` runtime or access the kernel's internal services without authorized WIT calls, each of which is validated.
 
 ## 4. Auditing
 
-- **Audit Logging**: Major kernel actions, including routing and registration, are logged to the standard output and will eventually be moved to a tamper-evident audit log file.
+- **Security Monitor**: The `iam` plugin provides a dashboard widget that tracks allowed and denied access attempts.
+- **Audit Events**: Every authorization check emits a `system:audit` event, allowing for external security monitoring and log aggregation.

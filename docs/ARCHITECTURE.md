@@ -7,18 +7,25 @@ Alloy's architecture follows a **Pragmatic Hybrid Kernel** pattern. Unlike a tra
 ## 1. Core Architecture
 
 ### 1.1 The Integrated Kernel
-The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and the services it exposes to external plugins.
+The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and a tiered ecosystem of services.
 
-#### Integrated Core Services:
-- **Identity & Access Management (IAM)**: A native Go implementation that manages identities, roles, and policies. It serves as the authoritative Policy Decision Point (PDP) for the entire system.
+#### Tier 1: Integrated Core Services (Go-Native)
+- **Native Security Router**: A low-latency authorization layer inside the kernel (`pkg/kernel/iam.go`) that protects core message routing.
 - **Key-Value Store (KV)**: A high-performance, persistent state store integrated directly into the kernel to eliminate RPC overhead for frequent metadata reads/writes.
 - **Event Bus (Pub/Sub)**: The internal central nervous system for message routing and asynchronous event notification.
 - **Telemetry & Logging**: Native monitoring of all kernel and plugin interactions.
 
+#### Tier 2: Standard Library Plugins (WASM)
+While functionally core to the platform, these are implemented as WASM plugins for extensibility:
+- **IAM Service**: Advanced, granular RBAC (Role-Based Access Control) with resource-level permissions and active security auditing.
+- **Knowledge Graph (Indexer)**: A unified activity indexer that listens to cross-plugin event streams (Chat, Buffers, Tasks, Projects) and maintains a persistent, searchable semantic graph.
+- **Storage Service**: Virtual Filesystem (WASI) provider and metadata management.
+- **Command Manager**: Central registry for all system capabilities and keyboard shortcuts.
+
 #### Host Functions:
 - **Message Bus (IPC)**: A high-performance message routing system for cross-plugin and frontend-to-backend communication.
 - **WASM Plugin Engine**: A `wazero`-based runtime for loading and executing WASM-based components using the WASM Component Model (WIT).
-- **Service Discovery**: Allows plugins to discover the WIT-compatible surface of the integrated Core Services.
+- **Hot-Reloading**: Enables the `WasmManager` to swap plugin binaries without service interruption.
 
 ### 1.2 Communication Paths
 Alloy features two distinct communication models:
