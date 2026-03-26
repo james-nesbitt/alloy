@@ -103,8 +103,21 @@ func TestBufferManagerWriteOffset(t *testing.T) {
 		t.Errorf("expected %s at offset %d, got %s", string(content), offset, string(data[offset:offset+len(content)]))
 	}
 
-	// Test overflow
-	err = sharedB.Write(1020, []byte("too long for this space"))
+	// Test Resize
+	err = sharedB.Resize(2048)
+	if err != nil {
+		t.Fatalf("resize failed: %v", err)
+	}
+	if sharedB.GetSize() != 2048 {
+		t.Errorf("expected size 2048, got %d", sharedB.GetSize())
+	}
+	// Verify data is still there after re-mmap
+	if string(sharedB.GetData()[offset:offset+len(content)]) != string(content) {
+		t.Errorf("data lost after resize: expected %s, got %s", string(content), string(sharedB.GetData()[offset:offset+len(content)]))
+	}
+
+	// Test overflow still works against new size
+	err = sharedB.Write(2041, []byte("too long"))
 	if err == nil {
 		t.Error("expected overflow error, got nil")
 	}

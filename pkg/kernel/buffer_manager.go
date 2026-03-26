@@ -34,6 +34,38 @@ func (b *SharedBuffer) Unlock()                { b.mu.Unlock() }
 func (b *SharedBuffer) GetVersion() int        { return b.Version }
 func (b *SharedBuffer) GetLastModified() int64 { return b.LastModified }
 
+// Resize increases the size of the shared buffer.
+func (b *SharedBuffer) Resize(newSize int) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if newSize <= b.Size {
+		return nil
+	}
+
+	// Unmap old data
+	if b.Data != nil {
+		if err := syscall.Munmap(b.Data); err != nil {
+			return fmt.Errorf("failed to munmap old data: %w", err)
+		}
+	}
+
+	// Truncate file
+	if err := b.File.Truncate(int64(newSize)); err != nil {
+		return fmt.Errorf("failed to truncate file: %w", err)
+	}
+
+	// Mmap new data
+	data, err := syscall.Mmap(int(b.File.Fd()), 0, newSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("failed to mmap resized file: %w", err)
+	}
+
+	b.Data = data
+	b.Size = newSize
+	return nil
+}
+
 // BufferManager handles the lifecycle of shared memory-mapped buffers.
 type BufferManager struct {
 	logger  *slog.Logger
@@ -70,13 +102,23 @@ func (bm *BufferManager) CreateBuffer(id, name string, initialSize int) (api.Sha
 		return nil, fmt.Errorf("failed to open buffer file: %w", err)
 	}
 
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to stat buffer file: %w", err)
+	}
+
 	if initialSize <= 0 {
 		initialSize = 1024 * 64 // Default to 64KB
 	}
 
-	if err := file.Truncate(int64(initialSize)); err != nil {
-		file.Close()
-		return nil, fmt.Errorf("failed to truncate buffer file: %w", err)
+	if info.Size() < int64(initialSize) {
+		if err := file.Truncate(int64(initialSize)); err != nil {
+			file.Close()
+			return nil, fmt.Errorf("failed to truncate buffer file: %w", err)
+		}
+	} else {
+		initialSize = int(info.Size())
 	}
 
 	data, err := syscall.Mmap(int(file.Fd()), 0, initialSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)

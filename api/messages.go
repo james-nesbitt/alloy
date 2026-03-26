@@ -196,6 +196,7 @@ type SharedBuffer interface {
 	Unlock()
 	GetVersion() int
 	GetLastModified() int64
+	Resize(newSize int) error
 }
 
 // Buffer reflects a handle to shared memory or file-backed storage
