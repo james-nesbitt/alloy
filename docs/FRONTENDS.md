@@ -1,17 +1,29 @@
-# Frontend Philosophy: The Arbitrator Pattern
+# Frontend Philosophy: The Composition Engine
 
-Alloy's frontends are not just views; they are **arbitrators** of plugin data. To avoid the complexity of a universal rendering protocol, Alloy uses a **Data-Driven UI**.
+Alloy's frontends (TUI, GUI, Web) are **Composition Engines**. They do not just "draw" pixels; they assemble a personal workspace by combining backend capabilities, role-specific tools, and user preferences.
 
-## 1. UI Arbitration
-Plugins do not "draw" pixels. Instead, they provide structured data to the Frontend. The Frontend translates this data into a format appropriate for the device (TUI, GUI, or Web).
+## 1. Composition Over Arbitration
 
-### The Dashboard Protocol
-Plugins implement the `dashboard-provider` interface to share their status with the user at startup.
+In Alloy, the UI is a **Dynamic Assembly** of three distinct layers of content:
 
-- **Request**: `get-summary()`
-  - **Payload**: `{ "title": "AI Agent", "content": "Ready. 4 active tasks." }`
-- **Request**: `get-actions()`
-  - **Payload**: `["Ask a question", "List tasks", "Configure model"]`
+1.  **Project Substrate (Shared)**: Components every participant sees regardless of their role (e.g., Team Chat, Project Dashboard, Activity Log).
+2.  **Role-Specific Capabilities**: Specialized tools enabled based on the user's role in the current project:
+    - **Developers**: Shared Buffers, Git Status, Tool-use AI.
+    - **Planners**: Task Boards, Resource Allocation, Gantt charts.
+    - **Support**: Multi-channel communication, knowledge base search.
+3.  **User Personalization**: Individualized layout adjustments, private plugins (Personal TODOs, Scratchpads), and theme choices.
+
+---
+
+## 2. Interactive Modality
+
+Alloy frontends provide a **Unified Interaction Bridge** where all components respect a shared modal state. This means you can use the same Neovim, Helix, or Meow navigation across different project views.
+
+### 2.1 UI Arbitration
+While the composition layer decides *what* is shown, the **Arbitrator Pattern** determines *how* its shown on the specific device.
+- **TUI**: Renders as high-density text viewports with Bubbletea.
+- **GUI (Gio)**: Renders with hardware acceleration, high-fidelity widgets, and smooth transitions.
+- **Web**: Renders via a Go-WASM bridge and a modern CSS-driven layout.
 
 ## 2. Shared Interface Elements
 The Frontend provides several standardized components that plugins can leverage without writing UI code.

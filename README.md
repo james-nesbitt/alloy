@@ -1,30 +1,27 @@
-# Alloy: The Hybrid Kernel Workspace
+# Alloy: The Modular Team Coordination Framework
 
-Alloy is a secure, lightweight, and high-performance hybrid kernel built in Go, designed specifically for collaborative development and project-centric workflows. It acts as a secure message bus and orchestration layer for high-performance WASM (WebAssembly) plugins while providing integrated core services for identity, state, and eventing.
+Alloy is a secure, high-performance coordination framework designed for multi-user, multi-role collaboration. It acts as a **Modular Workspace Engine** that composes backend capabilities (via WASM plugins) into specialized interfaces tailored to specific project types and user roles.
 
-## The Core Philosophy: Pragmatic Hybrid Kernel
+## The Philosophy: Unified Core, Specialized Workspaces
 
-Alloy has evolved from a pure micro-kernel to a **Pragmatic Hybrid Kernel**. While application logic remains isolated in WASM plugins, the critical "Operating System" services—**IAM, KV, Events, and Telemetry**—are integrated directly into the Go-based kernel. 
+Alloy is more than a development tool; it is a platform for **Team Orchestration**. While the backend provides a stable foundation for identity, state, and eventing, the frontends (TUI, GUI, Web) are responsible for assembling these capabilities into a coherent environment that matches the user's current goal.
 
-This hybrid approach ensures:
-- **Zero-Latency Core**: Internal system calls for identity and state management happen at native Go speeds with no serialization overhead.
-- **Guaranteed Integrity**: Core security (IAM) and communication (Events) are available immediately upon boot, eliminating bootstrapping deadlocks.
-- **Plugin Flexibility**: Application-level logic (AI Agents, Chat, Project Management) continues to benefit from the language-agnostic isolation of the WASM Component Model (WIT).
+### 1. Project-Specific Archetypes
+A single Alloy instance can host diverse project types simultaneously. The layout, available tools, and data-views change based on the **Project Archetype**:
+- **Coding**: Focused on buffers, Git integration, and AI-assisted refactoring.
+- **Sales/CRM**: Prioritizes lead tracking, communication history, and shared notes.
+- **Operations**: Centers on real-time log streams, health metrics, and task queues.
+- **Support**: Combines chat, ticket management, and knowledge-base search.
 
-### 1. Secure-by-Default (Integrated IAM)
-Every connection to the Alloy kernel is identity-verified. A built-in **IAM (Identity & Access Management)** system validates every message as it traverses the kernel, ensuring zero-trust security is baked into the "hardware" of the workspace.
+### 2. Role-Based Interfaces
+Different users participate in a project through different lenses. Alloy's frontend dynamically adjusts the UI based on the **User Role**:
+- **The Editor**: Full-screen focus on creation, high-performance modal interaction, and active feedback loops.
+- **The Planner**: Overview-heavy layout with task boards, timelines, and resource allocation widgets.
+- **The Reviewer**: Comparative views, annotation tools, and audit logs.
+- **The Support Agent**: Multi-channel communication streams and quick-access documentation cards.
 
-### 2. Project-Centric Context
-Alloy bridges the gap between different tools (AI, Git, Chat, Editors) by providing a unified **Project Manifest**. When you open Alloy in a project directory:
-- **IAM Policies** are scoped to the project and enforced by the kernel.
-- **AI Workers** gain a semantic index of project files and history via integrated KV stores.
-- **Shared Buffers** are synchronized across the team using the core Event bus.
-
-### 3. Composable "Front-end Arbitrated" UI
-Alloy uses a **Data-Driven UI Protocol**. Plugins do not render pixels; they provide **Summaries**, **Actions**, and **State Payloads**. The Frontend (TUI, GUI, or Web) acts as an arbitrator, deciding how to display this data based on project context and user preference.
-
-### 4. High-Performance Plugin Ecosystem (WASM)
-While the core is integrated, application logic lives in isolated WASM components. This provides language-agnostic SDKs (Go, Rust, C), hot-reloading, and strict sandboxing.
+### 3. User-Personalized Composition
+Alloy empowers users to define their own **Workspace Composition**. You can mix project-wide components (like a shared team chat) with user-specific content (like a private scratchpad or a customized dashboard) to create the environment that best supports your workflow.
 
 ## 🚀 Quick Start
 

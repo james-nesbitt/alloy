@@ -1,12 +1,23 @@
-# Alloy Architecture Design: Pragmatic Hybrid Kernel
+# Alloy Architecture: The Multi-User Coordination Engine
 
-Alloy's architecture follows a **Pragmatic Hybrid Kernel** pattern. Unlike a traditional micro-kernel where all services are external, Alloy integrates its most critical "infrastructure" services—**IAM, KV, Events, and Telemetry**—directly into the Go-based core. This provides the performance and integrity of a monolith for low-level system operations while preserving the isolation and extensibility of a micro-kernel for application logic.
+Alloy is architected as a **Modular Workspace Engine**. It decouples the core infrastructure (Identity, State, Events) from application-specific experiences and user-defined layouts, enabling a single backend to serve diverse project types and user roles.
 
 ---
 
-## 1. Core Architecture
+## 1. Core Philosophy: Pragmatic Hybrid Kernel
 
-### 1.1 The Integrated Kernel
+Alloy's architecture follows a **Pragmatic Hybrid Kernel** pattern. Unlike a traditional micro-kernel where all services are external, Alloy integrates its most critical "infrastructure" services—**IAM, KV, Events, and Telemetry**—directly into the Go-based core. This ensures the performance and integrity of a monolith for system operations while preserving the isolation and extensibility of a micro-kernel for domain-specific logic.
+
+### 1.1 Team Coordination Substrate
+The Go kernel is the stable "substrate" upon which collaboration occurs. 
+
+- **Role-Based Identity**: Every message and state change is stamped with an **mTLS-verified Actor**. Roles are contextual: a user may be a **Project Lead** in one workspace but an **Observer** in another.
+- **Unified Event Bus**: Messages are routed across the team in real-time, enabling synchronized state updates between different users' frontends.
+- **Shared vs. Private State**: The kernel manages a hierarchy of data access—Global Project Data, Role-Specific tool state, and Private User Preferences.
+
+---
+
+## 2. Kernel Components (Integrated)
 The Go kernel is responsible for the core lifecycle and the "Operating System" layer of the workspace. Its responsibilities are split between its internal Go-native logic and a tiered ecosystem of services.
 
 #### Tier 1: Integrated Core Services (Go-Native)

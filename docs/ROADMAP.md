@@ -50,3 +50,9 @@ Expanding the feature set and user interaction.
 - [ ] **Configurable Modal Engine**: Choice of Neovim, Helix, or Emacs-Meow interaction sets.
 - [x] **Hot-Reloading**: Seamless plugin updates without restart.
 - [ ] **Resource Isolation**: Configurable CPU/Memory limits.
+
+## Phase 7: The Team Coordination Framework (Proposed)
+- [ ] **Interchangeable Project Archetypes**: Support for non-coding project types (Sales, Support, Ops).
+- [ ] **User Role Mappings**: Contextual permission and UI capability inheritance based on role.
+- [ ] **Multi-User Sync (CRDT-lite)**: Expanded shared editing state across all project types.
+- [ ] **Collaborative Workspace Composition**: Shared vs. Private dashboard layouts and widget pinboard.
