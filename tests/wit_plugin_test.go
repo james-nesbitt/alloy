@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,8 +35,11 @@ func TestWITPlugins(t *testing.T) {
 	}
 
 	// Create message router
+	var mu sync.Mutex
 	var receivedMessages []api.Message
 	router := func(ctx context.Context, msg api.Message) {
+		mu.Lock()
+		defer mu.Unlock()
 		receivedMessages = append(receivedMessages, msg)
 	}
 

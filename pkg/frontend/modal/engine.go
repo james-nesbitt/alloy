@@ -73,7 +73,9 @@ type Driver interface {
 	// Modes returns the modes supported by this driver.
 	Modes() []Mode
 	// Customize allows overriding specific key bindings
-	Customize(mode Mode, key string, action Action)
+	Customize(mode Mode, key string, builder IntentBuilder)
+	// InitialMode returns the mode this driver starts in.
+	InitialMode() Mode
 }
 
 // Registry manages available modal drivers.
@@ -112,7 +114,7 @@ func NewEngine(initial Driver) *Engine {
 	return &Engine{
 		ActiveDriver: initial,
 		State: State{
-			Mode: ModeNormal,
+			Mode: initial.InitialMode(),
 		},
 	}
 }

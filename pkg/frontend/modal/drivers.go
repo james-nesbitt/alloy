@@ -1,7 +1,5 @@
 package modal
 
-import "fmt"
-
 // IntentBuilder is a function that creates an Intent based on the current modal state (e.g., using Count).
 type IntentBuilder func(state *State) Intent
 
@@ -9,6 +7,7 @@ type IntentBuilder func(state *State) Intent
 type MapDriver struct {
 	driverName string
 	modes      []Mode
+	initMode   Mode
 	keymaps    map[Mode]map[string]IntentBuilder
 	sequences  map[Mode]map[string]bool // True if the key is a prefix for a sequence
 }
@@ -16,6 +15,13 @@ type MapDriver struct {
 func (m *MapDriver) Name() string { return m.driverName }
 
 func (m *MapDriver) Modes() []Mode { return m.modes }
+
+func (m *MapDriver) InitialMode() Mode {
+	if m.initMode != "" {
+		return m.initMode
+	}
+	return ModeNormal
+}
 
 func (m *MapDriver) Customize(mode Mode, key string, builder IntentBuilder) {
 	if m.keymaps[mode] == nil {
@@ -220,8 +226,33 @@ func NewHelixDriver() *MapDriver {
 	return d
 }
 
+// NewMeowDriver creates a Meow modal driver.
+func NewMeowDriver() *MapDriver {
+	d := &MapDriver{
+		driverName: "meow",
+		modes:      []Mode{ModeNormal, ModeInsert, ModeSelection},
+		keymaps:    make(map[Mode]map[string]IntentBuilder),
+		sequences:  make(map[Mode]map[string]bool),
+	}
+
+	for _, m := range d.modes {
+		d.keymaps[m] = make(map[string]IntentBuilder)
+		d.sequences[m] = make(map[string]bool)
+	}
+
+	n := d.keymaps[ModeNormal]
+	n["i"] = func(s *State) Intent { return ModeIntent{NewMode: ModeInsert} }
+	n["n"] = func(s *State) Intent { return MoveIntent{Direction: "down", Count: 1} }
+	n["p"] = func(s *State) Intent { return MoveIntent{Direction: "up", Count: 1} }
+
+	d.keymaps[ModeInsert]["esc"] = func(s *State) Intent { return ModeIntent{NewMode: ModeNormal} }
+
+	return d
+}
+
 // init registers the default drivers in the global registry
 func init() {
 	DefaultRegistry.Register(NewVimDriver())
 	DefaultRegistry.Register(NewHelixDriver())
+	DefaultRegistry.Register(NewMeowDriver())
 }
