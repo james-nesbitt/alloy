@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/james-nesbitt/alloy/api"
@@ -44,17 +45,17 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 	case modal.MoveIntent:
 		switch it.Direction {
 		case "down":
-			m.textarea.SetCursor(m.textarea.Line()+1, 0)
+			m.textarea.SetCursor(m.textarea.Line() + 1)
 			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
 		case "up":
-			m.textarea.SetCursor(m.textarea.Line()-1, 0)
+			m.textarea.SetCursor(m.textarea.Line() - 1)
 			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
 		case "buffer-start":
-			m.textarea.SetCursor(0, 0)
+			m.textarea.SetCursor(0)
 			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, 0, 0))
 		case "buffer-end":
 			lines := strings.Split(m.textarea.Value(), "\n")
-			m.textarea.SetCursor(len(lines)-1, 0)
+			m.textarea.SetCursor(len(lines) - 1)
 			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, len(lines)-1, 0))
 		}
 
@@ -118,6 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inspectorVp.Height = msg.Height - 3
 		m.textarea.SetWidth(msg.Width)
 		m.commandInput.SetWidth(msg.Width)
+		m.omniList.SetSize(msg.Width-4, msg.Height/2)
 		if !m.ready {
 			m.ready = true
 		}
@@ -181,7 +183,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		intent, consumed := m.ModalEngine.Process(mKey)
 		if intent != nil {
 			var cmd tea.Cmd
-			m, cmd = m.dispatchIntent(intent)
+			newModel, cmd := m.dispatchIntent(intent)
+			m = newModel.(Model)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -323,6 +326,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case []OmniResult:
 		m.omniResults = msg
+		items := make([]list.Item, len(msg))
+		for i, res := range msg {
+			items[i] = listItem{res: res}
+		}
+		m.omniList.SetItems(items)
+		return m, nil
+
+	case searchDebounceMsg:
+		if msg.Query == m.commandInput.Value() {
+			return m, m.doOmniSearch(msg.Query)
+		}
 		return m, nil
 
 	case messageMsg:

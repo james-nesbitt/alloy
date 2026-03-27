@@ -8,7 +8,7 @@
 Before any merge, MUST run and pass:
 - `just fmt`
 - `just build-all`
-- `just test`
+- `just test`-all
 
 * Don't run tests without a timeout (use the just targets) *
 

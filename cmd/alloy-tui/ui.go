@@ -118,6 +118,8 @@ func (m Model) dashboardView() string {
 			} else {
 				content = string(tile.RawContent)
 			}
+		} else if tile.ContentType == "ascii-art" || tile.ContentType == "ascii" {
+			content = string(tile.RawContent)
 		} else {
 			// Default to text/markdown list
 			if len(tile.Content) > 0 && tile.Content[0] != "" {
@@ -130,6 +132,13 @@ func (m Model) dashboardView() string {
 		footer := ""
 		if len(tile.Actions) > 0 {
 			footer = "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Actions: "+strings.Join(tile.Actions, ", "))
+		}
+
+		// Ensure content doesn't overflow tile height
+		maxContentHeight := (m.height / 3) - 6
+		contentLines := strings.Split(content, "\n")
+		if len(contentLines) > maxContentHeight {
+			content = strings.Join(contentLines[:maxContentHeight], "\n") + "\n..."
 		}
 
 		tileView := tileStyle.Render(

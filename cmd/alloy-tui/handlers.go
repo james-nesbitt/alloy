@@ -696,22 +696,11 @@ func (m Model) handleOmniMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 		m.commandInput.Blur()
 		m.commandInput.SetValue("")
 		m.omniResults = nil
-		m.omniSelectedIdx = 0
-		return m, nil
-	case tea.KeyDown, tea.KeyCtrlN:
-		if len(m.omniResults) > 0 {
-			m.omniSelectedIdx = (m.omniSelectedIdx + 1) % len(m.omniResults)
-		}
-		return m, nil
-	case tea.KeyUp, tea.KeyCtrlP:
-		if len(m.omniResults) > 0 {
-			m.omniSelectedIdx = (m.omniSelectedIdx - 1 + len(m.omniResults)) % len(m.omniResults)
-		}
+		m.omniList.SetItems(nil)
 		return m, nil
 	case tea.KeyEnter:
-		if len(m.omniResults) > 0 {
-			res := m.omniResults[m.omniSelectedIdx]
-			return m.executeOmniResult(res)
+		if sel := m.omniList.SelectedItem(); sel != nil {
+			return m.executeOmniResult(sel.(listItem).res)
 		}
 	case tea.KeyBackspace:
 		if m.commandInput.Value() == "" {
@@ -721,15 +710,22 @@ func (m Model) handleOmniMode(msg tea.KeyMsg, ciCmd tea.Cmd) (tea.Model, tea.Cmd
 		}
 	}
 
+	// Update list for navigation/scrolling
+	var listCmd tea.Cmd
+	m.omniList, listCmd = m.omniList.Update(msg)
+
 	old := m.commandInput.Value()
 	m.commandInput, ciCmd = m.commandInput.Update(msg)
 	if m.commandInput.Value() != old {
-		// Only search if length > 1 (or allow all if empty)
-		m.omniSelectedIdx = 0
-		return m, m.doOmniSearch(m.commandInput.Value())
+		newVal := m.commandInput.Value()
+		// Search debouncing
+		return m, tea.Batch(ciCmd, listCmd, func() tea.Msg {
+			time.Sleep(150 * time.Millisecond)
+			return searchDebounceMsg{Query: newVal}
+		})
 	}
 
-	return m, ciCmd
+	return m, tea.Batch(ciCmd, listCmd)
 }
 
 func (m Model) doOmniSearch(query string) tea.Cmd {
@@ -762,7 +758,7 @@ func (m Model) executeOmniResult(res OmniResult) (tea.Model, tea.Cmd) {
 	m.commandInput.Blur()
 	m.commandInput.SetValue("")
 	m.omniResults = nil
-	m.omniSelectedIdx = 0
+	m.omniList.SetItems(nil)
 
 	action := res.Metadata["action"]
 	switch action {

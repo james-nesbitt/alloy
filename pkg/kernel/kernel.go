@@ -610,20 +610,14 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 		// 1. Push all registered widgets
 		widgets := k.ListWidgets()
 		for _, w := range widgets {
-			wData, _ := json.Marshal(map[string]any{
-				"topic": "dashboard:widget-updated",
-				"data":  w.Content,
-			})
+			wData, _ := json.Marshal(w)
 			k.deliverToFrontendSync(context.Background(), id, api.Message{
-				ID:      fmt.Sprintf("init-widget-%s", w.ID),
+				ID:      fmt.Sprintf("init-widget-reg-%s", w.ID),
 				Type:    api.TypeEvent,
 				Sender:  "kernel",
 				Target:  id,
-				Method:  "publish",
+				Method:  "dashboard:widget-registered",
 				Payload: wData,
-				Metadata: map[string]any{
-					"widget_id": w.ID,
-				},
 			})
 		}
 

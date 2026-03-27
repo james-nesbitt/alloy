@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,15 +16,16 @@ import (
 
 // OmniResult represents a result from the universal search
 type OmniResult struct {
-	ID          string            `json:"id"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Type        string            `json:"type"`
-	Score       float64           `json:"score"`
-	Shortcut    string            `json:"shortcut,omitempty"`
-	Source      string            `json:"source,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID          string            `json:"id"`;	Title       string            `json:"title"`;	Description string            `json:"description"`;	Type        string            `json:"type"`;	Score       float64           `json:"score"`;	Shortcut    string            `json:"shortcut,omitempty"`;	Source      string            `json:"source,omitempty"`;	Metadata    map[string]string `json:"metadata,omitempty"`
 }
+
+type listItem struct {
+	res OmniResult
+}
+
+func (i listItem) Title() string       { return i.res.Title }
+func (i listItem) Description() string { return i.res.Description }
+func (i listItem) FilterValue() string { return i.res.Title }
 
 // Model represents the overall UI state.
 type Model struct {
@@ -59,6 +61,9 @@ type Model struct {
 	// Omni state
 	omniResults     []OmniResult
 	omniSelectedIdx int
+	omniList        list.Model
+	lastSearchQuery string
+	searchTimer     *time.Timer
 
 	ActiveProject *frontend.Project
 	Projects      []frontend.Project
@@ -109,6 +114,10 @@ type discoveryMsg struct {
 	Targets []api.Registration `json:"targets"`
 }
 
+type searchDebounceMsg struct {
+	Query string
+}
+
 type messageMsg api.Message
 type errMsg error
 type tickMsg time.Time
@@ -144,12 +153,18 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 	// Default to Vim philosophy
 	engine := modal.NewEngine(modal.NewVimDriver())
 
+	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Universal Search"
+	l.SetShowHelp(false)
+	l.SetFilteringEnabled(false) // Handle filtering on kernel-side for now
+
 	return Model{
 		client:         client,
 		textarea:       ta,
 		commandInput:   ci,
 		msgCh:          msgCh,
 		ModalEngine:    engine,
+		omniList:       l,
 		ActiveChannel:  "general",
 		Mode:           tui.ModeDashboard,
 		subscriptions:  make(map[string]bool),

@@ -193,6 +193,7 @@ func NewRuntime(
 		widgets:          make(map[string]api.Widget),
 	}
 	rt.loadWorkspaces()
+	rt.loadWidgets()
 
 	// Instantiate the host module into base with functions (for shared access if needed)
 	hostMod, err := rt.instantiateHostModuleInRuntime(ctx, rt.baseRuntime)
@@ -1168,6 +1169,25 @@ func (r *Runtime) loadWorkspaces() {
 	}
 }
 
+// Persistence for widgets
+func (r *Runtime) saveWidgets() {
+	r.mu.RLock()
+	data, _ := json.Marshal(r.widgets)
+	r.mu.RUnlock()
+
+	_ = r.kv.Set("system", "widgets", data)
+}
+
+func (r *Runtime) loadWidgets() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	data, err := r.kv.Get("system", "widgets")
+	if err == nil && data != nil {
+		_ = json.Unmarshal(data, &r.widgets)
+	}
+}
+
 // Registry & Direct Interaction implemention
 
 func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen uint32) {
@@ -1531,6 +1551,7 @@ func (r *Runtime) internalRegisterWidget(ctx context.Context, mod wazeroapi.Modu
 	r.mu.Lock()
 	r.widgets[w.ID] = w
 	r.mu.Unlock()
+	r.saveWidgets()
 
 	// Broadast as event
 	wData, _ := json.Marshal(w)
@@ -1556,6 +1577,7 @@ func (r *Runtime) internalUnregisterWidget(ctx context.Context, mod wazeroapi.Mo
 	r.mu.Lock()
 	delete(r.widgets, id)
 	r.mu.Unlock()
+	r.saveWidgets()
 
 	payload, _ := json.Marshal(map[string]any{
 		"topic": "dashboard:widget-unregistered",
@@ -1582,6 +1604,7 @@ func (r *Runtime) internalUpdateWidget(ctx context.Context, mod wazeroapi.Module
 		r.widgets[id] = w
 	}
 	r.mu.Unlock()
+	r.saveWidgets()
 
 	// Ensure the content is valid JSON (wrap in quotes if it's text)
 	// Actually, let's just marshal it as a byte slice to be safe.
