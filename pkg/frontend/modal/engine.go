@@ -18,10 +18,25 @@ type Intent interface {
 
 // Key represents a physical or logical key press
 type Key struct {
-	Code  string // e.g., "j", "esc", "enter", "ctrl+c"
+	Code  string // e.g., "j", "esc", "enter", "f1"
 	Alt   bool
 	Shift bool
 	Ctrl  bool
+}
+
+func (k Key) String() string {
+	s := ""
+	if k.Ctrl {
+		s += "ctrl+"
+	}
+	if k.Alt {
+		s += "alt+"
+	}
+	if k.Shift && (len(k.Code) > 1 || k.Code == " ") {
+		s += "shift+"
+	}
+	s += k.Code
+	return s
 }
 
 // State represents the current internal state of a Modal Driver.
@@ -47,6 +62,9 @@ type Result struct {
 	Incomplete bool // True if the key is part of a multi-key sequence and waiting for more input
 }
 
+// Action represents a logical operation (e.g., "move:down", "mode:insert")
+type Action string
+
 // Driver is the core interface for a modal philosophy (Vim, Helix, Meow).
 type Driver interface {
 	Name() string
@@ -54,6 +72,34 @@ type Driver interface {
 	Handle(key Key, state *State) Result
 	// Modes returns the modes supported by this driver.
 	Modes() []Mode
+	// Customize allows overriding specific key bindings
+	Customize(mode Mode, key string, action Action)
+}
+
+// Registry manages available modal drivers.
+type Registry struct {
+	drivers map[string]Driver
+}
+
+func NewRegistry() *Registry {
+	return &Registry{
+		drivers: make(map[string]Driver),
+	}
+}
+
+func (r *Registry) Register(d Driver) {
+	r.drivers[d.Name()] = d
+}
+
+func (r *Registry) Get(name string) Driver {
+	return r.drivers[name]
+}
+
+// Global registry for convenience
+var DefaultRegistry = NewRegistry()
+
+func init() {
+	// We'll register default drivers in their respective files
 }
 
 // Engine orchestrates multiple drivers and maintains the active modal state.

@@ -157,8 +157,12 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 	ci.Placeholder = ":"
 	ci.SetHeight(1)
 
-	// Default to Vim philosophy
-	engine := modal.NewEngine(modal.NewVimDriver())
+	// Use Registry to get the preferred driver
+	driver := modal.DefaultRegistry.Get("vim")
+	if driver == nil {
+		driver = modal.NewVimDriver() // Fallback
+	}
+	engine := modal.NewEngine(driver)
 
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Universal Search"
