@@ -104,6 +104,8 @@ func (v *VimDriver) handleNormal(key Key, state *State) Result {
 			return Result{Intent: MoveIntent{Direction: "half-page-up", Count: 1}, Consumed: true}
 		case "d":
 			return Result{Intent: MoveIntent{Direction: "half-page-down", Count: 1}, Consumed: true}
+		case "r":
+			return Result{Intent: ActionIntent{Verb: "redo"}, Consumed: true}
 		}
 	}
 
@@ -138,8 +140,6 @@ func (v *VimDriver) handleNormal(key Key, state *State) Result {
 		return Result{Intent: SearchIntent{Type: "regex"}, Consumed: true}
 	case "u":
 		return Result{Intent: ActionIntent{Verb: "undo"}, Consumed: true}
-	case "ctrl+r":
-		return Result{Intent: ActionIntent{Verb: "redo"}, Consumed: true}
 	case "backspace", "delete":
 		return Result{Intent: ActionIntent{Verb: "delete-char"}, Consumed: true}
 	case "home":

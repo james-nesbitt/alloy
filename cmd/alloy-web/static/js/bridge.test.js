@@ -106,20 +106,28 @@ describe('Alloy Web UX - Bridge.js', () => {
         expect(fields.querySelector('label').innerText).toBe('name');
     });
 
-    it('should search using the WASM bridge', () => {
-        // Mock the window.alloy.search function that WASM provides
-        window.alloy.search = vi.fn().mockReturnValue(JSON.stringify([
-            { full_title: 'project:open', target: 'project', method: 'open' }
-        ]));
+    it('should search using the WebSocket connection', async () => {
+        // Mock WebSocket.send
+        window.alloy.socket = {
+            send: vi.fn(),
+            readyState: 1 // WebSocket.OPEN
+        };
+
+        vi.useFakeTimers();
 
         const input = document.getElementById('omni-input');
         input.value = 'proj';
         input.dispatchEvent(new Event('input'));
 
-        expect(window.alloy.search).toHaveBeenCalledWith('proj');
-        const results = document.getElementById('omni-results');
-        expect(results.children.length).toBe(1);
-        expect(results.innerHTML).toContain('project:open');
+        // Advance timers to clear the 150ms debounce
+        vi.advanceTimersByTime(200);
+
+        expect(window.alloy.socket.send).toHaveBeenCalled();
+        const sentMsg = JSON.parse(window.alloy.socket.send.mock.calls[0][0]);
+        expect(sentMsg.method).toBe('omni:search');
+        expect(sentMsg.payload).toContain('proj');
+
+        vi.useRealTimers();
     });
 
     it('should navigate results using Arrow keys', () => {

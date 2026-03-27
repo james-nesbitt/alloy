@@ -16,7 +16,14 @@ import (
 
 // OmniResult represents a result from the universal search
 type OmniResult struct {
-	ID          string            `json:"id"`;	Title       string            `json:"title"`;	Description string            `json:"description"`;	Type        string            `json:"type"`;	Score       float64           `json:"score"`;	Shortcut    string            `json:"shortcut,omitempty"`;	Source      string            `json:"source,omitempty"`;	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Type        string            `json:"type"`
+	Score       float64           `json:"score"`
+	Shortcut    string            `json:"shortcut,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type listItem struct {

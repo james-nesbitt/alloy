@@ -35,7 +35,7 @@ Before edits, MUST read:
 
 **DEVELOPER (Implementer)**
 - *Task*: Execute a confirmed PLANNER/ARCHITECT plan.
-- *Rule*: Follow implementation plan and architecture plan, spot test as you go, and commit as you deliver each target. Don't merge, don't run full tests.
+- *Rule*: Follow implementation plan and architecture plan following BRANCHING rules, spot test as you go, and commit as you deliver each target. VERIFICATION not required.
 
 **REVIEWER (Quality/Merge Guard)**
 - *Task*: Critique code on a `feat/` or `fix/` branch before merge.

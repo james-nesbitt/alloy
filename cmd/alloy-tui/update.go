@@ -50,16 +50,23 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 				// (or re-map to msg)
 				keyMsg := tea.KeyMsg{}
 				switch it.Direction {
-				case "down": keyMsg = tea.KeyMsg{Type: tea.KeyDown}
-				case "up": keyMsg = tea.KeyMsg{Type: tea.KeyUp}
-				case "left": keyMsg = tea.KeyMsg{Type: tea.KeyLeft}
-				case "right": keyMsg = tea.KeyMsg{Type: tea.KeyRight}
-				case "line-start": keyMsg = tea.KeyMsg{Type: tea.KeyHome}
-				case "line-end": keyMsg = tea.KeyMsg{Type: tea.KeyEnd}
-				case "buffer-start": m.textarea.SetCursor(0)
-				case "buffer-end": 
+				case "down":
+					keyMsg = tea.KeyMsg{Type: tea.KeyDown}
+				case "up":
+					keyMsg = tea.KeyMsg{Type: tea.KeyUp}
+				case "left":
+					keyMsg = tea.KeyMsg{Type: tea.KeyLeft}
+				case "right":
+					keyMsg = tea.KeyMsg{Type: tea.KeyRight}
+				case "line-start":
+					keyMsg = tea.KeyMsg{Type: tea.KeyHome}
+				case "line-end":
+					keyMsg = tea.KeyMsg{Type: tea.KeyEnd}
+				case "buffer-start":
+					m.textarea.SetCursor(0)
+				case "buffer-end":
 					lines := strings.Split(m.textarea.Value(), "\n")
-					m.textarea.SetCursor(len(lines)-1)
+					m.textarea.SetCursor(len(lines) - 1)
 				}
 				if keyMsg.Type != 0 {
 					var taCmd tea.Cmd
@@ -73,10 +80,14 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 				// Viewport movement for Normal/Dashboard/Inspector
 				keyMsg := tea.KeyMsg{}
 				switch it.Direction {
-				case "down": keyMsg = tea.KeyMsg{Type: tea.KeyDown}
-				case "up": keyMsg = tea.KeyMsg{Type: tea.KeyUp}
-				case "page-up": keyMsg = tea.KeyMsg{Type: tea.KeyPgUp}
-				case "page-down": keyMsg = tea.KeyMsg{Type: tea.KeyPgDown}
+				case "down":
+					keyMsg = tea.KeyMsg{Type: tea.KeyDown}
+				case "up":
+					keyMsg = tea.KeyMsg{Type: tea.KeyUp}
+				case "page-up":
+					keyMsg = tea.KeyMsg{Type: tea.KeyPgUp}
+				case "page-down":
+					keyMsg = tea.KeyMsg{Type: tea.KeyPgDown}
 				}
 				if keyMsg.Type != 0 {
 					var vpCmd tea.Cmd
@@ -144,6 +155,9 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 				keyMsg = tea.KeyMsg{Type: tea.KeyTab}
 			} else if it.Text == " " {
 				keyMsg = tea.KeyMsg{Runes: []rune(" "), Type: tea.KeySpace}
+			} else if len(it.Text) > 1 {
+				// Special key not caught? fallback
+				return m, nil
 			}
 			m.textarea, taCmd = m.textarea.Update(keyMsg)
 			if taCmd != nil {
@@ -274,7 +288,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
-		// If key was not consumed by ModalEngine, just drop it or handle global 
+		// If key was not consumed by ModalEngine, just drop it or handle global
 		// keys that shouldn't be modalized.
 		if consumed {
 			return m, nil

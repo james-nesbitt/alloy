@@ -68,16 +68,16 @@ func TestWebFrontendAPI(t *testing.T) {
 
 		// Test sending a message through WS
 		testMsg := api.Message{
-			ID:     "ws-test-1",
-			Target: "project",
-			Method: "create",
+			ID:      "ws-test-1",
+			Target:  "project",
+			Method:  "create",
 			Payload: []byte(`{"name": "test-ws"}`),
 		}
 		if err := conn.WriteJSON(testMsg); err != nil {
 			t.Fatalf("Failed to write to WS: %v", err)
 		}
 
-		// Since our handleWS executes target calls in background, 
+		// Since our handleWS executes target calls in background,
 		// we might need a small wait or a more robust mock.
 		time.Sleep(100 * time.Millisecond)
 
