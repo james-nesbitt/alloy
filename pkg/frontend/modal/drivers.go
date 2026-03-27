@@ -23,9 +23,23 @@ func (v *VimDriver) Handle(key Key, state *State) Result {
 		return v.handleInsert(key, state)
 	case ModeSelection: // Visual mode in Vim
 		return v.handleSelection(key, state)
+	case ModeCommand:
+		return v.handleCommand(key, state)
 	default:
 		return Result{Consumed: false}
 	}
+}
+
+func (v *VimDriver) handleCommand(key Key, state *State) Result {
+	if key.Code == "esc" {
+		state.Mode = ModeNormal
+		return Result{Intent: ModeIntent{NewMode: ModeNormal}, Consumed: true}
+	}
+	// Consume all keys in command mode as InputIntent
+	if !key.Ctrl && !key.Alt {
+		return Result{Intent: InputIntent{Text: key.Code}, Consumed: true}
+	}
+	return Result{Consumed: false}
 }
 
 func (v *VimDriver) handleNormal(key Key, state *State) Result {
@@ -100,13 +114,13 @@ func (v *VimDriver) handleNormal(key Key, state *State) Result {
 	case "v":
 		state.Mode = ModeSelection
 		return Result{Intent: ModeIntent{NewMode: ModeSelection}, Consumed: true}
-	case "j":
+	case "j", "down":
 		return Result{Intent: MoveIntent{Direction: "down", Count: count}, Consumed: true}
-	case "k":
+	case "k", "up":
 		return Result{Intent: MoveIntent{Direction: "up", Count: count}, Consumed: true}
-	case "h":
+	case "h", "left":
 		return Result{Intent: MoveIntent{Direction: "left", Count: count}, Consumed: true}
-	case "l":
+	case "l", "right":
 		return Result{Intent: MoveIntent{Direction: "right", Count: count}, Consumed: true}
 	case "0":
 		return Result{Intent: MoveIntent{Direction: "line-start", Count: 1}, Consumed: true}
@@ -120,9 +134,22 @@ func (v *VimDriver) handleNormal(key Key, state *State) Result {
 	case ":":
 		state.Mode = ModeCommand
 		return Result{Intent: ModeIntent{NewMode: ModeCommand}, Consumed: true}
-	case "/":
-		// Should switch to a searching sub-mode or intent
+	case "/", "?":
 		return Result{Intent: SearchIntent{Type: "regex"}, Consumed: true}
+	case "u":
+		return Result{Intent: ActionIntent{Verb: "undo"}, Consumed: true}
+	case "ctrl+r":
+		return Result{Intent: ActionIntent{Verb: "redo"}, Consumed: true}
+	case "backspace", "delete":
+		return Result{Intent: ActionIntent{Verb: "delete-char"}, Consumed: true}
+	case "home":
+		return Result{Intent: MoveIntent{Direction: "line-start", Count: 1}, Consumed: true}
+	case "end":
+		return Result{Intent: MoveIntent{Direction: "line-end", Count: 1}, Consumed: true}
+	case "pgup":
+		return Result{Intent: MoveIntent{Direction: "page-up", Count: 1}, Consumed: true}
+	case "pgdown":
+		return Result{Intent: MoveIntent{Direction: "page-down", Count: 1}, Consumed: true}
 	}
 	return Result{Consumed: false}
 }
@@ -132,6 +159,14 @@ func (v *VimDriver) handleInsert(key Key, state *State) Result {
 	if key.Code == "esc" {
 		state.Mode = ModeNormal
 		return Result{Intent: ModeIntent{NewMode: ModeNormal}, Consumed: true}
+	}
+	// Emit InputIntent for characters
+	if !key.Ctrl && !key.Alt && len(key.Code) == 1 {
+		return Result{Intent: InputIntent{Text: key.Code}, Consumed: true}
+	}
+	// Fallback for special keys in insert mode (e.g., enter, backspace)
+	if key.Code == "enter" || key.Code == "backspace" || key.Code == "tab" {
+		return Result{Intent: InputIntent{Text: key.Code}, Consumed: true}
 	}
 	return Result{Consumed: false}
 }
@@ -171,9 +206,23 @@ func (h *HelixDriver) Handle(key Key, state *State) Result {
 		return h.handleNormal(key, state)
 	case ModeInsert:
 		return h.handleInsert(key, state)
+	case ModeCommand:
+		return h.handleCommand(key, state)
 	default:
 		return Result{Consumed: false}
 	}
+}
+
+func (h *HelixDriver) handleCommand(key Key, state *State) Result {
+	if key.Code == "esc" {
+		state.Mode = ModeNormal
+		return Result{Intent: ModeIntent{NewMode: ModeNormal}, Consumed: true}
+	}
+	// Consume all keys in command mode as InputIntent
+	if !key.Ctrl && !key.Alt {
+		return Result{Intent: InputIntent{Text: key.Code}, Consumed: true}
+	}
+	return Result{Consumed: false}
 }
 
 func (h *HelixDriver) handleNormal(key Key, state *State) Result {
@@ -243,13 +292,13 @@ func (h *HelixDriver) handleNormal(key Key, state *State) Result {
 	case "a":
 		// append (move right then insert)
 		return Result{Intent: ActionIntent{Verb: "append"}, Consumed: true}
-	case "j":
+	case "j", "down":
 		return Result{Intent: MoveIntent{Direction: "down", Count: count}, Consumed: true}
-	case "k":
+	case "k", "up":
 		return Result{Intent: MoveIntent{Direction: "up", Count: count}, Consumed: true}
-	case "h":
+	case "h", "left":
 		return Result{Intent: MoveIntent{Direction: "left", Count: count}, Consumed: true}
-	case "l":
+	case "l", "right":
 		return Result{Intent: MoveIntent{Direction: "right", Count: count}, Consumed: true}
 	case "w":
 		return Result{Intent: MoveIntent{Direction: "word-forward", Count: count}, Consumed: true}
@@ -291,6 +340,10 @@ func (h *HelixDriver) handleInsert(key Key, state *State) Result {
 	if key.Code == "esc" {
 		state.Mode = ModeNormal
 		return Result{Intent: ModeIntent{NewMode: ModeNormal}, Consumed: true}
+	}
+	// Emit InputIntent for characters
+	if !key.Ctrl && !key.Alt && (len(key.Code) == 1 || key.Code == "enter" || key.Code == "backspace" || key.Code == "tab") {
+		return Result{Intent: InputIntent{Text: key.Code}, Consumed: true}
 	}
 	return Result{Consumed: false}
 }

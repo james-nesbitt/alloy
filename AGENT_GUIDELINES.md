@@ -8,7 +8,7 @@
 Before any merge, MUST run and pass:
 - `just fmt`
 - `just build-all`
-- `just test`-all
+- `just test-all`
 
 * Don't run tests without a timeout (use the just targets) *
 
@@ -27,11 +27,11 @@ Before edits, MUST read:
 
 **PLANNER (Feature Planner)**
 - *Task*: Define feature requirements, WIT interfaces, and project manifest impact.
-- *Rule*: Match `docs/ROADMAP.md` goals, describe deliverables and define testing boundaries. Output: implementation plan.
+- *Rule*: Match `docs/ROADMAP.md` goals, describe deliverables and define testing boundaries, never run VERIFICATION. Output: implementation plan.
 
 **ARCHITECT (Refactor Planner)**
 - *Task*: Analyze code debt, propose structural refactors.
-- *Rule*: Designs details for implementation plan, focus on decoupling, interface stability, and DRY. NO Implementation.
+- *Rule*: Designs details for implementation plan, focus on decoupling, interface stability, and DRY. NO Implementation, never run VERIFICATION.
 
 **DEVELOPER (Implementer)**
 - *Task*: Execute a confirmed PLANNER/ARCHITECT plan.

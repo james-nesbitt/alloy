@@ -44,19 +44,52 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 
 	case modal.MoveIntent:
 		switch it.Direction {
-		case "down":
-			m.textarea.SetCursor(m.textarea.Line() + 1)
-			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
-		case "up":
-			m.textarea.SetCursor(m.textarea.Line() - 1)
-			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
-		case "buffer-start":
-			m.textarea.SetCursor(0)
-			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, 0, 0))
-		case "buffer-end":
-			lines := strings.Split(m.textarea.Value(), "\n")
-			m.textarea.SetCursor(len(lines) - 1)
-			cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, len(lines)-1, 0))
+		case "down", "up", "left", "right", "line-start", "line-end", "buffer-start", "buffer-end", "page-up", "page-down":
+			if m.Mode == tui.ModeInsert || m.Mode == tui.ModeEdit || m.Mode == tui.ModeChat {
+				// To avoid duplicate Update calls on msg, we can just call our own movement logic
+				// (or re-map to msg)
+				keyMsg := tea.KeyMsg{}
+				switch it.Direction {
+				case "down": keyMsg = tea.KeyMsg{Type: tea.KeyDown}
+				case "up": keyMsg = tea.KeyMsg{Type: tea.KeyUp}
+				case "left": keyMsg = tea.KeyMsg{Type: tea.KeyLeft}
+				case "right": keyMsg = tea.KeyMsg{Type: tea.KeyRight}
+				case "line-start": keyMsg = tea.KeyMsg{Type: tea.KeyHome}
+				case "line-end": keyMsg = tea.KeyMsg{Type: tea.KeyEnd}
+				case "buffer-start": m.textarea.SetCursor(0)
+				case "buffer-end": 
+					lines := strings.Split(m.textarea.Value(), "\n")
+					m.textarea.SetCursor(len(lines)-1)
+				}
+				if keyMsg.Type != 0 {
+					var taCmd tea.Cmd
+					m.textarea, taCmd = m.textarea.Update(keyMsg)
+					if taCmd != nil {
+						cmds = append(cmds, taCmd)
+					}
+				}
+				cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
+			} else {
+				// Viewport movement for Normal/Dashboard/Inspector
+				keyMsg := tea.KeyMsg{}
+				switch it.Direction {
+				case "down": keyMsg = tea.KeyMsg{Type: tea.KeyDown}
+				case "up": keyMsg = tea.KeyMsg{Type: tea.KeyUp}
+				case "page-up": keyMsg = tea.KeyMsg{Type: tea.KeyPgUp}
+				case "page-down": keyMsg = tea.KeyMsg{Type: tea.KeyPgDown}
+				}
+				if keyMsg.Type != 0 {
+					var vpCmd tea.Cmd
+					if m.Mode == tui.ModeInspector {
+						m.inspectorVp, vpCmd = m.inspectorVp.Update(keyMsg)
+					} else {
+						m.viewport, vpCmd = m.viewport.Update(keyMsg)
+					}
+					if vpCmd != nil {
+						cmds = append(cmds, vpCmd)
+					}
+				}
+			}
 		}
 
 	case modal.WindowIntent:
@@ -95,6 +128,57 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 		m.Mode = tui.ModeOmni
 		m.commandInput.Focus()
 		cmds = append(cmds, m.doOmniSearch(""))
+
+	case modal.InputIntent:
+		switch m.Mode {
+		case tui.ModeInsert, tui.ModeEdit, tui.ModeChat:
+			// Inject key into textarea
+			// Since we're 100% intent based, we need to handle special cases in input
+			var taCmd tea.Cmd
+			keyMsg := tea.KeyMsg{Runes: []rune(it.Text), Type: tea.KeyRunes}
+			if it.Text == "enter" {
+				keyMsg = tea.KeyMsg{Type: tea.KeyEnter}
+			} else if it.Text == "backspace" {
+				keyMsg = tea.KeyMsg{Type: tea.KeyBackspace}
+			} else if it.Text == "tab" {
+				keyMsg = tea.KeyMsg{Type: tea.KeyTab}
+			} else if it.Text == " " {
+				keyMsg = tea.KeyMsg{Runes: []rune(" "), Type: tea.KeySpace}
+			}
+			m.textarea, taCmd = m.textarea.Update(keyMsg)
+			if taCmd != nil {
+				cmds = append(cmds, taCmd)
+			}
+			if m.Mode == tui.ModeEdit {
+				m.isLocalBufferDirty = true
+			}
+			if m.Mode == tui.ModeChat && it.Text == "enter" {
+				val := m.textarea.Value()
+				if strings.TrimSpace(val) != "" {
+					cmds = append(cmds, m.sendChatMessage(val))
+					m.textarea.SetValue("")
+				}
+			}
+		case tui.ModeCommand, tui.ModeOmni:
+			// Inject into commandInput
+			keyMsg := tea.KeyMsg{Runes: []rune(it.Text), Type: tea.KeyRunes}
+			if it.Text == "enter" {
+				keyMsg = tea.KeyMsg{Type: tea.KeyEnter}
+			} else if it.Text == "backspace" {
+				keyMsg = tea.KeyMsg{Type: tea.KeyBackspace}
+			} else if it.Text == " " {
+				keyMsg = tea.KeyMsg{Runes: []rune(" "), Type: tea.KeySpace}
+			}
+			m.commandInput, _ = m.commandInput.Update(keyMsg)
+			if m.Mode == tui.ModeOmni {
+				cmds = append(cmds, m.doOmniSearch(m.commandInput.Value()))
+			} else if m.Mode == tui.ModeCommand && it.Text == "enter" {
+				m.commandInput.SetValue("")
+				m.Mode = m.lastMainMode
+				newModel, cmd := m.executeCommand(m.commandInput.Value())
+				return newModel.(Model), cmd
+			}
+		}
 
 	case modal.ActionIntent:
 		switch it.Verb {
@@ -190,89 +274,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
+		// If key was not consumed by ModalEngine, just drop it or handle global 
+		// keys that shouldn't be modalized.
 		if consumed {
 			return m, nil
-		}
-
-		// Handle keys based on mode (Legacy fallback)
-		switch m.Mode {
-		case tui.ModeNormal, tui.ModeDashboard:
-			newM, cmd := m.handleNormalMode(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
-			var vpCmd tea.Cmd
-			m.viewport, vpCmd = m.viewport.Update(msg)
-			if vpCmd != nil {
-				cmds = append(cmds, vpCmd)
-			}
-
-		case tui.ModeInsert:
-			newM, cmd := m.handleInsertMode(msg, nil)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
-			var taCmd tea.Cmd
-			m.textarea, taCmd = m.textarea.Update(msg)
-			if taCmd != nil {
-				cmds = append(cmds, taCmd)
-			}
-
-		case tui.ModeChat:
-			newM, cmd := m.handleChatMode(msg, nil)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
-			var taCmd tea.Cmd
-			m.textarea, taCmd = m.textarea.Update(msg)
-			if taCmd != nil {
-				cmds = append(cmds, taCmd)
-			}
-
-		case tui.ModeEdit:
-			newM, cmd := m.handleEditMode(msg, nil)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
-
-			oldVal := m.textarea.Value()
-			oldLine := m.textarea.Line()
-			var taCmd tea.Cmd
-			m.textarea, taCmd = m.textarea.Update(msg)
-			if taCmd != nil {
-				cmds = append(cmds, taCmd)
-			}
-			if m.textarea.Value() != oldVal {
-				m.isLocalBufferDirty = true
-			}
-			if m.textarea.Line() != oldLine {
-				cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
-			}
-
-		case tui.ModeCommand:
-			newM, cmd := m.handleCommandMode(msg, nil)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
-
-		case tui.ModeForm:
-			newM, cmd := m.handleFormMode(msg, nil)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
-
-		case tui.ModeOmni:
-			newM, cmd := m.handleOmniMode(msg, nil)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m = newM.(Model)
 		}
 
 	case discoveryMsg:

@@ -145,3 +145,15 @@ type SearchIntent struct {
 }
 
 func (s SearchIntent) Kind() string { return "search" }
+
+type InputIntent struct {
+	Text string
+}
+
+func (i InputIntent) Kind() string { return "input" }
+
+type LifecycleIntent struct {
+	Action string // e.g., "blur", "focus", "close", "resize"
+}
+
+func (l LifecycleIntent) Kind() string { return "lifecycle" }

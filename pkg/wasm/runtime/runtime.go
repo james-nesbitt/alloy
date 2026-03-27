@@ -173,9 +173,13 @@ func NewRuntime(
 	call func(ctx context.Context, msg api.Message) (api.Message, error),
 ) (*Runtime, error) {
 	cache := wazero.NewCompilationCache()
-	rtConfig := wazero.NewRuntimeConfig().WithCompilationCache(cache)
+	// EXPERIMENTAL: Enable instruction fuel counting
+	rtConfig := wazero.NewRuntimeConfig().
+		WithCompilationCache(cache).
+		WithFuel(true)
+
 	r := wazero.NewRuntimeWithConfig(ctx, rtConfig)
-	logger.Info("creating new WIT-based runtime (v2.9-async-compile)")
+	logger.Info("creating new WIT-based runtime (v2.9-async-fuel)")
 
 	rt := &Runtime{
 		baseRuntime:      r,
@@ -274,6 +278,9 @@ func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.
 
 func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, capsPtr, capsLen uint32) {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
+
+	// Grant initial fuel for the startup sequence
+	mod.AddFuel(1_000_000)
 
 	if capsLen > 0 {
 		// alloy_capability_t is 40 bytes
@@ -621,6 +628,9 @@ func (r *Runtime) internalGetNextMessage(ctx context.Context, mod wazeroapi.Modu
 		return
 	}
 
+	// Refill fuel for the next slice (instruction limit)
+	mod.AddFuel(1_000_000)
+
 	select {
 	case msg := <-instance.msgChan:
 		r.logger.Debug("wasm plugin pulled message", "id", pluginID, "msgID", msg.ID)
@@ -710,7 +720,7 @@ func (r *Runtime) LoadPlugin(
 		maxMemoryBytes: maxMemoryMB * 1024 * 1024,
 		msgPerSecond:   msgPerSec,
 		bytesPerSecond: 10 * 1024 * 1024, // Default 10MB/s
-		fuelLimit:      1000,             // Default 1s execution proxy (ms)
+		fuelLimit:      1_000_000,        // Default 1,000,000 instructions
 		lastMsgReset:   time.Now(),
 	}
 
@@ -735,7 +745,8 @@ func (r *Runtime) LoadPlugin(
 
 		instRtConfig := wazero.NewRuntimeConfig().
 			WithCompilationCache(r.compilationCache). // Reuse the shared cache
-			WithMemoryLimitPages(maxPages)
+			WithMemoryLimitPages(maxPages).
+			WithFuel(true)
 
 		pluginRuntime := wazero.NewRuntimeWithConfig(instCtx, instRtConfig)
 		instance.pluginRuntime = pluginRuntime
@@ -785,22 +796,42 @@ func (r *Runtime) LoadPlugin(
 			WithName(id).
 			WithStdout(newLoggerWriter(r.logger, id, "stdout")).
 			WithStderr(newLoggerWriter(r.logger, id, "stderr")).
-			WithFSConfig(fs)
+			WithFSConfig(fs).
+			WithStartFunctions() // Don't call _start automatically
 
 		mod, err := pluginRuntime.InstantiateModule(instCtx, compiled, config)
 		if err != nil {
-			// Don't log error for normal context cancellation (shutdown)
 			if !errors.Is(err, context.Canceled) {
-				r.logger.Error("wasm module terminated with error", "id", id, "error", err)
+				r.logger.Error("wasm module terminated during instantiation", "id", id, "error", err)
 				instance.recordCrash()
 			}
 			instCancel()
 			return
 		}
 
+		// Set initial fuel for startup
+		mod.AddFuel(10_000_000) // 10M for startup
+
 		r.mu.Lock()
 		instance.mod = mod
 		r.mu.Unlock()
+
+		// Call _start (WASI) manually
+		f := mod.ExportedFunction("_start")
+		if f != nil {
+			_, err = f.Call(instCtx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					// Check for fuel exhaustion specifically
+					if strings.Contains(err.Error(), "fuel exhausted") {
+						r.logger.Error("wasm module ran out of fuel during execution", "id", id)
+					} else {
+						r.logger.Error("wasm module terminated with error", "id", id, "error", err)
+					}
+					instance.recordCrash()
+				}
+			}
+		}
 	}()
 
 	// Wait for the plugin to signal it's ready (via internalStarted)
