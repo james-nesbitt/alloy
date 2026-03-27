@@ -11,6 +11,7 @@ Before any merge, the REVIEWER must run and pass:
 - `just fmt`
 - `just build-all`
 - `just test-all`
+- **EXCEPTION**: Changes restricted to `docs/`, `plans/`, `AI_GUIDELINES.md`, or `README.md` (documentation-only) do NOT require `just build-all` or `just test-all`.
 - *Note*: Merges are only permitted if VERIFICATION passes or explicit User "Autonomy" is granted.
 
 **3. ROLE-BASED ACCESS CONTROL**
