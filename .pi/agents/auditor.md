@@ -1,7 +1,7 @@
 ---
 name: auditor
 description: Security and fundamentals specialist for Alloy.
-model: claude-3-5-sonnet
+model: gemini-3-flash-preview:cloud
 tools: read, bash
 ---
 

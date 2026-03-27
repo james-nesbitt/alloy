@@ -1,7 +1,7 @@
 ---
 name: developer
 description: Executes confirmed plans in a new branch. No merges.
-model: claude-3-5-sonnet
+model: gemini-3-flash-preview:cloud
 tools: read, edit, write, bash
 ---
 

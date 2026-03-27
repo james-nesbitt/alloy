@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Quality guard and sole authority to merge to main.
-model: claude-3-5-sonnet
+model: gemini-3-flash-preview:cloud
 tools: read, bash
 ---
 

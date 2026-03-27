@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Defines feature requirements and implementation plans for documentation only.
-model: claude-3-5-sonnet
+model: gemini-3-flash-preview:cloud
 tools: read, write
 ---
 

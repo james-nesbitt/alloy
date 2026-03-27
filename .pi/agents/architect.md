@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Propose structural refactors via documentation.
-model: claude-3-5-sonnet
+model: gemini-3-flash-preview:cloud
 tools: read, write
 ---
 
