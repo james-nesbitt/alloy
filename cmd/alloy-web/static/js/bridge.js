@@ -11,7 +11,8 @@
             selectedIndex: 0,
             connected: false,
             activeCommand: null,
-            formData: {}
+            formData: {},
+            searchTimeout: null
         },
 
         // Initialize the web frontend
@@ -60,6 +61,31 @@
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
+                
+                // Handle Omni Search results
+                if (data.method === 'omni:search' || data.id?.startsWith('omni-search-')) {
+                    const results = JSON.parse(data.payload);
+                    // Map results to the format bridge expects
+                    bridge.state.results = results.map(r => ({
+                        target: r.source || r.type,
+                        method: r.id,
+                        full_title: r.title,
+                        description: r.description,
+                        params: [] // WASM plugins don't provide param metadata yet in this view
+                    }));
+                    bridge.state.selectedIndex = 0;
+                    bridge.renderResults(bridge.state.results);
+                    return;
+                }
+
+                // Handle Widget Updates
+                if (data.type === 'event' && data.method === 'publish') {
+                    const evt = JSON.parse(data.payload);
+                    if (evt.topic === 'dashboard:widget-updated') {
+                        bridge.updateWidget(data.metadata?.widget_id, evt.data);
+                        return;
+                    }
+                }
                 
                 // Dispatch to WASM logic
                 if (window.alloy && window.alloy.handleEvent) {
@@ -345,15 +371,41 @@
         },
 
         filterResults: () => {
-            if (!window.alloy || !window.alloy.search) return;
-            
-            try {
-                const resJson = window.alloy.search(bridge.state.query);
-                bridge.state.results = JSON.parse(resJson);
-                bridge.state.selectedIndex = 0;
-                bridge.renderResults(bridge.state.results);
-            } catch (err) {
-                console.error("Search error:", err);
+            // DEBOUNCED SEARCH via WebSocket
+            if (bridge.state.searchTimeout) clearTimeout(bridge.state.searchTimeout);
+
+            bridge.state.searchTimeout = setTimeout(() => {
+                const query = bridge.state.query;
+                
+                const msg = {
+                    id: `omni-search-${Date.now()}`,
+                    type: 'request',
+                    sender: 'web-client',
+                    target: 'omni-palette',
+                    method: 'omni:search',
+                    payload: JSON.stringify({ query: query, limit: 15 })
+                };
+
+                if (bridge.socket && bridge.socket.readyState === WebSocket.OPEN) {
+                    bridge.socket.send(JSON.stringify(msg));
+                }
+            }, 150);
+        },
+
+        updateWidget: (id, content) => {
+            console.log("Updating widget:", id);
+            const widgetEl = document.querySelector(`[data-widget-id="${id}"]`);
+            if (widgetEl) {
+                // If content is base64 (from WASM), decode it
+                if (typeof content === 'string' && /^[A-Za-z0-9+/=]+$/.test(content)) {
+                    try {
+                        widgetEl.innerHTML = atob(content);
+                    } catch(e) {
+                        widgetEl.innerText = content;
+                    }
+                } else {
+                    widgetEl.innerText = content;
+                }
             }
         }
     };

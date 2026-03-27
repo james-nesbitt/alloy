@@ -90,7 +90,7 @@ func (wf *WebFrontend) handleWS(w http.ResponseWriter, r *http.Request) {
 		go func(m api.Message) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, err := wf.client.Send(ctx, m.Target, m.Method, m.Payload)
+			resp, err := wf.client.Send(ctx, m.Target, m.Method, m.Payload)
 			if err != nil {
 				slog.Error("WS task failed", "error", err)
 				_ = conn.WriteJSON(api.Message{
@@ -99,6 +99,9 @@ func (wf *WebFrontend) handleWS(w http.ResponseWriter, r *http.Request) {
 					Sender:  "kernel",
 					Payload: []byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())),
 				})
+			} else {
+				// Send response back to the client
+				_ = conn.WriteJSON(resp)
 			}
 		}(msg)
 	}

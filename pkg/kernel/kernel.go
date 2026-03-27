@@ -602,6 +602,44 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 
 	go k.events.Publish(context.Background(), "component:registered", "kernel",
 		[]byte(`{"id":"`+id+`","type":"frontend"}`))
+
+	// Push current system state to the new frontend
+	go func() {
+		time.Sleep(100 * time.Millisecond) // Give the frontend a moment to start its read loop
+
+		// 1. Push all registered widgets
+		widgets := k.ListWidgets()
+		for _, w := range widgets {
+			wData, _ := json.Marshal(map[string]any{
+				"topic": "dashboard:widget-updated",
+				"data":  w.Content,
+			})
+			k.deliverToFrontendSync(context.Background(), id, api.Message{
+				ID:      fmt.Sprintf("init-widget-%s", w.ID),
+				Type:    api.TypeEvent,
+				Sender:  "kernel",
+				Target:  id,
+				Method:  "publish",
+				Payload: wData,
+				Metadata: map[string]any{
+					"widget_id": w.ID,
+				},
+			})
+		}
+
+		// 2. Push active workspace
+		if ws, ok := k.GetActiveWorkspace(); ok {
+			wsData, _ := json.Marshal(ws)
+			k.deliverToFrontendSync(context.Background(), id, api.Message{
+				ID:      "init-workspace",
+				Type:    api.TypeEvent,
+				Sender:  "kernel",
+				Target:  id,
+				Method:  "workspace:active",
+				Payload: wsData,
+			})
+		}
+	}()
 }
 
 func (k *Kernel) UnregisterFrontend(id string) {
