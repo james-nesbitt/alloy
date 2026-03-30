@@ -65,6 +65,7 @@ type Kernel struct {
 	cache      *CacheManager
 	doc        *DocStore
 	buffers    *BufferManager
+	widgets    *WidgetManager
 
 	// security configuration
 	insecure bool
@@ -135,6 +136,9 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 
 	k.doc = NewDocStore()
 	k.RegisterPlugin(k.doc)
+
+	k.widgets = NewWidgetManager(logger, storage)
+	k.RegisterPlugin(k.widgets)
 
 	// Integrated Logger (Auditing)
 	auditDir := storage.BaseDir()
@@ -961,7 +965,7 @@ func (k *Kernel) GetActiveWorkspace() (api.Workspace, bool) {
 	return k.wasmManager.GetActiveWorkspace()
 }
 func (k *Kernel) ListWorkspaces() []api.Workspace { return k.wasmManager.ListWorkspaces() }
-func (k *Kernel) ListWidgets() []api.Widget       { return k.wasmManager.ListWidgets() }
+func (k *Kernel) ListWidgets() []api.Widget       { return k.widgets.ListWidgets() }
 
 // Internal helper for wasm manager
 type witPluginWrapper struct {

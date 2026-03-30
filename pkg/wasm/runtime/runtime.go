@@ -46,8 +46,7 @@ type Runtime struct {
 	// Buffer Views (pluginID -> bufferID -> guestPtr)
 	bufferViews map[string]map[string]uint32
 
-	// Dashboard management
-	widgets map[string]api.Widget
+	// Dashboard management deprecated in runtime, moved to kernel
 }
 
 // Instance represents a WASM plugin instance.
@@ -192,10 +191,8 @@ func NewRuntime(
 		plugins:          make(map[string]*Instance),
 		workspaces:       make(map[string]api.Workspace),
 		bufferViews:      make(map[string]map[string]uint32),
-		widgets:          make(map[string]api.Widget),
 	}
 	rt.loadWorkspaces()
-	rt.loadWidgets()
 
 	// Instantiate the host module into base with functions (for shared access if needed)
 	hostMod, err := rt.instantiateHostModuleInRuntime(ctx, rt.baseRuntime)
@@ -1182,25 +1179,6 @@ func (r *Runtime) loadWorkspaces() {
 	}
 }
 
-// Persistence for widgets
-func (r *Runtime) saveWidgets() {
-	r.mu.RLock()
-	data, _ := json.Marshal(r.widgets)
-	r.mu.RUnlock()
-
-	_ = r.kv.Set("system", "widgets", data)
-}
-
-func (r *Runtime) loadWidgets() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	data, err := r.kv.Get("system", "widgets")
-	if err == nil && data != nil {
-		_ = json.Unmarshal(data, &r.widgets)
-	}
-}
-
 // Registry & Direct Interaction implemention
 
 func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen uint32) {
@@ -1559,50 +1537,30 @@ func (r *Runtime) internalRegisterWidget(ctx context.Context, mod wazeroapi.Modu
 		w.Content, _ = mod.Memory().Read(contentPtr, contentLen)
 	}
 
-	r.logger.Info("plugin registering dashboard widget", "plugin", mod.Name(), "widget", w.ID, "title", w.Title)
+	r.logger.Info("plugin registering dashboard widget (proxying to kernel)", "plugin", mod.Name(), "widget", w.ID, "title", w.Title)
 
-	r.mu.Lock()
-	r.widgets[w.ID] = w
-	r.mu.Unlock()
-	r.saveWidgets()
-
-	// Broadast as event
-	wData, _ := json.Marshal(w)
-	payload, _ := json.Marshal(map[string]any{
-		"topic": "dashboard:widget-registered",
-		"data":  json.RawMessage(wData),
-	})
-
+	payload, _ := json.Marshal(w)
 	r.routerFn(ctx, api.Message{
 		ID:      fmt.Sprintf("reg-widget-%d", time.Now().UnixNano()),
-		Type:    api.TypeEvent,
+		Type:    api.TypeRequest,
 		Sender:  mod.Name(),
-		Target:  "events",
-		Method:  "publish",
+		Target:  "widget-manager",
+		Method:  "register",
 		Payload: payload,
 	})
 }
 
 func (r *Runtime) internalUnregisterWidget(ctx context.Context, mod wazeroapi.Module, idPtr, idLen uint32) {
 	id := r.readStringFromArgs(mod, idPtr, idLen)
-	r.logger.Info("plugin unregistering dashboard widget", "plugin", mod.Name(), "widget", id)
+	r.logger.Info("plugin unregistering dashboard widget (proxying to kernel)", "plugin", mod.Name(), "widget", id)
 
-	r.mu.Lock()
-	delete(r.widgets, id)
-	r.mu.Unlock()
-	r.saveWidgets()
-
-	payload, _ := json.Marshal(map[string]any{
-		"topic": "dashboard:widget-unregistered",
-		"data":  map[string]string{"id": id},
-	})
-
+	payload, _ := json.Marshal(map[string]string{"id": id})
 	r.routerFn(ctx, api.Message{
 		ID:      fmt.Sprintf("unreg-widget-%d", time.Now().UnixNano()),
-		Type:    api.TypeEvent,
+		Type:    api.TypeRequest,
 		Sender:  mod.Name(),
-		Target:  "events",
-		Method:  "publish",
+		Target:  "widget-manager",
+		Method:  "unregister",
 		Payload: payload,
 	})
 }
@@ -1611,31 +1569,19 @@ func (r *Runtime) internalUpdateWidget(ctx context.Context, mod wazeroapi.Module
 	id := r.readStringFromArgs(mod, idPtr, idLen)
 	content, _ := mod.Memory().Read(contentPtr, contentLen)
 
-	r.mu.Lock()
-	if w, ok := r.widgets[id]; ok {
-		w.Content = content
-		r.widgets[id] = w
+	update := api.WidgetUpdate{
+		ID:      id,
+		Content: content,
 	}
-	r.mu.Unlock()
-	r.saveWidgets()
 
-	// Ensure the content is valid JSON (wrap in quotes if it's text)
-	// Actually, let's just marshal it as a byte slice to be safe.
-	payload, _ := json.Marshal(map[string]any{
-		"topic": "dashboard:widget-updated",
-		"data":  content,
-	})
-
+	payload, _ := json.Marshal(update)
 	r.routerFn(ctx, api.Message{
 		ID:      fmt.Sprintf("upd-widget-%d", time.Now().UnixNano()),
-		Type:    api.TypeEvent,
+		Type:    api.TypeRequest,
 		Sender:  mod.Name(),
-		Target:  "events",
-		Method:  "publish",
+		Target:  "widget-manager",
+		Method:  "update",
 		Payload: payload,
-		Metadata: map[string]any{
-			"widget_id": id,
-		},
 	})
 }
 
@@ -1690,13 +1636,7 @@ func (r *Runtime) ListWorkspaces() []api.Workspace {
 }
 
 func (r *Runtime) ListWidgets() []api.Widget {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	widgets := make([]api.Widget, 0, len(r.widgets))
-	for _, w := range r.widgets {
-		widgets = append(widgets, w)
-	}
-	return widgets
+	return nil // Handled by kernel
 }
 
 func (r *Runtime) internalGetBufferView(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, resultPtr uint32) {

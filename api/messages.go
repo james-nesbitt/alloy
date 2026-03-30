@@ -153,6 +153,12 @@ type Registration struct {
 	Capabilities []Capability `json:"capabilities,omitempty"`
 }
 
+// WidgetUpdate represents a content refresh for a specific widget.
+type WidgetUpdate struct {
+	ID      string `json:"id"`
+	Content []byte `json:"content"`
+}
+
 // Widget represents a dynamic dashboard tile.
 type Widget struct {
 	ID                string `json:"id"`

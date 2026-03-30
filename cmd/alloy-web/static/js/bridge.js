@@ -64,13 +64,23 @@
                 
                 // Handle Omni Search results
                 if (data.method === 'omni:search' || data.id?.startsWith('omni-search-')) {
-                    const results = JSON.parse(data.payload);
+                    let results = data.payload;
+                    if (typeof results === 'string') {
+                        try {
+                            results = JSON.parse(results);
+                        } catch (e) {
+                            console.error("Failed to parse omni results", e);
+                            return;
+                        }
+                    }
+                    
                     // Map results to the format bridge expects
                     bridge.state.results = results.map(r => ({
-                        target: r.source || r.type,
+                        target: (r.type === 'command') ? r.id : (r.source || r.type),
                         method: r.id,
                         full_title: r.title,
                         description: r.description,
+                        metadata: r.metadata,
                         params: [] // WASM plugins don't provide param metadata yet in this view
                     }));
                     bridge.state.selectedIndex = 0;
@@ -237,6 +247,25 @@
         selectResult: () => {
             const res = bridge.state.results[bridge.state.selectedIndex];
             if (!res) return;
+
+            // Handle metadata-based actions
+            if (res.metadata && res.metadata.action) {
+                const action = res.metadata.action;
+                console.log("Omni Action:", action, res.metadata);
+
+                if (action === 'switch' && res.metadata.buffer_id) {
+                    bridge.executeCommand('buffer', 'buffer:read', { id: res.metadata.buffer_id });
+                    bridge.toggleOmni(false);
+                    return;
+                }
+                
+                if (action === 'open' && res.metadata.path) {
+                    // Logic to open a document
+                    bridge.notify(`Opening Document: ${res.metadata.path}`, 'info');
+                    bridge.toggleOmni(false);
+                    return;
+                }
+            }
             
             if (res.params && res.params.length > 0) {
                 bridge.showForm(res);

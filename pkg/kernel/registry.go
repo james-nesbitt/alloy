@@ -8,7 +8,185 @@ import (
 	"time"
 
 	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/storage"
 )
+
+// WidgetManager maintains a registry of dashboard widgets.
+type WidgetManager struct {
+	mu      sync.RWMutex
+	widgets map[string]api.Widget
+	logger  *slog.Logger
+	router  func(context.Context, api.Message)
+	store   storage.StateStore
+}
+
+func NewWidgetManager(logger *slog.Logger, store storage.StateStore) *WidgetManager {
+	wm := &WidgetManager{
+		widgets: make(map[string]api.Widget),
+		logger:  logger,
+		store:   store,
+	}
+	wm.load()
+	return wm
+}
+
+func (w *WidgetManager) SetRouter(r func(context.Context, api.Message)) {
+	w.router = r
+}
+
+func (w *WidgetManager) ID() string { return "widget-manager" }
+
+func (w *WidgetManager) Capabilities() []api.Capability {
+	return []api.Capability{
+		{Method: "register", Description: "Register a dashboard widget"},
+		{Method: "unregister", Description: "Unregister a dashboard widget"},
+		{Method: "update", Description: "Update widget content"},
+		{Method: "list", Description: "List all widgets"},
+	}
+}
+
+func (w *WidgetManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
+	switch msg.Method {
+	case "register":
+		var widget api.Widget
+		if err := json.Unmarshal(msg.Payload, &widget); err != nil {
+			return api.Message{}, err
+		}
+		w.mu.Lock()
+		w.widgets[widget.ID] = widget
+		w.mu.Unlock()
+		w.save()
+
+		// Publish event
+		if w.router != nil {
+			w.router(ctx, api.Message{
+				ID:      "evt-widget-reg-" + widget.ID,
+				Type:    api.TypeEvent,
+				Sender:  w.ID(),
+				Target:  "events",
+				Method:  "publish",
+				Payload: []byte(`{"topic":"dashboard:widget-registered"}`),
+			})
+		}
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"ok"}`),
+		}, nil
+
+	case "unregister":
+		var req struct{ ID string }
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return api.Message{}, err
+		}
+		w.mu.Lock()
+		delete(w.widgets, req.ID)
+		w.mu.Unlock()
+		w.save()
+
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"ok"}`),
+		}, nil
+
+	case "update":
+		var update api.WidgetUpdate
+		if err := json.Unmarshal(msg.Payload, &update); err != nil {
+			return api.Message{}, err
+		}
+		w.mu.Lock()
+		widget, ok := w.widgets[update.ID]
+		if ok {
+			widget.Content = update.Content
+			w.widgets[update.ID] = widget
+		}
+		w.mu.Unlock()
+		if ok {
+			w.save()
+		}
+
+		if ok && w.router != nil {
+			// Broadcast to all frontends
+			w.router(ctx, api.Message{
+				ID:      "evt-widget-upd-" + update.ID,
+				Type:    api.TypeEvent,
+				Sender:  w.ID(),
+				Target:  "*", // Broadcast
+				Method:  "dashboard:widget-updated",
+				Payload: msg.Payload,
+				Metadata: map[string]any{
+					"widget_id": update.ID,
+				},
+			})
+		}
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: []byte(`{"status":"ok"}`),
+		}, nil
+
+	case "list":
+		w.mu.RLock()
+		defer w.mu.RUnlock()
+		widgets := make([]api.Widget, 0, len(w.widgets))
+		for _, v := range w.widgets {
+			widgets = append(widgets, v)
+		}
+		payload, _ := json.Marshal(widgets)
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Sender:  w.ID(),
+			Target:  msg.Sender,
+			Payload: payload,
+		}, nil
+	}
+	return api.Message{}, nil
+}
+
+func (w *WidgetManager) Shutdown(ctx context.Context) error {
+	w.save()
+	return nil
+}
+
+func (w *WidgetManager) save() {
+	if w.store == nil {
+		return
+	}
+	w.mu.RLock()
+	data, _ := json.Marshal(w.widgets)
+	w.mu.RUnlock()
+	_ = w.store.Set("system", "widgets", data)
+}
+
+func (w *WidgetManager) load() {
+	if w.store == nil {
+		return
+	}
+	data, err := w.store.Get("system", "widgets")
+	if err == nil && data != nil {
+		w.mu.Lock()
+		_ = json.Unmarshal(data, &w.widgets)
+		w.mu.Unlock()
+	}
+}
+
+func (w *WidgetManager) ListWidgets() []api.Widget {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	res := make([]api.Widget, 0, len(w.widgets))
+	for _, v := range w.widgets {
+		res = append(res, v)
+	}
+	return res
+}
 
 // CommandManager maintains a registry of all system-wide actions and component capabilities.
 type CommandManager struct {
