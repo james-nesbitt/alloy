@@ -91,6 +91,10 @@
                 // Handle Widget Updates
                 if (data.type === 'event' && data.method === 'publish') {
                     const evt = JSON.parse(data.payload);
+                    if (evt.topic === 'dashboard:widget-registered') {
+                        bridge.registerWidget(evt.data);
+                        return;
+                    }
                     if (evt.topic === 'dashboard:widget-updated') {
                         bridge.updateWidget(data.metadata?.widget_id, evt.data);
                         return;
@@ -423,7 +427,7 @@
 
         updateWidget: (id, content) => {
             console.log("Updating widget:", id);
-            const widgetEl = document.querySelector(`[data-widget-id="${id}"]`);
+            const widgetEl = document.querySelector(`[data-widget-id="${id}"] .widget-content`);
             if (widgetEl) {
                 // If content is base64 (from WASM), decode it
                 if (typeof content === 'string' && /^[A-Za-z0-9+/=]+$/.test(content)) {
@@ -435,6 +439,34 @@
                 } else {
                     widgetEl.innerText = content;
                 }
+            }
+        },
+
+        registerWidget: (widget) => {
+            console.log("Registering widget:", widget.id);
+            const container = document.getElementById('dashboard-widgets');
+            if (!container) return;
+
+            if (document.querySelector(`[data-widget-id="${widget.id}"]`)) return;
+
+            const el = document.createElement('div');
+            el.className = 'bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col space-y-2';
+            el.setAttribute('data-widget-id', widget.id);
+            
+            const title = document.createElement('h3');
+            title.className = 'text-zinc-400 text-xs font-bold uppercase tracking-widest';
+            title.innerText = widget.title;
+            
+            const content = document.createElement('div');
+            content.className = 'text-zinc-100 widget-content';
+            content.innerText = 'Loading...';
+            
+            el.appendChild(title);
+            el.appendChild(content);
+            container.appendChild(el);
+            
+            if (widget.content) {
+                bridge.updateWidget(widget.id, widget.content);
             }
         }
     };

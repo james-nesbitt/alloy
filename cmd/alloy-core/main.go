@@ -42,6 +42,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", ":9090", "Address for Prometheus metrics")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
+	projectManifest := flag.String("manifest", "alloy-project.json", "Project manifest file")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -121,6 +122,20 @@ func main() {
 	// Create and start IPC server BEFORE loading plugins so tests can connect while loading
 	server := ipc.NewServer(logger, k, tlsConfig)
 
+	// Step: Apply Project Manifest if found
+	if *projectManifest != "" {
+		if _, err := os.Stat(*projectManifest); err == nil {
+			manifest, err := kernel.LoadManifest(*projectManifest)
+			if err != nil {
+				logger.Error("failed to load project manifest", "error", err)
+			} else {
+				if err := k.ApplyManifest(ctx, manifest); err != nil {
+					logger.Error("failed to apply project manifest", "error", err)
+				}
+			}
+		}
+	}
+
 	go func() {
 		logger.Info("starting IPC server", "addr", *listenAddr)
 		if err := server.ListenAndServe(*listenAddr); err != nil {
@@ -172,7 +187,7 @@ func main() {
 		// Resolve paths relative to manifest
 		for i := range manifest.Plugins {
 			if manifest.Plugins[i].Type == "wasm" {
-				manifest.Plugins[i].Path = resolvePluginPath(currentProvisionFile, manifest.Plugins[i].Path)
+				manifest.Plugins[i].Path = kernel.ResolvePluginPath(currentProvisionFile, manifest.Plugins[i].Path)
 			}
 		}
 
@@ -196,47 +211,4 @@ func main() {
 	if err := k.Shutdown(ctx); err != nil {
 		logger.Error("kernel shutdown error", "error", err)
 	}
-}
-
-// resolvePluginPath attempts to find the WASM file relative to several well-known locations.
-func resolvePluginPath(manifestPath, pluginPath string) string {
-	if filepath.IsAbs(pluginPath) {
-		if _, err := os.Stat(pluginPath); err == nil {
-			return pluginPath
-		}
-	}
-
-	// 1. Try relative to the manifest file itself
-	relToManifest := filepath.Join(filepath.Dir(manifestPath), pluginPath)
-	if _, err := os.Stat(relToManifest); err == nil {
-		return relToManifest
-	}
-
-	// 2. Try the official FHS location relative to the binary
-	if exe, err := os.Executable(); err == nil {
-		fhsPath := filepath.Join(filepath.Dir(exe), "..", "lib", "alloy", "plugins", pluginPath)
-		if _, err := os.Stat(fhsPath); err == nil {
-			return fhsPath
-		}
-	}
-
-	// 3. Try common dev paths (relative to CWD)
-	cwd, _ := os.Getwd()
-	devPaths := []string{
-		filepath.Join(cwd, "build", "dist", "usr", "lib", "alloy", "plugins", pluginPath),
-		filepath.Join(cwd, "build", "plugins", pluginPath),
-	}
-	for _, p := range devPaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
-	// 4. Try system-wide location
-	sysPath := filepath.Join("/usr/lib/alloy/plugins", pluginPath)
-	if _, err := os.Stat(sysPath); err == nil {
-		return sysPath
-	}
-
-	return ""
 }

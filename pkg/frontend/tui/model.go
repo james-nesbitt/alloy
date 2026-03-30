@@ -30,6 +30,7 @@ type TickMsg time.Time
 type Pane struct {
 	Type     int     // ModeNormal, ModeDashboard, ModeChat, ModeEdit
 	WidthPct float64 // 0.0 to 1.0
+	WidgetID string  // Specific widget for this pane
 }
 
 const (

@@ -94,12 +94,12 @@ func (m Model) View() string {
 				style = style.Border(lipgloss.NormalBorder(), false, true, false, true).BorderForeground(lipgloss.Color("240"))
 			}
 
-			content := m.renderPaneContent(p.Type, paneWidth-2, workingHeight)
+			content := m.renderPaneContent(p, paneWidth-2, workingHeight)
 			views = append(views, style.Render(content))
 		}
 		mainView = lipgloss.JoinHorizontal(lipgloss.Top, views...)
 	} else {
-		mainView = m.renderPaneContent(m.Mode, m.width, workingHeight)
+		mainView = m.renderPaneContent(m.Panes[0], m.width, workingHeight)
 	}
 
 	view := lipgloss.JoinVertical(lipgloss.Left,
@@ -302,7 +302,20 @@ func (m Model) omniPaletteView() string {
 	return paletteStyle.Render(m.omniList.View())
 }
 
-func (m Model) renderPaneContent(paneType int, width int, height int) string {
+func (m Model) renderPaneContent(p tui.Pane, width int, height int) string {
+	if p.WidgetID != "" {
+		if tile, ok := m.DashboardTiles[p.WidgetID]; ok {
+			return lipgloss.NewStyle().Width(width).Height(height).Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(" "+tile.Title),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(" " + strings.Repeat("─", width-2)),
+					lipgloss.NewStyle().Padding(0, 1).Render(string(tile.RawContent)),
+				),
+			)
+		}
+	}
+
+	paneType := p.Type
 	if paneType == tui.ModeInsert || paneType == tui.ModeChat || paneType == tui.ModeEdit {
 		m.textarea.SetWidth(width)
 		m.textarea.SetHeight(height)

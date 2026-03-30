@@ -115,6 +115,10 @@ func run(w *app.Window, client *frontend.Client) error {
 								_, _ = client.Send(subCtx, "events", "subscribe", subReq)
 								subReq3, _ := json.Marshal(map[string]string{"topic": "workspace:set"})
 								_, _ = client.Send(subCtx, "events", "subscribe", subReq3)
+								subReq4, _ := json.Marshal(map[string]string{"topic": "dashboard:widget-registered"})
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq4)
+								subReq5, _ := json.Marshal(map[string]string{"topic": "dashboard:widget-updated"})
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq5)
 								subCancel()
 								gui.subscriptions["project:opened"] = true
 							}
@@ -162,24 +166,41 @@ func run(w *app.Window, client *frontend.Client) error {
 			}
 		}
 
-		if msg.Method == "dashboard-update" {
-			var tile frontend.DashboardTile
-			if err := json.Unmarshal(msg.Payload, &tile); err == nil {
+		if msg.Method == "dashboard:widget-registered" {
+			var w api.Widget
+			if err := json.Unmarshal(msg.Payload, &w); err == nil {
 				if gui.dashboardTiles == nil {
 					gui.dashboardTiles = make(map[string]frontend.DashboardTile)
 				}
-				gui.dashboardTiles[msg.Sender] = tile
+				gui.dashboardTiles[w.ID] = frontend.DashboardTile{
+					ID:          w.ID,
+					Title:       w.Title,
+					ContentType: w.ContentType,
+					RawContent:  w.Content,
+					Content:     []string{string(w.Content)},
+					Timestamp:   time.Now().Unix(),
+				}
 
 				found := false
 				for _, id := range gui.tileOrder {
-					if id == msg.Sender {
+					if id == w.ID {
 						found = true
 						break
 					}
 				}
 				if !found {
-					gui.tileOrder = append(gui.tileOrder, msg.Sender)
+					gui.tileOrder = append(gui.tileOrder, w.ID)
 				}
+			}
+		}
+
+		if msg.Method == "dashboard:widget-updated" {
+			widgetID, _ := msg.Metadata["widget_id"].(string)
+			if tile, ok := gui.dashboardTiles[widgetID]; ok {
+				tile.RawContent = msg.Payload
+				tile.Content = []string{string(msg.Payload)}
+				tile.Timestamp = time.Now().Unix()
+				gui.dashboardTiles[widgetID] = tile
 			}
 		}
 		w.Invalidate()

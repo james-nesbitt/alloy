@@ -3,8 +3,10 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -81,5 +83,70 @@ func TestDynamicDashboardWidgets(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for widget registration")
+	}
+}
+
+func TestManifestAutoBoot(t *testing.T) {
+	dataDir := t.TempDir()
+	kvStore := storage.NewMemoryStateStore()
+	logH := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	k, err := kernel.New(logH, kvStore, dataDir, "")
+	if err != nil {
+		t.Fatalf("failed to create kernel: %v", err)
+	}
+
+	manifestPath := filepath.Join(dataDir, "alloy-project.json")
+	pluginPath := "../build/dist/usr/lib/alloy/plugins/ai.wasm"
+
+	if _, err := os.Stat(pluginPath); err != nil {
+		t.Skip("ai.wasm not found")
+	}
+
+	manifest := fmt.Sprintf(`{
+		"name": "Test Project",
+		"plugins": [
+			{ "id": "ai", "path": "%s", "load": "boot" }
+		]
+	}`, pluginPath)
+
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	m, err := kernel.LoadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("failed to load manifest: %v", err)
+	}
+
+	// Capture events
+	widgetCh := make(chan struct{}, 10)
+	k.RegisterPlugin(&mockPlugin{
+		id: "event-catcher",
+		handler: func(ctx context.Context, msg api.Message) (api.Message, error) {
+			if msg.Method == "dashboard:widget-registered" {
+				widgetCh <- struct{}{}
+			}
+			return api.Message{}, nil
+		},
+	})
+	k.RouteMessage(context.Background(), api.Message{
+		ID:      "sub-2",
+		Sender:  "event-catcher",
+		Target:  "events",
+		Method:  "subscribe",
+		Payload: []byte(`{"topic":"dashboard:widget-registered"}`),
+	})
+
+	if err := k.ApplyManifest(context.Background(), m); err != nil {
+		t.Fatalf("failed to apply manifest: %v", err)
+	}
+
+	// Verify plugin 'ai' is loading and eventually registers its widget
+	select {
+	case <-widgetCh:
+		// Success
+	case <-time.After(15 * time.Second):
+		t.Fatal("timed out waiting for auto-booted widget")
 	}
 }

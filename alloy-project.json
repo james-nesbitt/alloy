@@ -1,0 +1,16 @@
+{
+  "name": "Alloy Core Demo",
+  "description": "Dynamic Dashboard & Omni-Palette Showcase",
+  "plugins": [
+    { "id": "buffer", "path": "plugins/buffer.wasm", "load": "lazy" },
+    { "id": "chat", "path": "plugins/chat.wasm", "load": "lazy" },
+    { "id": "ai", "path": "plugins/ai.wasm", "load": "boot" }
+  ],
+  "layout": {
+    "default_mode": "dashboard",
+    "layout": [
+      { "type": "dashboard", "width_pct": 0.5 },
+      { "type": "chat", "width_pct": 0.5 }
+    ]
+  }
+}

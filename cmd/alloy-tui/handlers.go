@@ -288,8 +288,35 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				}
 				if !found {
 					m.TileOrder = append(m.TileOrder, w.ID)
+
+					// DYNAMIC VIEWPORT PART: Every widget registered also becomes a PANE
+					// if we are in a purely dynamic dashboard mode (no set project layout).
+					if len(m.Panes) == 1 && m.Panes[0].Type == tui.ModeDashboard && m.Panes[0].WidgetID == "" {
+						// Transition to split layout for this and future widgets
+						m.Panes = []tui.Pane{}
+						for _, id := range m.TileOrder {
+							m.Panes = append(m.Panes, tui.Pane{
+								Type:     tui.ModeDashboard,
+								WidgetID: id,
+							})
+						}
+					} else if len(m.Panes) > 0 && m.Panes[0].Type == tui.ModeDashboard {
+						// Already in dynamic pane mode, just add
+						m.Panes = append(m.Panes, tui.Pane{
+							Type:     tui.ModeDashboard,
+							WidgetID: w.ID,
+						})
+					}
+
+					// Auto-balance widths
+					if len(m.Panes) > 0 {
+						wPct := 1.0 / float64(len(m.Panes))
+						for i := range m.Panes {
+							m.Panes[i].WidthPct = wPct
+						}
+					}
 				}
-				displayMsg = fmt.Sprintf("[%s] New dashboard widget: %s (%s)", time.Now().Format("15:04:05"), w.Title, msg.Sender)
+				displayMsg = fmt.Sprintf("[%s] Dashboard widget active: %s (%s)", time.Now().Format("15:04:05"), w.Title, msg.Sender)
 			}
 		case "dashboard:widget-updated":
 			widgetID, _ := msg.Metadata["widget_id"].(string)
