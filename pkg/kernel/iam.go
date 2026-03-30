@@ -40,17 +40,22 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 
 	// Explicit guest permissions for core functionality
 	iam.policies["guest"] = Policy{Role: "guest", Permissions: []string{
-		"health:*",            // Any user can check health status
-		"command-manager:*",   // Discovery is public
-		"events:subscribe",    // Monitoring public events
-		"events:publish",      // Emitting non-privileged events (e.g. log)
-		"iam:check",           // Checking own permissions
-		"project:get_active",  // Seeing project context
-		"chat:send",           // Basic interaction
-		"buffer:read",         // Public data
-		"kernel:*",            // Basic system calls (e.g. registry read)
-		"logger:*",            // Sending logs
-		"wasm-manager:status", // Seeing plugin status
+		"health:*",               // Any user can check health status
+		"command-manager:*",      // Discovery is public
+		"events:*",               // Pub/Sub discovery and usage
+		"iam:check",              // Checking own permissions
+		"project:*",              // Project discovery and context
+		"chat:*",                 // Basic interaction
+		"buffer:read",            // Public data
+		"buffer:list",            // Public data
+		"buffer:buffer:read",     // Capability-based
+		"buffer:buffer:list",     // Capability-based
+		"kernel:*",               // Basic system calls (e.g. registry read)
+		"logger:*",               // Sending logs
+		"wasm-manager:status",    // Seeing plugin status
+		"widget-manager:*",       // Dashboard updates
+		"omni-palette:*",         // Search usage
+		"index:knowledge:search", // Search usage
 	}}
 
 	// Bootstrap system identities
@@ -60,6 +65,7 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 	iam.identities["events"] = "admin"
 	iam.identities["command-manager"] = "admin"
 	iam.identities["wasm-manager"] = "admin"
+	iam.identities["widget-manager"] = "admin"
 	iam.identities["logger"] = "admin"
 	iam.identities["admin-user"] = "admin"
 	iam.identities["admin-sim"] = "admin"

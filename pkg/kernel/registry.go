@@ -59,13 +59,19 @@ func (w *WidgetManager) HandleMessage(ctx context.Context, msg api.Message) (api
 
 		// Publish event
 		if w.router != nil {
+			widgetData, _ := json.Marshal(widget)
+			publishReq, _ := json.Marshal(map[string]any{
+				"topic": "dashboard:widget-registered",
+				"data":  json.RawMessage(widgetData),
+			})
+
 			w.router(ctx, api.Message{
 				ID:      "evt-widget-reg-" + widget.ID,
 				Type:    api.TypeEvent,
 				Sender:  w.ID(),
 				Target:  "events",
 				Method:  "publish",
-				Payload: []byte(`{"topic":"dashboard:widget-registered"}`),
+				Payload: publishReq,
 			})
 		}
 		return api.Message{

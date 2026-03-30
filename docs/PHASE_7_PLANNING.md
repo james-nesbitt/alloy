@@ -40,5 +40,7 @@ Transform the static layout into a dynamic, plugin-driven dashboard.
 - [ ] Update `pkg/wasm/runtime/runtime.go` to provide a host-call for `update_widget`.
 - [ ] Implement the registry in the kernel to track which widgets are registered.
 
-### Step 3: TUI Workspace Layout
-- [ ] Refactor `cmd/alloy-tui` to support dynamic panes based on registered widgets.
+---
+
+## 4. Lessons Learned
+For technical challenges and toolchain requirements discovered during Phase 7, see [LESSONS_LEARNED_PHASE_7.md](./LESSONS_LEARNED_PHASE_7.md).

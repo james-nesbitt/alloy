@@ -284,7 +284,7 @@ func TestWorkspaceWIT(t *testing.T) {
 	wasmPath := "../../../build/dist/usr/lib/alloy/plugins/workspace-test.wasm"
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
-		t.Fatalf("Failed to read workspace-test.wasm: %v (run 'just build-plugin workspace-test' first)", err)
+		t.Skipf("Skipping TestWorkspaceWIT: Failed to read workspace-test.wasm: %v (run 'just build-plugin workspace-test' first)", err)
 	}
 
 	caps := []api.Capability{

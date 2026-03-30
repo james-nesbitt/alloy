@@ -47,8 +47,25 @@ clean:
 
 # --- PROJECT SETUP & CODE GENERATION ---
 
+# Check project dependencies (Go, TinyGo, wit-bindgen)
+check-deps:
+    @command -v go >/dev/null 2>&1 || { echo >&2 "Go is required. Install from: https://go.dev"; exit 1; }
+    @command -v tinygo >/dev/null 2>&1 || { echo >&2 "TinyGo is required. Install from: https://tinygo.org"; exit 1; }
+    @command -v wit-bindgen >/dev/null 2>&1 || { echo >&2 "wit-bindgen is required (v0.17.0 recommended). Install: 'cargo install wit-bindgen-cli --version 0.17.0'"; exit 1; }
+    @if ! wit-bindgen --version | grep -q "0.17.0"; then \
+        echo "WARNING: Detected wit-bindgen $(wit-bindgen --version). Version 0.17.0 is highly recommended for TinyGo compatibility."; \
+    fi
+
+# Ensure mock wasm-opt exists (TinyGo dependency)
+setup-wasm-opt:
+    @mkdir -p {{INTERNAL_BIN}}
+    @if [ ! -f {{INTERNAL_BIN}}/wasm-opt ]; then \
+        printf '#!/bin/bash\n# Mock wasm-opt to skip optimization steps if Binaryen is missing\nwhile [[ $$# -gt 0 ]]; do\n  case $$1 in\n    --output)\n      OUTPUT="$$2"\n      shift; shift\n      ;;\n    *)\n      INPUT="$$1"\n      shift\n      ;;\n  esac\ndone\nif [ ! -z "$$OUTPUT" ]; then\n  cp "$$INPUT" "$$OUTPUT"\nfi\n' > {{INTERNAL_BIN}}/wasm-opt; \
+        chmod +x {{INTERNAL_BIN}}/wasm-opt; \
+    fi
+
 # Generate WIT bindings for both Go (guest) and Rust (host)
-generate:
+generate: check-deps
     @echo ">> Generating WIT bindings into {{BINDINGS_DIR}}..."
     mkdir -p {{BINDINGS_DIR}}/host/wit-rust {{BINDINGS_DIR}}/guest
     wit-bindgen rust --out-dir {{BINDINGS_DIR}}/host/wit-rust wit/alloy.wit
@@ -60,7 +77,7 @@ generate:
     @echo ">> WIT bindings generated."
 
 # Fix and standardize all project modules (replace directives, workspace)
-setup-dev: generate
+setup-dev: generate setup-wasm-opt
     @chmod +x scripts/fix-project-modules.sh
     @./scripts/fix-project-modules.sh
 

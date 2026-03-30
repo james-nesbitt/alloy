@@ -925,7 +925,7 @@ func (r *Runtime) GetResponse(ctx context.Context, pluginID string, requestID st
 		return resp, nil
 	case <-ctx.Done():
 		return api.Message{}, ctx.Err()
-	case <-time.After(15 * time.Second):
+	case <-time.After(30 * time.Second):
 		return api.Message{}, errors.New("timeout waiting for WASM response")
 	}
 }

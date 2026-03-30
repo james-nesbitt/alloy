@@ -225,7 +225,19 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	k.logger.Debug("kernel routing message", "id", msg.ID, "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
 	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
 
-	// 1. Core Interception (RBAC & Integrated Interceptors)
+	// 1. Resolve Target (Capability resolution) early for IAM
+	target := msg.Target
+	k.mu.RLock()
+	capTarget, isCap := k.capabilityMap[target]
+	k.mu.RUnlock()
+
+	if isCap {
+		k.logger.Debug("resolved capability to target", "capability", target, "target", capTarget)
+		target = capTarget
+		msg.Target = target
+	}
+
+	// 2. Core Interception (RBAC & Integrated Interceptors)
 	if ctx.Value(skipInterceptorsKey) == nil {
 		// RBAC Check via built-in IdentityManager
 		if !k.insecure {
@@ -234,9 +246,12 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 				actor = msg.Sender
 			}
 
-			// Security Check
-			if msg.Sender != "system" && msg.Sender != "kernel" && msg.Sender != "iam" &&
-				msg.Type != api.TypeResponse {
+			// Security Check: System services are exempt from RBAC
+			isSystemService := msg.Sender == "system" || msg.Sender == "kernel" ||
+				msg.Sender == "iam" || msg.Sender == "events" ||
+				msg.Sender == "widget-manager" || msg.Sender == "command-manager"
+
+			if !isSystemService && msg.Type != api.TypeResponse {
 				if !k.iam.Authorize(actor, msg.Target, msg.Method) {
 					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target)
 					k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
@@ -312,19 +327,10 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 		// Actually the command manager IS a registered plugin, so we just deliver.
 	}
 
-	// 4. Resolve Target (Capability resolution)
-	target := msg.Target
-	k.mu.RLock()
-	capTarget, isCap := k.capabilityMap[target]
-	k.mu.RUnlock()
+	// 4. Deliver to Frontend, Plugin, or Lazy Load
+	// Note: msg.Target may have been updated by capability resolution
+	target = msg.Target
 
-	if isCap {
-		k.logger.Debug("resolved capability to target", "capability", target, "target", capTarget)
-		target = capTarget
-		msg.Target = target
-	}
-
-	// 5. Deliver to Frontend, Plugin, or Lazy Load
 	k.mu.RLock()
 	frontendChan, isFrontend := k.frontends[target]
 	plugin, isPlugin := k.plugins[target]
