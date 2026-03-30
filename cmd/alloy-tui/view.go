@@ -308,7 +308,7 @@ func (m Model) renderPaneContent(p tui.Pane, width int, height int) string {
 			return lipgloss.NewStyle().Width(width).Height(height).Render(
 				lipgloss.JoinVertical(lipgloss.Left,
 					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(" "+tile.Title),
-					lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(" " + strings.Repeat("─", width-2)),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(" "+strings.Repeat("─", width-2)),
 					lipgloss.NewStyle().Padding(0, 1).Render(string(tile.RawContent)),
 				),
 			)

@@ -12,10 +12,10 @@ import (
 
 // ProjectManifest defines the structure of the alloy-project.json file.
 type ProjectManifest struct {
-	Name        string           `json:"name"`
-	Description string           `json:"description,omitempty"`
-	Version     string           `json:"version,omitempty"`
-	Plugins     []PluginConfig   `json:"plugins"`
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Version     string              `json:"version,omitempty"`
+	Plugins     []PluginConfig      `json:"plugins"`
 	Layout      api.WorkspaceConfig `json:"layout,omitempty"`
 }
 

@@ -933,7 +933,7 @@ func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, ma
 
 	k.RegisterPlugin(plugin)
 	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps)
-}// RegisterWASMPlugin registers a WASM plugin with default limits.
+} // RegisterWASMPlugin registers a WASM plugin with default limits.
 func (k *Kernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
 	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps)
 }
