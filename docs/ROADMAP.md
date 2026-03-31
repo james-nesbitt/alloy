@@ -13,10 +13,11 @@
 - [ ] Archetype Bootstrapping (Coding, Sales, Ops)
 - [ ] Capability Negotiation & Fallbacks
 
-**PHASE 8: CONTEXTUAL IDENTITY**
-- [ ] Project-Specific Role Mappings
-- [ ] Role-Filtered Event Messaging
-- [ ] Capability Visibility in Omni-Palette
+**PHASE 8: AGNOSTIC CONTEXTUAL IDENTITY (DONE)**
+- [x] Implement Hierarchy-Aware RBAC (`[Namespace]/[Target]:[Method]`)
+- [x] Ephemeral Role Attestation Service (IAM Host API)
+- [x] Context-Filtered Discovery (`command-manager`)
+- [x] Redacted Event Streaming (Scoped Publication)
 
 **PHASE 9: WORKSPACE SYNTHESIS**
 - [ ] Frontend Composition Engine (Project + User tools)

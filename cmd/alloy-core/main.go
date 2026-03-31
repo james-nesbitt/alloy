@@ -10,10 +10,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/project"
 	"github.com/james-nesbitt/alloy/pkg/security/identity"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
@@ -125,12 +128,54 @@ func main() {
 	// Step: Apply Project Manifest if found
 	if *projectManifest != "" {
 		if _, err := os.Stat(*projectManifest); err == nil {
-			manifest, err := kernel.LoadManifest(*projectManifest)
+			manifest, err := project.LoadManifest(*projectManifest)
 			if err != nil {
 				logger.Error("failed to load project manifest", "error", err)
 			} else {
-				if err := k.ApplyManifest(ctx, manifest); err != nil {
-					logger.Error("failed to apply project manifest", "error", err)
+				// Translate manifest into kernel commands
+				logger.Info("applying manifest", "project", manifest.Name, "plugins", len(manifest.Plugins))
+
+				// 1. Create the project via API (if plugin exists)
+				// Or skip for now and rely on project plugin
+
+				// 2. Load plugins defined in manifest
+				for _, pc := range manifest.Plugins {
+					pluginPath := kernel.ResolvePluginPath(*projectManifest, pc.Path)
+					logger.Debug("registering plugin from manifest", "id", pc.ID, "load", pc.LoadTime)
+
+					pDef := kernel.PluginDef{
+						ID:       pc.ID,
+						Path:     pluginPath,
+						Type:     "wasm",
+						LoadTime: pc.LoadTime,
+					}
+
+					if err := k.Provision([]kernel.PluginDef{pDef}); err != nil {
+						logger.Error("failed to provision plugin from manifest", "id", pc.ID, "error", err)
+					}
+				}
+
+				// 3. TODO: Send project:set-security if manifest has security config
+				if manifest.Security != nil {
+					// We wait for the plugin to be ready and send it
+					// For now, we perform local core IAM grants direct since this IS the bootstrap
+					// But user wants "translated into configuration to be passed to project:create"
+					// So let's send a delayed message to the project plugin
+					go func() {
+						time.Sleep(2 * time.Second) // wait for wasm to boot
+						securityPayload, _ := json.Marshal(manifest.Security)
+						k.RouteMessage(context.Background(), api.Message{
+							ID:      "bootstrap-security",
+							Type:    api.TypeRequest,
+							Sender:  "system",
+							Target:  "project",
+							Method:  "project:set-security",
+							Payload: securityPayload,
+							Metadata: map[string]any{
+								"namespace": manifest.Name,
+							},
+						})
+					}()
 				}
 			}
 		}

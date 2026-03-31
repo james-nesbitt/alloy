@@ -21,8 +21,11 @@ The Alloy kernel acts as both the **Policy Enforcement Point (PEP)** and the **P
 
 ### 3.1 Tier 1: Native Kernel Router Protection
 - **Low-Latency Authorization**: Every message routed by the kernel is intercepted by a native Go-based security layer (`pkg/kernel/iam.go`).
-- **Integrated RBAC Policy**: High-level permissions are managed within the kernel's state for core service access. 
-- **System Integrity**: Internal kernel components (`kernel`, `events`, `iam-native`) are privileged to prevent deadlocks.
+- **Hierarchical Namespace RBAC**: High-level permissions follow a prefixed syntax: `[Namespace]/[Target]:[Method]`.
+    - **Global**: `buffer:read` (Matches any buffer read)
+    - **Scoped**: `prj-123/buffer:read` (Matches only if the message metadata includes `context: prj-123`).
+    - **Wildcards**: `prj-123/*` or `*/buffer:read` are supported for flexible scoping.
+- **System Integrity**: Internal kernel components (`kernel`, `events`, `iam`) are privileged to prevent deadlocks.
 
 ### 3.2 Tier 2: Pluggable WASM IAM (Advanced RBAC)
 - **Granular Control**: Advanced security logic (e.g., resource-specific rules like `buffer:write:public-*`) is handled by the `iam` WASM plugin.

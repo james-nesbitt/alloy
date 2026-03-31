@@ -85,16 +85,8 @@ func getScopePrefix(requestScope string) string {
 	case "user":
 		return "user:secret:"
 	case "team":
-		ws, ok := plugin.GetActiveWorkspace()
-		if ok && ws.TeamId.IsSome() {
-			return "team:" + ws.TeamId.Unwrap() + ":secret:"
-		}
 		return "global:team:secret:"
 	case "project":
-		ws, ok := plugin.GetActiveWorkspace()
-		if ok {
-			return "project:" + ws.Id + ":secret:"
-		}
 		return "global:project:secret:"
 	default:
 		return "global:secret:"

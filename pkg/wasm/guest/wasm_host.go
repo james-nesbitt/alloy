@@ -1,292 +1,244 @@
-//go:build wasip1 || wasm
-
 package guest
 
 import (
-	wit "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
+	alloy "github.com/james-nesbitt/alloy/build/gen/bindings/guest"
 )
 
-// WasmHost implements HostInterface by calling the WIT-generated bindings.
-type WasmHost struct{}
-
 func createDefaultHost() HostInterface {
-	return &WasmHost{}
+	return &wasmHost{}
 }
 
-func (w *WasmHost) Init(id string, caps []AlloyCapability) {
-	witCaps := make([]wit.AlloyCapability, len(caps))
+type wasmHost struct{}
+
+func (w *wasmHost) Init(id string, caps []AlloyCapability) {
+	wCaps := make([]alloy.AlloyCapability, len(caps))
 	for i, c := range caps {
-		witCaps[i] = toWitCapability(c)
+		wCaps[i] = w.toWitCap(c)
 	}
-	wit.AlloyInit(id, witCaps)
+	alloy.AlloyInit(id, wCaps)
 }
 
-func (w *WasmHost) Started() {
-	wit.AlloyStarted()
+func (w *wasmHost) Started() {
+	alloy.AlloyStarted()
 }
 
-func (w *WasmHost) GetNextMessage() Option[AlloyMessage] {
-	opt := wit.AlloyGetNextMessage()
+func (w *wasmHost) GetNextMessage() Option[AlloyMessage] {
+	opt := alloy.AlloyGetNextMessage()
 	if opt.IsNone() {
 		return None[AlloyMessage]()
 	}
-	return Some(fromWitMessage(opt.Unwrap()))
+	return Some(w.fromWitMsg(opt.Unwrap()))
 }
 
-func (w *WasmHost) SendResponse(msg AlloyMessage) {
-	wit.AlloySendResponse(toWitMessage(msg))
+func (w *wasmHost) SendResponse(msg AlloyMessage) {
+	alloy.AlloySendResponse(w.toWitMsg(msg))
 }
 
-func (w *WasmHost) Log(level string, msg string) {
-	wit.AlloyLog(level, msg)
+func (w *wasmHost) Log(level string, message string) {
+	alloy.AlloyLog(level, message)
 }
 
-func (w *WasmHost) RouteMessage(msg AlloyMessage) {
-	wit.AlloyRouteMessage(toWitMessage(msg))
+func (w *wasmHost) KvSet(key string, value []byte) bool {
+	return alloy.AlloyKvSet(key, value)
 }
 
-func (w *WasmHost) Call(msg AlloyMessage) AlloyMessage {
-	return fromWitMessage(wit.AlloyCall(toWitMessage(msg)))
-}
-
-func (w *WasmHost) KvSet(key string, val []byte) bool {
-	return wit.AlloyKvSet(key, val)
-}
-
-func (w *WasmHost) KvGet(key string) Option[[]byte] {
-	opt := wit.AlloyKvGet(key)
+func (w *wasmHost) KvGet(key string) Option[[]byte] {
+	opt := alloy.AlloyKvGet(key)
 	if opt.IsNone() {
 		return None[[]byte]()
 	}
 	return Some(opt.Unwrap())
 }
 
-func (w *WasmHost) KvDelete(key string) bool {
-	return wit.AlloyKvDelete(key)
+func (w *wasmHost) KvDelete(key string) bool {
+	return alloy.AlloyKvDelete(key)
 }
 
-func (w *WasmHost) KvList(prefix string) []string {
-	return wit.AlloyKvList(prefix)
+func (w *wasmHost) KvList(prefix string) []string {
+	return alloy.AlloyKvList(prefix)
 }
 
-func (w *WasmHost) GetActiveWorkspace() Option[AlloyWorkspace] {
-	opt := wit.AlloyGetActiveWorkspace()
-	if opt.IsNone() {
-		return None[AlloyWorkspace]()
+func (w *wasmHost) RouteMessage(msg AlloyMessage) {
+	alloy.AlloyRouteMessage(w.toWitMsg(msg))
+}
+
+func (w *wasmHost) Call(msg AlloyMessage) AlloyMessage {
+	res := alloy.AlloyCall(w.toWitMsg(msg))
+	return w.fromWitMsg(res)
+}
+
+func (w *wasmHost) RegisterCapability(cap AlloyCapability) {
+	alloy.AlloyRegisterCapability(w.toWitCap(cap))
+}
+
+func (w *wasmHost) UnregisterCapability(method string) {
+	alloy.AlloyUnregisterCapability(method)
+}
+
+func (w *wasmHost) FindProviders(method, actor string, contextID string) []string {
+	var witContext alloy.Option[string]
+	if contextID != "" {
+		witContext = alloy.Some(contextID)
+	} else {
+		witContext = alloy.None[string]()
 	}
-	return Some(fromWitWorkspace(opt.Unwrap()))
+	return alloy.AlloyFindProviders(method, actor, witContext)
 }
 
-func (w *WasmHost) SetActiveWorkspace(id string) {
-	wit.AlloySetActiveWorkspace(id)
-}
-
-func (w *WasmHost) ListWorkspaces() []AlloyWorkspace {
-	list := wit.AlloyListWorkspaces()
-	res := make([]AlloyWorkspace, len(list))
-	for i, ws := range list {
-		res[i] = fromWitWorkspace(ws)
+func (w *wasmHost) GetAllCapabilities(actor string, contextID string) []AlloyCapability {
+	var witContext alloy.Option[string]
+	if contextID != "" {
+		witContext = alloy.Some(contextID)
+	} else {
+		witContext = alloy.None[string]()
 	}
-	return res
-}
 
-func (w *WasmHost) RegisterWorkspace(ws AlloyWorkspace) {
-	wit.AlloyRegisterWorkspace(toWitWorkspace(ws))
-}
-
-func (w *WasmHost) UnregisterWorkspace(id string) {
-	wit.AlloyUnregisterWorkspace(id)
-}
-
-func (w *WasmHost) RegisterCapability(cap AlloyCapability) {
-	wit.AlloyRegisterCapability(toWitCapability(cap))
-}
-
-func (w *WasmHost) UnregisterCapability(method string) {
-	wit.AlloyUnregisterCapability(method)
-}
-
-func (w *WasmHost) FindProviders(method string) []string {
-	return wit.AlloyFindProviders(method)
-}
-
-func (w *WasmHost) GetAllCapabilities() []AlloyCapability {
-	list := wit.AlloyGetAllCapabilities()
-	res := make([]AlloyCapability, len(list))
-	for i, c := range list {
-		res[i] = fromWitCapability(c)
+	witCaps := alloy.AlloyGetAllCapabilities(actor, witContext)
+	res := make([]AlloyCapability, len(witCaps))
+	for i, c := range witCaps {
+		res[i] = w.fromWitCap(c)
 	}
 	return res
 }
 
-func (w *WasmHost) ReadBuffer(id string) Option[AlloyBuffer] {
-	opt := wit.AlloyReadBuffer(id)
+func (w *wasmHost) ReadBuffer(id string) Option[AlloyBuffer] {
+	opt := alloy.AlloyReadBuffer(id)
 	if opt.IsNone() {
 		return None[AlloyBuffer]()
 	}
-	return Some(fromWitBuffer(opt.Unwrap()))
+	witB := opt.Unwrap()
+	return Some(AlloyBuffer{
+		Id:           witB.Id,
+		Name:         witB.Name,
+		Content:      witB.Content,
+		LastModified: witB.LastModified,
+		MimeType:     witB.MimeType,
+	})
 }
 
-func (w *WasmHost) WriteBuffer(id string, content []byte) bool {
-	return wit.AlloyWriteBuffer(id, content)
+func (w *wasmHost) WriteBuffer(id string, content []byte) bool {
+	return alloy.AlloyWriteBuffer(id, content)
 }
 
-func (w *WasmHost) ListBuffers() []string {
-	return wit.AlloyListBuffers()
+func (w *wasmHost) ListBuffers() []string {
+	return alloy.AlloyListBuffers()
 }
 
-func (w *WasmHost) GetBufferView(id string) (ptr, size uint32, ok bool) {
-	opt := wit.AlloyGetBufferView(id)
+func (w *wasmHost) GetBufferView(id string) (ptr, size uint32, ok bool) {
+	opt := alloy.AlloyGetBufferView(id)
 	if opt.IsNone() {
 		return 0, 0, false
 	}
-	val := opt.Unwrap()
-	return val.F0, val.F1, true
+	res := opt.Unwrap()
+	return res.F0, res.F1, true
 }
 
-func (w *WasmHost) RegisterWidget(wg AlloyWidget) {
-	wit.AlloyRegisterWidget(toWitWidget(wg))
+func (w *wasmHost) RegisterWidget(widget AlloyWidget) {
+	alloy.AlloyRegisterWidget(alloy.AlloyWidget{
+		Id:                widget.Id,
+		Title:             widget.Title,
+		ContentType:       widget.ContentType,
+		Content:           widget.Content,
+		RefreshIntervalMs: widget.RefreshIntervalMs,
+	})
 }
 
-func (w *WasmHost) UnregisterWidget(id string) {
-	wit.AlloyUnregisterWidget(id)
+func (w *wasmHost) UnregisterWidget(id string) {
+	alloy.AlloyUnregisterWidget(id)
 }
 
-func (w *WasmHost) UpdateWidget(id string, content []byte) {
-	wit.AlloyUpdateWidget(id, content)
+func (w *wasmHost) UpdateWidget(id string, content []byte) {
+	alloy.AlloyUpdateWidget(id, content)
 }
 
-// Conversion helpers
+// Internal Converters
 
-func toWitOptionString(opt Option[string]) wit.Option[string] {
-	if opt.IsNone() {
-		return wit.None[string]()
+func (w *wasmHost) toWitMsg(msg AlloyMessage) alloy.AlloyMessage {
+	return alloy.AlloyMessage{
+		Id:        msg.Id,
+		MsgType:   msg.MsgType,
+		Method:    msg.Method,
+		Sender:    msg.Sender,
+		Actor:     msg.Actor,
+		Target:    w.toWitOptionString(msg.Target),
+		Payload:   msg.Payload,
+		Timestamp: msg.Timestamp,
+		Metadata:  w.toWitMetadata(msg.Metadata),
 	}
-	return wit.Some(opt.Unwrap())
 }
 
-func fromWitOptionString(opt wit.Option[string]) Option[string] {
+func (w *wasmHost) fromWitMsg(msg alloy.AlloyMessage) AlloyMessage {
+	return AlloyMessage{
+		Id:        msg.Id,
+		MsgType:   msg.MsgType,
+		Method:    msg.Method,
+		Sender:    msg.Sender,
+		Actor:     msg.Actor,
+		Target:    w.fromWitOptionString(msg.Target),
+		Payload:   msg.Payload,
+		Timestamp: msg.Timestamp,
+		Metadata:  w.fromWitMetadata(msg.Metadata),
+	}
+}
+
+func (w *wasmHost) toWitCap(c AlloyCapability) alloy.AlloyCapability {
+	return alloy.AlloyCapability{
+		Method:      c.Method,
+		Description: c.Description,
+		Shortcut:    w.toWitOptionString(c.Shortcut),
+		Annotations: w.toWitOptionMetadata(c.Annotations),
+	}
+}
+
+func (w *wasmHost) fromWitCap(c alloy.AlloyCapability) AlloyCapability {
+	return AlloyCapability{
+		Method:      c.Method,
+		Description: c.Description,
+		Shortcut:    w.fromWitOptionString(c.Shortcut),
+		Annotations: w.fromWitOptionMetadata(c.Annotations),
+	}
+}
+
+func (w *wasmHost) toWitOptionString(opt Option[string]) alloy.Option[string] {
+	if opt.IsNone() {
+		return alloy.None[string]()
+	}
+	return alloy.Some(opt.Unwrap())
+}
+
+func (w *wasmHost) fromWitOptionString(opt alloy.Option[string]) Option[string] {
 	if opt.IsNone() {
 		return None[string]()
 	}
 	return Some(opt.Unwrap())
 }
 
-func toWitTuple2(list []AlloyTuple2StringStringT) []wit.AlloyTuple2StringStringT {
-	if list == nil {
-		return nil
+func (w *wasmHost) toWitOptionMetadata(opt Option[[]AlloyTuple2StringStringT]) alloy.Option[[]alloy.AlloyTuple2StringStringT] {
+	if opt.IsNone() {
+		return alloy.None[[]alloy.AlloyTuple2StringStringT]()
 	}
-	res := make([]wit.AlloyTuple2StringStringT, len(list))
-	for i, t := range list {
-		res[i] = wit.AlloyTuple2StringStringT{F0: t.F0, F1: t.F1}
+	return alloy.Some(w.toWitMetadata(opt.Unwrap()))
+}
+
+func (w *wasmHost) fromWitOptionMetadata(opt alloy.Option[[]alloy.AlloyTuple2StringStringT]) Option[[]AlloyTuple2StringStringT] {
+	if opt.IsNone() {
+		return None[[]AlloyTuple2StringStringT]()
+	}
+	return Some(w.fromWitMetadata(opt.Unwrap()))
+}
+
+func (w *wasmHost) toWitMetadata(meta []AlloyTuple2StringStringT) []alloy.AlloyTuple2StringStringT {
+	res := make([]alloy.AlloyTuple2StringStringT, len(meta))
+	for i, m := range meta {
+		res[i] = alloy.AlloyTuple2StringStringT{F0: m.F0, F1: m.F1}
 	}
 	return res
 }
 
-func fromWitTuple2(list []wit.AlloyTuple2StringStringT) []AlloyTuple2StringStringT {
-	if list == nil {
-		return nil
-	}
-	res := make([]AlloyTuple2StringStringT, len(list))
-	for i, t := range list {
-		res[i] = AlloyTuple2StringStringT{F0: t.F0, F1: t.F1}
+func (w *wasmHost) fromWitMetadata(meta []alloy.AlloyTuple2StringStringT) []AlloyTuple2StringStringT {
+	res := make([]AlloyTuple2StringStringT, len(meta))
+	for i, m := range meta {
+		res[i] = AlloyTuple2StringStringT{F0: m.F0, F1: m.F1}
 	}
 	return res
-}
-
-func toWitMessage(m AlloyMessage) wit.AlloyMessage {
-	return wit.AlloyMessage{
-		Id:        m.Id,
-		MsgType:   m.MsgType,
-		Method:    m.Method,
-		Sender:    m.Sender,
-		Target:    toWitOptionString(m.Target),
-		Payload:   m.Payload,
-		Timestamp: m.Timestamp,
-	}
-}
-
-func fromWitMessage(m wit.AlloyMessage) AlloyMessage {
-	return AlloyMessage{
-		Id:        m.Id,
-		MsgType:   m.MsgType,
-		Method:    m.Method,
-		Sender:    m.Sender,
-		Target:    fromWitOptionString(m.Target),
-		Payload:   m.Payload,
-		Timestamp: m.Timestamp,
-	}
-}
-
-func toWitCapability(c AlloyCapability) wit.AlloyCapability {
-	shortcut := toWitOptionString(c.Shortcut)
-	var annots wit.Option[[]wit.AlloyTuple2StringStringT]
-	if c.Annotations.IsSome() {
-		annots = wit.Some(toWitTuple2(c.Annotations.Unwrap()))
-	} else {
-		annots = wit.None[[]wit.AlloyTuple2StringStringT]()
-	}
-	return wit.AlloyCapability{
-		Method:      c.Method,
-		Description: c.Description,
-		Shortcut:    shortcut,
-		Annotations: annots,
-	}
-}
-
-func fromWitCapability(c wit.AlloyCapability) AlloyCapability {
-	var annots Option[[]AlloyTuple2StringStringT]
-	if c.Annotations.IsSome() {
-		annots = Some(fromWitTuple2(c.Annotations.Unwrap()))
-	} else {
-		annots = None[[]AlloyTuple2StringStringT]()
-	}
-	return AlloyCapability{
-		Method:      c.Method,
-		Description: c.Description,
-		Shortcut:    fromWitOptionString(c.Shortcut),
-		Annotations: annots,
-	}
-}
-
-func toWitWorkspace(w AlloyWorkspace) wit.AlloyWorkspace {
-	return wit.AlloyWorkspace{
-		Id:       w.Id,
-		Name:     w.Name,
-		Path:     w.Path,
-		TeamId:   toWitOptionString(w.TeamId),
-		Layout:   toWitOptionString(w.Layout),
-		Metadata: toWitTuple2(w.Metadata),
-	}
-}
-
-func fromWitWorkspace(w wit.AlloyWorkspace) AlloyWorkspace {
-	return AlloyWorkspace{
-		Id:       w.Id,
-		Name:     w.Name,
-		Path:     w.Path,
-		TeamId:   fromWitOptionString(w.TeamId),
-		Layout:   fromWitOptionString(w.Layout),
-		Metadata: fromWitTuple2(w.Metadata),
-	}
-}
-
-func fromWitBuffer(b wit.AlloyBuffer) AlloyBuffer {
-	return AlloyBuffer{
-		Id:           b.Id,
-		Name:         b.Name,
-		Content:      b.Content,
-		LastModified: b.LastModified,
-		MimeType:     b.MimeType,
-	}
-}
-
-func toWitWidget(w AlloyWidget) wit.AlloyWidget {
-	return wit.AlloyWidget{
-		Id:                w.Id,
-		Title:             w.Title,
-		ContentType:       w.ContentType,
-		Content:           w.Content,
-		RefreshIntervalMs: w.RefreshIntervalMs,
-	}
 }

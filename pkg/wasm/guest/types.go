@@ -70,9 +70,11 @@ type AlloyMessage struct {
 	MsgType   string
 	Method    string
 	Sender    string
+	Actor     string
 	Target    Option[string]
 	Payload   []byte
 	Timestamp uint64
+	Metadata  []AlloyTuple2StringStringT
 }
 
 // Handler is a function that processes a message and returns an optional response.
@@ -93,16 +95,6 @@ type AlloyCapability struct {
 	Description string
 	Shortcut    Option[string]
 	Annotations Option[[]AlloyTuple2StringStringT]
-}
-
-// AlloyWorkspace represents an Alloy workspace.
-type AlloyWorkspace struct {
-	Id       string
-	Name     string
-	Path     string
-	TeamId   Option[string]
-	Layout   Option[string]
-	Metadata []AlloyTuple2StringStringT
 }
 
 // AlloyBuffer represents a direct data buffer.
@@ -145,6 +137,7 @@ type CommandContext struct {
 	Plugin *Plugin
 	Args   []string
 	Sender string
+	Actor  string
 }
 
 // CommandHandler is a function that handles a command.
@@ -174,18 +167,11 @@ type HostInterface interface {
 	KvDelete(key string) bool
 	KvList(prefix string) []string
 
-	// Workspaces
-	GetActiveWorkspace() Option[AlloyWorkspace]
-	SetActiveWorkspace(id string)
-	ListWorkspaces() []AlloyWorkspace
-	RegisterWorkspace(ws AlloyWorkspace)
-	UnregisterWorkspace(id string)
-
 	// Registry
 	RegisterCapability(cap AlloyCapability)
 	UnregisterCapability(method string)
-	FindProviders(method string) []string
-	GetAllCapabilities() []AlloyCapability
+	FindProviders(method, actor string, contextID string) []string
+	GetAllCapabilities(actor string, contextID string) []AlloyCapability
 
 	// Buffers
 	ReadBuffer(id string) Option[AlloyBuffer]

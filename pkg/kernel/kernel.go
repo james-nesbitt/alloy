@@ -108,15 +108,15 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	}
 	k.wasmManager = wm
 
-	// Initialize and register integrated core services
-	k.events = NewEventManager(logger)
-	k.events.SetRouter(k.RouteMessage)
-	k.RegisterPlugin(k.events)
-
 	k.iam, _ = NewIdentityManager(context.Background(), logger, storage)
 	k.RegisterPlugin(k.iam)
 
-	k.commands = NewCommandManager(logger, k.listRegistrations)
+	// Initialize and register integrated core services
+	k.events = NewEventManager(logger, k.iam)
+	k.events.SetRouter(k.RouteMessage)
+	k.RegisterPlugin(k.events)
+
+	k.commands = NewCommandManager(logger, k.listRegistrations, k.iam)
 	k.RegisterPlugin(k.commands)
 
 	k.health = NewHealthManager(logger)
@@ -252,8 +252,10 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 				msg.Sender == "widget-manager" || msg.Sender == "command-manager"
 
 			if !isSystemService && msg.Type != api.TypeResponse {
-				if !k.iam.Authorize(actor, msg.Target, msg.Method) {
-					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target)
+				contextID, _ := msg.Metadata["context"].(string)
+
+				if !k.iam.AuthorizeWithContext(actor, msg.Target, msg.Method, contextID) {
+					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target, "method", msg.Method, "ctx", contextID)
 					k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
 					span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
 
@@ -570,12 +572,14 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	}
 
 	// Emit registration event
-	go func() {
-		caps := p.Capabilities()
-		capsData, _ := json.Marshal(caps)
-		k.events.Publish(context.Background(), "component:registered", "kernel",
-			[]byte(`{"id":"`+id+`","type":"plugin","capabilities":`+string(capsData)+`}`))
-	}()
+	if k.events != nil {
+		go func() {
+			caps := p.Capabilities()
+			capsData, _ := json.Marshal(caps)
+			k.events.Publish(context.Background(), "component:registered", "kernel",
+				[]byte(`{"id":"`+id+`","type":"plugin","capabilities":`+string(capsData)+`}`))
+		}()
+	}
 }
 
 // RegisterMetadata describes a plugin to the kernel without loading it yet.
@@ -617,7 +621,7 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 	go func() {
 		time.Sleep(100 * time.Millisecond) // Give the frontend a moment to start its read loop
 
-		// 1. Push all registered widgets
+		// 2. Push all registered widgets
 		widgets := k.ListWidgets()
 		for _, w := range widgets {
 			wData, _ := json.Marshal(w)
@@ -628,19 +632,6 @@ func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
 				Target:  id,
 				Method:  "dashboard:widget-registered",
 				Payload: wData,
-			})
-		}
-
-		// 2. Push active workspace
-		if ws, ok := k.GetActiveWorkspace(); ok {
-			wsData, _ := json.Marshal(ws)
-			k.deliverToFrontendSync(context.Background(), id, api.Message{
-				ID:      "init-workspace",
-				Type:    api.TypeEvent,
-				Sender:  "kernel",
-				Target:  id,
-				Method:  "workspace:active",
-				Payload: wsData,
 			})
 		}
 	}()
@@ -702,77 +693,6 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 			Payload:   []byte(`{"status":"pong"}`),
 			Timestamp: time.Now().Unix(),
 		})
-	case "workspace:register":
-		var ws api.Workspace
-		if err := json.Unmarshal(msg.Payload, &ws); err != nil {
-			k.logger.Error("failed to unmarshal workspace register request", "error", err, "payload", string(msg.Payload))
-			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-				ID:        msg.ID + "-resp",
-				Type:      api.TypeResponse,
-				Sender:    "kernel",
-				Target:    msg.Sender,
-				Payload:   []byte(`{"error":"invalid workspace format"}`),
-				Timestamp: time.Now().Unix(),
-			})
-			return
-		}
-
-		k.RegisterWorkspace(ws)
-		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-			ID:        msg.ID + "-resp",
-			Type:      api.TypeResponse,
-			Sender:    "kernel",
-			Target:    msg.Sender,
-			Payload:   []byte(`{"status":"ok"}`),
-			Timestamp: time.Now().Unix(),
-		})
-
-	case "workspace:set_active":
-		var id string
-		if err := json.Unmarshal(msg.Payload, &id); err != nil {
-			k.logger.Error("failed to unmarshal workspace set_active request", "error", err, "payload", string(msg.Payload))
-			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-				ID:        msg.ID + "-resp",
-				Type:      api.TypeResponse,
-				Sender:    "kernel",
-				Target:    msg.Sender,
-				Payload:   []byte(`{"error":"invalid workspace id format"}`),
-				Timestamp: time.Now().Unix(),
-			})
-			return
-		}
-
-		k.SetActiveWorkspace(id)
-		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-			ID:        msg.ID + "-resp",
-			Type:      api.TypeResponse,
-			Sender:    "kernel",
-			Target:    msg.Sender,
-			Payload:   []byte(`{"status":"ok"}`),
-			Timestamp: time.Now().Unix(),
-		})
-	case "workspace:get_active":
-		ws, ok := k.GetActiveWorkspace()
-		if ok {
-			data, _ := json.Marshal(ws)
-			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-				ID:        msg.ID + "-resp",
-				Type:      api.TypeResponse,
-				Sender:    "kernel",
-				Target:    msg.Sender,
-				Payload:   data,
-				Timestamp: time.Now().Unix(),
-			})
-		} else {
-			k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
-				ID:        msg.ID + "-resp",
-				Type:      api.TypeResponse,
-				Sender:    "kernel",
-				Target:    msg.Sender,
-				Payload:   []byte(`{"error":"no active workspace"}`),
-				Timestamp: time.Now().Unix(),
-			})
-		}
 	case "discovery:list", "list":
 		msg.Target = "command-manager"
 		k.RouteMessage(ctx, msg)
@@ -1005,16 +925,7 @@ func (k *Kernel) RegisterInterceptor(i api.Interceptor) {
 	k.mu.Unlock()
 }
 
-// Workspace Management (Passthrough to WasmManager)
-
-func (k *Kernel) RegisterWorkspace(ws api.Workspace) { k.wasmManager.RegisterWorkspace(ws) }
-func (k *Kernel) UnregisterWorkspace(id string)      { k.wasmManager.UnregisterWorkspace(id) }
-func (k *Kernel) SetActiveWorkspace(id string)       { k.wasmManager.SetActiveWorkspace(id) }
-func (k *Kernel) GetActiveWorkspace() (api.Workspace, bool) {
-	return k.wasmManager.GetActiveWorkspace()
-}
-func (k *Kernel) ListWorkspaces() []api.Workspace { return k.wasmManager.ListWorkspaces() }
-func (k *Kernel) ListWidgets() []api.Widget       { return k.widgets.ListWidgets() }
+func (k *Kernel) ListWidgets() []api.Widget { return k.widgets.ListWidgets() }
 
 // Internal helper for wasm manager
 type witPluginWrapper struct {

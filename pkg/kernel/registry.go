@@ -201,13 +201,15 @@ type CommandManager struct {
 	logger   *slog.Logger
 	route    func(context.Context, api.Message)
 	provider func() []api.Registration
+	iam      *IdentityManager
 }
 
-func NewCommandManager(logger *slog.Logger, provider func() []api.Registration) *CommandManager {
+func NewCommandManager(logger *slog.Logger, provider func() []api.Registration, iam *IdentityManager) *CommandManager {
 	return &CommandManager{
 		registry: make(map[string]api.Registration),
 		logger:   logger,
 		provider: provider,
+		iam:      iam,
 	}
 }
 
@@ -311,19 +313,61 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		return api.Message{}, nil
 
 	case "list", "discover", "service:discovery", "command-manager:discover", "discovery:list":
-		var targets []api.Registration
+		var allTargets []api.Registration
 		if c.provider != nil {
-			targets = c.provider()
+			allTargets = c.provider()
 		} else {
 			c.mu.RLock()
 			for _, reg := range c.registry {
-				targets = append(targets, reg)
+				allTargets = append(allTargets, reg)
 			}
 			c.mu.RUnlock()
 		}
 
+		// Filter targets based on Identity
+		var filtered []api.Registration
+		actor := msg.Actor
+		if actor == "" {
+			actor = msg.Sender
+		}
+
+		// Context-relative discovery
+		var contextID string
+		if msg.Metadata != nil {
+			if ctxID, ok := msg.Metadata["context"].(string); ok {
+				contextID = ctxID
+			}
+		}
+
+		for _, reg := range allTargets {
+			// If registration ID itself matches a capability (lazy check)
+			// But usually we filter individual capabilities
+			var allowedCaps []api.Capability
+			for _, cap := range reg.Capabilities {
+				if c.iam != nil {
+					// Check if allowed for actor
+					if c.iam.AuthorizeWithContext(actor, reg.ID, cap.Method, contextID) {
+						allowedCaps = append(allowedCaps, cap)
+					}
+				} else {
+					allowedCaps = append(allowedCaps, cap)
+				}
+			}
+
+			// Only add registrations that have at least one allowed capability
+			// Or ones that represent frontends (no capabilities listed)
+			if len(allowedCaps) > 0 || (reg.Type == "frontend" && len(reg.Capabilities) == 0) {
+				filtered = append(filtered, api.Registration{
+					ID:           reg.ID,
+					Type:         reg.Type,
+					Status:       reg.Status,
+					Capabilities: allowedCaps,
+				})
+			}
+		}
+
 		payload, _ := json.Marshal(map[string]any{
-			"targets": targets,
+			"targets": filtered,
 		})
 		return api.Message{
 			ID:        msg.ID + "-resp",

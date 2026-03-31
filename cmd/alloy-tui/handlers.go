@@ -66,7 +66,7 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 		if err := json.Unmarshal(msg.Payload, &event); err == nil {
 			// If workspace has a custom layout, apply it
 			if event.Data.Layout != "" {
-				var wCfg api.WorkspaceConfig
+				var wCfg frontend.WorkspaceConfig
 				if err := json.Unmarshal([]byte(event.Data.Layout), &wCfg); err == nil {
 					if len(wCfg.Layout) > 0 {
 						newPanes := []tui.Pane{}

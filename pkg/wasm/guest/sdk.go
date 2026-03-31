@@ -199,9 +199,11 @@ func (p *Plugin) messageLoop() {
 				MsgType:   "response",
 				Method:    resp.Method,
 				Sender:    p.id,
+				Actor:     resp.Actor,
 				Target:    Some(msg.Sender),
 				Payload:   resp.Payload,
 				Timestamp: resp.Timestamp,
+				Metadata:  resp.Metadata,
 			})
 		}
 	}
@@ -223,6 +225,7 @@ func (p *Plugin) handleCommand(msg AlloyMessage) *AlloyMessage {
 		Plugin: p,
 		Args:   args,
 		Sender: msg.Sender,
+		Actor:  msg.Actor,
 	})
 
 	payload, _ := json.Marshal(result)
@@ -231,6 +234,32 @@ func (p *Plugin) handleCommand(msg AlloyMessage) *AlloyMessage {
 		Method:  msg.Method,
 		Payload: payload,
 	}
+}
+
+// GetMetadata retrieves a metadata value by key.
+func (m *AlloyMessage) GetMetadata(key string) (string, bool) {
+	if m.Metadata == nil {
+		return "", false
+	}
+	for _, entry := range m.Metadata {
+		if entry.F0 == key {
+			return entry.F1, true
+		}
+	}
+	return "", false
+}
+
+// ContextID returns the context/namespace ID if present in metadata.
+func (m *AlloyMessage) ContextID() string {
+	val, ok := m.GetMetadata("context")
+	if ok {
+		return val
+	}
+	val, ok = m.GetMetadata("namespace")
+	if ok {
+		return val
+	}
+	return ""
 }
 
 // Log logs a message to the host.
@@ -256,9 +285,11 @@ func (p *Plugin) Reply(req AlloyMessage, payload any) AlloyMessage {
 		MsgType:   "response",
 		Method:    req.Method,
 		Sender:    p.id,
+		Actor:     req.Actor,
 		Target:    Some(req.Sender),
 		Payload:   data,
 		Timestamp: req.Timestamp,
+		Metadata:  req.Metadata,
 	}
 }
 
@@ -271,9 +302,11 @@ func (p *Plugin) ErrorReply(req AlloyMessage, errMsg string) AlloyMessage {
 		MsgType:   "response",
 		Method:    "error",
 		Sender:    p.id,
+		Actor:     req.Actor,
 		Target:    Some(req.Sender),
 		Payload:   data,
 		Timestamp: req.Timestamp,
+		Metadata:  req.Metadata,
 	}
 }
 
@@ -290,7 +323,7 @@ func (p *Plugin) ReplyError(req AlloyMessage, errMsg string) *AlloyMessage {
 
 // RequireService checks if a specific service is available.
 func (p *Plugin) RequireService(serviceID string) {
-	providers := p.FindProviders("*")
+	providers := p.FindProviders("*", "", "")
 	found := false
 	for _, provider := range providers {
 		if provider == serviceID {
@@ -306,7 +339,7 @@ func (p *Plugin) RequireService(serviceID string) {
 
 // CheckCapability checks if any plugin provides the specified method.
 func (p *Plugin) CheckCapability(method string) bool {
-	providers := p.FindProviders(method)
+	providers := p.FindProviders(method, "", "")
 	return len(providers) > 0
 }
 
@@ -339,31 +372,6 @@ func (p *Plugin) KVList(prefix string) []string {
 	return p.host.KvList(prefix)
 }
 
-// Workspace Utils
-func (p *Plugin) GetActiveWorkspace() (AlloyWorkspace, bool) {
-	res := p.host.GetActiveWorkspace()
-	if res.IsSome() {
-		return res.Unwrap(), true
-	}
-	return AlloyWorkspace{}, false
-}
-
-func (p *Plugin) SetActiveWorkspace(id string) {
-	p.host.SetActiveWorkspace(id)
-}
-
-func (p *Plugin) ListWorkspaces() []AlloyWorkspace {
-	return p.host.ListWorkspaces()
-}
-
-func (p *Plugin) RegisterWorkspace(ws AlloyWorkspace) {
-	p.host.RegisterWorkspace(ws)
-}
-
-func (p *Plugin) UnregisterWorkspace(id string) {
-	p.host.UnregisterWorkspace(id)
-}
-
 // Registry Utils
 func (p *Plugin) RegisterCapability(cap AlloyCapability) {
 	p.host.RegisterCapability(cap)
@@ -373,12 +381,12 @@ func (p *Plugin) UnregisterCapability(method string) {
 	p.host.UnregisterCapability(method)
 }
 
-func (p *Plugin) FindProviders(method string) []string {
-	return p.host.FindProviders(method)
+func (p *Plugin) FindProviders(method, actor string, contextID string) []string {
+	return p.host.FindProviders(method, actor, contextID)
 }
 
-func (p *Plugin) GetAllCapabilities() []AlloyCapability {
-	return p.host.GetAllCapabilities()
+func (p *Plugin) GetAllCapabilities(actor string, contextID string) []AlloyCapability {
+	return p.host.GetAllCapabilities(actor, contextID)
 }
 
 // Buffer Utils

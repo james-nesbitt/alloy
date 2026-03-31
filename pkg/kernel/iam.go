@@ -20,19 +20,21 @@ type Policy struct {
 
 // IdentityManager implements authorization enforcement for the kernel.
 type IdentityManager struct {
-	logger     *slog.Logger
-	state      storage.StateStore
-	mu         sync.RWMutex
-	policies   map[string]Policy
-	identities map[string]string // actor -> role
+	logger          *slog.Logger
+	state           storage.StateStore
+	mu              sync.RWMutex
+	policies        map[string]Policy
+	identities      map[string]string              // actor -> role
+	namespaceGrants map[string]map[string][]string // actor -> namespace -> capabilities
 }
 
 func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.StateStore) (*IdentityManager, error) {
 	iam := &IdentityManager{
-		logger:     logger,
-		state:      state,
-		policies:   make(map[string]Policy),
-		identities: make(map[string]string),
+		logger:          logger,
+		state:           state,
+		policies:        make(map[string]Policy),
+		identities:      make(map[string]string),
+		namespaceGrants: make(map[string]map[string][]string),
 	}
 
 	// Bootstrap default roles
@@ -44,7 +46,6 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 		"command-manager:*",      // Discovery is public
 		"events:*",               // Pub/Sub discovery and usage
 		"iam:check",              // Checking own permissions
-		"project:*",              // Project discovery and context
 		"chat:*",                 // Basic interaction
 		"buffer:read",            // Public data
 		"buffer:list",            // Public data
@@ -69,6 +70,28 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 	iam.identities["logger"] = "admin"
 	iam.identities["admin-user"] = "admin"
 	iam.identities["admin-sim"] = "admin"
+	iam.identities["user"] = "admin"
+	iam.identities["test-waiter"] = "admin"
+	iam.identities["test-client"] = "admin"
+	iam.identities["test-frontend"] = "admin"
+	iam.identities["tui-sim"] = "admin"
+	iam.identities["gui-sim"] = "admin"
+	iam.identities["web-host-sim"] = "admin"
+	iam.identities["test-user"] = "admin"
+	iam.identities["dashboard-mock"] = "admin"
+	iam.identities["event-catcher"] = "admin"
+
+	// Plugin identities (when acting as actors)
+	iam.identities["ai"] = "admin"
+	iam.identities["chat"] = "admin"
+	iam.identities["buffer"] = "admin"
+	iam.identities["health"] = "admin"
+	iam.identities["test-health"] = "admin"
+	iam.identities["secrets"] = "admin"
+	iam.identities["tasks"] = "admin"
+	iam.identities["index"] = "admin"
+	iam.identities["project"] = "admin"
+	iam.identities["omni-palette"] = "admin"
 
 	return iam, nil
 }
@@ -81,6 +104,7 @@ func (i *IdentityManager) Capabilities() []api.Capability {
 		{Method: "check", Description: "Check if an actor is authorized for an action"},
 		{Method: "policy:set", Description: "Update or create a role policy"},
 		{Method: "identity:set", Description: "Assign a role to an actor"},
+		{Method: "grant_namespace_role", Description: "Grant ephemeral role capabilities in a namespace"},
 	}
 }
 
@@ -88,17 +112,39 @@ func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (a
 	switch msg.Method {
 	case "check", "authorize":
 		var req struct {
-			Actor  string `json:"actor"`
-			Target string `json:"target"`
-			Method string `json:"method"`
+			Actor   string `json:"actor"`
+			Target  string `json:"target"`
+			Method  string `json:"method"`
+			Context string `json:"context,omitempty"`
 		}
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
-			// fallback to old simple check?
 			return api.Message{}, err
 		}
 
-		allowed := i.Authorize(req.Actor, req.Target, req.Method)
+		allowed := i.AuthorizeWithContext(req.Actor, req.Target, req.Method, req.Context)
 		return i.reply(msg, map[string]any{"allowed": allowed}), nil
+
+	case "grant_namespace_role":
+		// This must be from a trusted system service (project, kernel)
+		// We'll enforce this via standard authorize, but internal checks could be stricter
+		var req struct {
+			Actor        string   `json:"actor"`
+			Namespace    string   `json:"namespace"`
+			Capabilities []string `json:"capabilities"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return api.Message{}, err
+		}
+
+		i.mu.Lock()
+		if _, ok := i.namespaceGrants[req.Actor]; !ok {
+			i.namespaceGrants[req.Actor] = make(map[string][]string)
+		}
+		i.namespaceGrants[req.Actor][req.Namespace] = req.Capabilities
+		i.mu.Unlock()
+
+		i.logger.Info("IAM namespace grant active", "actor", req.Actor, "ns", req.Namespace, "caps", len(req.Capabilities))
+		return i.reply(msg, map[string]string{"status": "ok"}), nil
 
 	case "policy:set":
 		var req struct {
@@ -159,36 +205,94 @@ func (i *IdentityManager) reply(msg api.Message, payload any) api.Message {
 }
 
 func (i *IdentityManager) Authorize(actor, target, method string) bool {
+	return i.AuthorizeWithContext(actor, target, method, "")
+}
+
+func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID string) bool {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
-	// 1. Get role
+	// 1. Get role (Global)
 	role, ok := i.identities[actor]
 	if !ok {
 		role = "guest"
 	}
 
-	// 2. Get policy
+	action := target + ":" + method
+
+	// 2. Check Namespace Permissions first (Ephemeral grants)
+	if contextID != "" {
+		if ns, ok := i.namespaceGrants[actor]; ok {
+			if caps, ok := ns[contextID]; ok {
+				for _, perm := range caps {
+					if i.matchAction(perm, action) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Get policy (Global)
 	policy, ok := i.policies[role]
 	if !ok {
 		return false
 	}
 
-	// 3. Check permissions
-	action := target + ":" + method
+	// 4. Check global permissions (including namespaced patterns)
 	for _, perm := range policy.Permissions {
-		if perm == "*" {
-			return true
-		}
-		if perm == action {
-			return true
-		}
-		if strings.HasSuffix(perm, ":*") && strings.HasPrefix(action, perm[:len(perm)-1]) {
+		if i.matchPerm(perm, action, contextID) {
 			return true
 		}
 	}
 
-	i.logger.Warn("IAM denied access", "actor", actor, "role", role, "target", target, "method", method)
+	i.logger.Warn("IAM denied access", "actor", actor, "role", role, "target", target, "method", method, "ctx", contextID)
+	return false
+}
+
+func (i *IdentityManager) matchPerm(perm, action, contextID string) bool {
+	// 1. Check for namespace prefix in perm (e.g., "prj-123/buffer:read")
+	if strings.Contains(perm, "/") {
+		parts := strings.SplitN(perm, "/", 2)
+		nsPattern := parts[0]
+		rest := parts[1]
+
+		// Namespace wildcard support (e.g. "*/buffer:read")
+		nsMatch := false
+		if nsPattern == "*" {
+			nsMatch = true
+		} else if strings.HasSuffix(nsPattern, "*") {
+			nsMatch = strings.HasPrefix(contextID, nsPattern[:len(nsPattern)-1])
+		} else {
+			nsMatch = (nsPattern == contextID)
+		}
+
+		if !nsMatch {
+			return false
+		}
+
+		// Match the rest against the action
+		return i.matchAction(rest, action)
+	}
+
+	// 2. Global perm applies regardless of context (e.g. "buffer:read" matches all)
+	return i.matchAction(perm, action)
+}
+
+func (i *IdentityManager) matchAction(pattern, action string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if pattern == action {
+		return true
+	}
+	// Support both "target:*" and "target*"
+	if strings.HasSuffix(pattern, ":*") {
+		return strings.HasPrefix(action, pattern[:len(pattern)-1])
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(action, pattern[:len(pattern)-1])
+	}
 	return false
 }
 

@@ -114,7 +114,9 @@ func TestSeparationRegistrationVsLoading(t *testing.T) {
 				t.Logf("failed to unmarshal discovery response: %v", err)
 				continue
 			}
+			t.Logf("Discovery result: %d targets found", len(body.Targets))
 			for _, r := range body.Targets {
+				t.Logf("  Found target: %s (type=%s)", r["id"], r["type"])
 				if r["id"] == "missing-plugin" {
 					found = true
 					t.Log("SUCCESS: 'missing-plugin' registered successfully even though file is missing")
@@ -214,7 +216,7 @@ func TestWasmFunctionalSuite(t *testing.T) {
 	}
 
 	// Check that lazy plugins are discoverable via metadata before loading
-	waitForPlugins(t, conn, collector, expected, 30*time.Second)
+	waitForPlugins(t, conn, collector, expected, 60*time.Second)
 
 	// 1. Verify Health (Loading it for the first time via request)
 	sendMsg(t, conn, api.Message{

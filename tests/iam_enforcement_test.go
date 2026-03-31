@@ -23,6 +23,9 @@ func TestIAMEnforcement(t *testing.T) {
 				"type":      "wasm",
 				"path":      filepath.Join(buildDir, "health.wasm"),
 				"load_time": "boot",
+				"capabilities": []map[string]string{
+					{"method": "status", "description": "health status"},
+				},
 			},
 		},
 	}

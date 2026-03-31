@@ -568,15 +568,9 @@ func queryAnthropic(cfg ProviderConfig, prompt string) (string, error) {
 	return response.Content[0].Text, nil
 }
 
-// getProjectContext gets the current project and workspace context.
+// getProjectContext gets the current project context.
 func getProjectContext() string {
 	var contextParts []string
-
-	// Get workspace context
-	ws, ok := plugin.GetActiveWorkspace()
-	if ok {
-		contextParts = append(contextParts, fmt.Sprintf("Active Workspace: %s (Location: %s)", ws.Name, ws.Path))
-	}
 
 	// Get project context
 	project, err := getActiveProject()

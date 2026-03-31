@@ -10,18 +10,25 @@ import (
 	"github.com/james-nesbitt/alloy/api"
 )
 
+type subscriber struct {
+	ID    string
+	Actor string
+}
+
 // EventManager handles pub/sub for the Alloy ecosystem.
 type EventManager struct {
 	mu          sync.RWMutex
-	subscribers map[string][]string // topic -> subscriber plugin/frontend IDs
+	subscribers map[string][]subscriber // topic -> subscribers
 	logger      *slog.Logger
 	route       func(context.Context, api.Message)
+	iam         *IdentityManager
 }
 
-func NewEventManager(logger *slog.Logger) *EventManager {
+func NewEventManager(logger *slog.Logger, iam *IdentityManager) *EventManager {
 	return &EventManager{
-		subscribers: make(map[string][]string),
+		subscribers: make(map[string][]subscriber),
 		logger:      logger,
+		iam:         iam,
 	}
 }
 
@@ -49,8 +56,17 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
 			return api.Message{}, err
 		}
+
+		actor := msg.Actor
+		if actor == "" {
+			actor = msg.Sender
+		}
+
 		e.mu.Lock()
-		e.subscribers[req.Topic] = append(e.subscribers[req.Topic], msg.Sender)
+		e.subscribers[req.Topic] = append(e.subscribers[req.Topic], subscriber{
+			ID:    msg.Sender,
+			Actor: actor,
+		})
 		e.mu.Unlock()
 		e.logger.Debug("plugin subscribed to topic", "plugin", msg.Sender, "topic", req.Topic)
 		return api.Message{
@@ -64,13 +80,14 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 	case "publish", "events:publish":
 		var req struct {
 			Topic string          `json:"topic"`
+			Scope string          `json:"scope,omitempty"`
 			Data  json.RawMessage `json:"data"`
 		}
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
 			return api.Message{}, err
 		}
 
-		e.Publish(ctx, req.Topic, msg.Sender, req.Data)
+		e.PublishScoped(ctx, req.Topic, msg.Sender, req.Data, req.Scope)
 
 		return api.Message{
 			ID:        msg.ID + "-resp",
@@ -87,22 +104,39 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 
 // Publish distributes an event to all subscribers.
 func (e *EventManager) Publish(ctx context.Context, topic string, sender string, data json.RawMessage) {
+	e.PublishScoped(ctx, topic, sender, data, "")
+}
+
+// PublishScoped distributes an event with a namespace scope (context).
+func (e *EventManager) PublishScoped(ctx context.Context, topic string, sender string, data json.RawMessage, scope string) {
 	e.mu.RLock()
 	subs := e.subscribers[topic]
 	e.mu.RUnlock()
 
-	e.logger.Info("publishing event", "topic", topic, "subscribers", len(subs), "sender", sender)
+	e.logger.Info("publishing event", "topic", topic, "subscribers", len(subs), "sender", sender, "scope", scope)
 
 	if e.route != nil {
 		for _, sub := range subs {
+			// Pre-flight Redaction Logic
+			if scope != "" && e.iam != nil {
+				// Check if this subscriber actor can receive this topic in this scope
+				if !e.iam.AuthorizeWithContext(sub.Actor, "events", "subscribe", scope) {
+					e.logger.Debug("skipping event for unauthorized subscriber", "topic", topic, "sub", sub.ID, "actor", sub.Actor, "scope", scope)
+					continue
+				}
+			}
+
 			go e.route(ctx, api.Message{
 				ID:        "evt-" + time.Now().Format("150405.000"),
 				Type:      api.TypeEvent,
 				Sender:    e.ID(),
-				Target:    sub,
+				Target:    sub.ID,
 				Method:    topic,
 				Payload:   data,
 				Timestamp: time.Now().Unix(),
+				Metadata: map[string]any{
+					"scope": scope,
+				},
 			})
 		}
 	}

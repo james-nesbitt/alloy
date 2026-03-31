@@ -23,6 +23,16 @@ type Project struct {
 	Layout      json.RawMessage `json:"layout,omitempty"`
 }
 
+// Workspace represents a discovered workspace.
+type Workspace struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Path     string            `json:"path"`
+	TeamID   string            `json:"team_id,omitempty"`
+	Layout   string            `json:"layout,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
 // ProjectCreateRequest represents a request to create a project.
 type ProjectCreateRequest struct {
 	Name        string `json:"name"`
@@ -40,10 +50,19 @@ type ProjectOpenRequest struct {
 	ID string `json:"id"`
 }
 
+// ProjectSecurityConfig defines roles and assignments for the project.
+type ProjectSecurityConfig struct {
+	Roles       map[string][]string `json:"roles"`
+	Assignments map[string]string   `json:"assignments"`
+}
+
 var (
-	projects = make(map[string]*Project)
-	plugin   *Plugin
-	store    = NewKVStore[map[string]*Project]("project-manager")
+	projects   = make(map[string]*Project)
+	workspaces = make(map[string]*Workspace)
+	activeWorkspaceID string
+	plugin     *Plugin
+	store      = NewKVStore[map[string]*Project]("project-manager")
+	wsStore    = NewKVStore[map[string]*Workspace]("workspace-manager")
 )
 
 // KVStore provides type-safe KV storage.
@@ -159,7 +178,8 @@ func main() {
 		WithAnnotations("project:set-workspace", map[string]string{
 			"group":  "project",
 			"params": "id",
-		})
+		}).
+		WithCapability("project:set-security", "Set security roles for a project")
 
 	// Set up message handlers
 	plugin.Handle("project:create", handleCreate)
@@ -173,6 +193,7 @@ func main() {
 	plugin.Handle("project:discover", handleDiscover)
 	plugin.Handle("project:list-workspaces", handleListWorkspaces)
 	plugin.Handle("project:set-workspace", handleSetWorkspace)
+	plugin.Handle("project:set-security", handleSetSecurity)
 
 	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
@@ -200,6 +221,13 @@ func main() {
 			projects = data
 			plugin.Log("info", fmt.Sprintf("Restored %d projects", len(projects)))
 			emitDashboardUpdate()
+		}
+		if wsData, err := wsStore.Get("all"); err == nil {
+			workspaces = wsData
+			plugin.Log("info", fmt.Sprintf("Restored %d workspaces", len(workspaces)))
+		}
+		if activeID, ok := plugin.KVGet("active-workspace-id"); ok {
+			activeWorkspaceID = string(activeID)
 		}
 		return nil
 	})
@@ -413,7 +441,7 @@ func discoverWorkspaces(root string) {
 	plugin.Log("info", "Workspace discovery complete")
 }
 
-// registerWorkspaceFromFile reads a workspace file and registers it with the host.
+// registerWorkspaceFromFile reads a workspace file and registers it internaly.
 func registerWorkspaceFromFile(alloyDir, workspaceFile string) {
 	data, err := os.ReadFile(workspaceFile)
 	if err != nil {
@@ -428,15 +456,15 @@ func registerWorkspaceFromFile(alloyDir, workspaceFile string) {
 		return
 	}
 
-	var ws AlloyWorkspace
+	var ws Workspace
 	if err := json.Unmarshal(data, &ws); err != nil {
 		plugin.Log("error", "Failed to parse workspace file: "+err.Error())
 		return
 	}
 	
 	// If ID or Path are not set in the JSON, derive them from the location
-	if ws.Id == "" {
-		ws.Id = filepath.Base(filepath.Dir(alloyDir))
+	if ws.ID == "" {
+		ws.ID = filepath.Base(filepath.Dir(alloyDir))
 	}
 	if ws.Path == "" {
 		ws.Path = filepath.Dir(alloyDir)
@@ -444,26 +472,29 @@ func registerWorkspaceFromFile(alloyDir, workspaceFile string) {
 
 	// Set layout if present in the project struct
 	if len(proj.Layout) > 0 {
-		ws.Layout = Some(string(proj.Layout))
+		ws.Layout = string(proj.Layout)
 	}
 	
 	plugin.Log("info", fmt.Sprintf("Registering discovered workspace: %s (%s)", ws.Name, ws.Path))
-	plugin.RegisterWorkspace(ws)
+	workspaces[ws.ID] = &ws
+	saveWorkspaces()
 }
 
-// handleListWorkspaces returns a list of all workspaces from the host registry.
+// handleListWorkspaces returns a list of all workspaces.
 func handleListWorkspaces(msg AlloyMessage) AlloyMessage {
-	workspaces := plugin.ListWorkspaces()
+	list := make([]*Workspace, 0, len(workspaces))
+	for _, ws := range workspaces {
+		list = append(list, ws)
+	}
 	return plugin.Reply(msg, map[string]interface{}{
-		"workspaces": workspaces,
+		"workspaces": list,
 	})
 }
 
-// handleSetWorkspace switches the active workspace in the host registry.
+// handleSetWorkspace switches the active workspace.
 func handleSetWorkspace(msg AlloyMessage) AlloyMessage {
 	var id string
 	if err := json.Unmarshal(msg.Payload, &id); err != nil {
-		// Try unmarshalling as a map if it's from the TUI form
 		var req map[string]string
 		if err := json.Unmarshal(msg.Payload, &req); err == nil {
 			id = req["id"]
@@ -471,18 +502,10 @@ func handleSetWorkspace(msg AlloyMessage) AlloyMessage {
 			id = string(msg.Payload)
 		}
 	}
-	plugin.SetActiveWorkspace(id)
+	activeWorkspaceID = id
+	plugin.KVSet("active-workspace-id", []byte(id))
 
-	// Notify about workspace change
-	var active *AlloyWorkspace
-	workspaces := plugin.ListWorkspaces()
-	for _, ws := range workspaces {
-		if ws.Id == id {
-			active = &ws
-			break
-		}
-	}
-
+	active := workspaces[id]
 	if active != nil {
 		evtPayload, _ := json.Marshal(map[string]interface{}{
 			"topic": "workspace:opened",
@@ -500,9 +523,58 @@ func handleSetWorkspace(msg AlloyMessage) AlloyMessage {
 	return plugin.Reply(msg, map[string]string{"status": "ok", "workspace": id})
 }
 
+// handleSetSecurity applies security configurations to the host IAM service.
+func handleSetSecurity(msg AlloyMessage) AlloyMessage {
+	var cfg ProjectSecurityConfig
+	if err := json.Unmarshal(msg.Payload, &cfg); err != nil {
+		return plugin.ErrorReply(msg, "invalid_security_config")
+	}
+
+	namespace := msg.ContextID()
+	if namespace == "" {
+		// FALLBACK: If not explicitly set, try to get from project-specific metadata
+		// In bootstrap, we set it in the context manually
+		nsRaw, ok := msg.GetMetadata("namespace")
+		if ok {
+			namespace = fmt.Sprintf("%v", nsRaw)
+		}
+	}
+
+	if namespace == "" {
+		return plugin.ErrorReply(msg, "missing_namespace_context")
+	}
+
+	plugin.Log("info", fmt.Sprintf("Applying security policy for namespace: %s", namespace))
+
+	// For each assignment, map it to the requested role capabilities
+	for actor, roleName := range cfg.Assignments {
+		caps, exists := cfg.Roles[roleName]
+		if !exists {
+			plugin.Log("warn", "Assigned role not found: "+roleName)
+			continue
+		}
+
+		// Grant to IAM service
+		grantPayload, _ := json.Marshal(map[string]interface{}{
+			"actor":        actor,
+			"namespace":    namespace,
+			"capabilities": caps,
+		})
+
+		plugin.RouteMessage(AlloyMessage{
+			MsgType: "request",
+			Sender:  "project",
+			Target:  Some("iam"),
+			Method:  "grant_namespace_role",
+			Payload: grantPayload,
+		})
+	}
+
+	return plugin.Reply(msg, map[string]string{"status": "applied"})
+}
+
 // saveProjects saves all projects to persistent storage.
 func saveProjects() {
-	// Save all projects
 	if err := store.Set("all", projects); err != nil {
 		plugin.Log("error", "Failed to save projects: "+err.Error())
 	}
@@ -515,9 +587,13 @@ func saveProjects() {
 			return
 		}
 	}
-
-	// No active project
 	plugin.KVSet("shared:active-project", nil)
+}
+
+func saveWorkspaces() {
+	if err := wsStore.Set("all", workspaces); err != nil {
+		plugin.Log("error", "Failed to save workspaces: "+err.Error())
+	}
 }
 
 // notifyProjectOpened notifies about a project being opened via events service.

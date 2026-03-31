@@ -12,6 +12,7 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
+	"github.com/james-nesbitt/alloy/pkg/project"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
 
@@ -97,7 +98,8 @@ func TestManifestAutoBoot(t *testing.T) {
 	}
 
 	manifestPath := filepath.Join(dataDir, "alloy-project.json")
-	pluginPath := "../build/dist/usr/lib/alloy/plugins/ai.wasm"
+	cwd, _ := os.Getwd()
+	pluginPath := filepath.Join(filepath.Dir(cwd), "build/dist/usr/lib/alloy/plugins/ai.wasm")
 
 	if _, err := os.Stat(pluginPath); err != nil {
 		t.Skip("ai.wasm not found")
@@ -114,7 +116,7 @@ func TestManifestAutoBoot(t *testing.T) {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	m, err := kernel.LoadManifest(manifestPath)
+	m, err := project.LoadManifest(manifestPath)
 	if err != nil {
 		t.Fatalf("failed to load manifest: %v", err)
 	}
@@ -138,8 +140,20 @@ func TestManifestAutoBoot(t *testing.T) {
 		Payload: []byte(`{"topic":"dashboard:widget-registered"}`),
 	})
 
-	if err := k.ApplyManifest(context.Background(), m); err != nil {
-		t.Fatalf("failed to apply manifest: %v", err)
+	// We no longer manually boot project things in core tests as core is agostic.
+	// Instead, we just provision the plugins and see if they work.
+
+	for _, pc := range m.Plugins {
+		pluginPath := kernel.ResolvePluginPath(manifestPath, pc.Path)
+		pDef := kernel.PluginDef{
+			ID:       pc.ID,
+			Path:     pluginPath,
+			Type:     "wasm",
+			LoadTime: pc.LoadTime,
+		}
+		if err := k.Provision([]kernel.PluginDef{pDef}); err != nil {
+			t.Fatalf("failed to provision plugin %s: %v", pc.ID, err)
+		}
 	}
 
 	// Verify plugin 'ai' is loading and eventually registers its widget

@@ -113,8 +113,9 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 	query := strings.ToLower(req.Query)
 	results := []OmniResult{}
 
-	// 1. Get ALL system capabilities (Commands)
-	caps := plugin.GetAllCapabilities()
+	// 1. Get ALL system capabilities (Commands) filtered by context
+	contextID := msg.ContextID()
+	caps := plugin.GetAllCapabilities(msg.Actor, contextID)
 	for _, cap := range caps {
 		score := 0.0
 		method := strings.ToLower(cap.Method)

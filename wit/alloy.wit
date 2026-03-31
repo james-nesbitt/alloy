@@ -8,18 +8,10 @@ world alloy {
             msg-type: string,
             method: string,
             sender: string,
+            actor: string,
             target: option<string>,
             payload: list<u8>,
             timestamp: u64,
-        }
-        
-        // Workspace structure
-        record workspace {
-            id: string,
-            name: string,
-            path: string,
-            team-id: option<string>,
-            layout: option<string>, // JSON workspace configuration
             metadata: list<tuple<string, string>>,
         }
         
@@ -93,18 +85,11 @@ world alloy {
         // Load plugin state
         load-state: func(state: list<u8>);
 
-        // Workspace management
-        get-active-workspace: func() -> option<workspace>;
-        set-active-workspace: func(id: string);
-        list-workspaces: func() -> list<workspace>;
-        register-workspace: func(ws: workspace);
-        unregister-workspace: func(id: string);
-
         // Registry management (new)
         register-capability: func(cap: capability);
         unregister-capability: func(method: string);
-        find-providers: func(method: string) -> list<string>;
-        get-all-capabilities: func() -> list<capability>;
+        find-providers: func(method: string, actor: string, context-id: option<string>) -> list<string>;
+        get-all-capabilities: func(actor: string, context-id: option<string>) -> list<capability>;
 
         // Direct Buffer Access (Direct Component interaction)
         read-buffer: func(id: string) -> option<buffer>;
