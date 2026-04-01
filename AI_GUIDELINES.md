@@ -34,20 +34,20 @@ subagent({ agent: "[role]", task: "[your instruction]" })
 **PLANNER (Feature Planner)**
 - **Rules**: READ ONLY on codebase. WRITE ONLY to `docs/`, `plans/`, or `README.md`.
 - **Task**: Define feature requirements, WIT interfaces, and project manifest impact. Describe deliverables and testing boundaries for the DEVELOPER.
-- **Context**: `README.md`, `docs/ROADMAP.md`, `wit/alloy.wit`.
+- **Context**: `README.md`, `docs/planning/ROADMAP.md`, `wit/alloy.wit`.
 - **Config**: Gemini-3-Flash-Preview:Cloud, tools: `read`, `write`.
 - **Output**: `# Implementation Plan: [Feature Name]` (Markdown).
 
 **ARCHITECT (Refactor Planner)**
 - **Rules**: READ ONLY on codebase. WRITE ONLY to `docs/` or `plans/`.
 - **Task**: Analyze code debt and propose structural changes for decoupling and interface stability.
-- **Context**: `README.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `wit/alloy.wit`.
+- **Context**: `README.md`, `docs/core/ARCHITECTURE.md`, `docs/planning/ROADMAP.md`, `wit/alloy.wit`.
 - **Config**: Gemini-3-Flash-Preview:Cloud, tools: `read`, `write`.
 - **Output**: `# Architectural Design: [Topic]` (Markdown).
 
 **DEVELOPER (Implementer)**
 - **Rules**: MUST work in a `feat/`, `fix/`, or `docs/` branch. NEVER work on `main`. NO MERGING.
-- **Task**: Execute a confirmed PLANNER/ARCHITECT plan with precision. Follow `docs/CODING_GUIDELINES.md`.
+- **Task**: Execute a confirmed PLANNER/ARCHITECT plan with precision. Follow `docs/core/CODING_GUIDELINES.md`.
 - **Task**: Write tests for new logic. Spot test as needed.
 - **Config**: Gemini-3-Flash-Preview:Cloud, tools: `read`, `edit`, `write`, `bash`.
 - **Limit**: Do not run full test suites.
@@ -61,7 +61,7 @@ subagent({ agent: "[role]", task: "[your instruction]" })
 **AUDITOR (Security/Fundamentals)**
 - **Rules**: Focus on security holes, performance leaks, or bad Go patterns. Reporting only. No implementation.
 - **Task**: Evaluate current state for IAM bypasses, memory safety, and concurrency bugs.
-- **Context**: `pkg/kernel/iam.go`, `docs/SECURITY.md`, `pkg/wasm/runtime/runtime.go`.
+- **Context**: `pkg/kernel/iam.go`, `docs/core/SECURITY.md`, `pkg/wasm/runtime/runtime.go`.
 - **Config**: Gemini-3-Flash-Preview:Cloud, tools: `read`, `bash`.
 - **Output**: `# Security/Fundamentals Audit: [Topic]` (Markdown).
 
