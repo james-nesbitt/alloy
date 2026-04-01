@@ -597,7 +597,7 @@ func (m *Model) closeFocusedPane() {
 				return true
 			}
 			if removeNode(&child) {
-				// If child became empty, remove it? 
+				// If child became empty, remove it?
 				// For now just check if we need to simplify this split
 				if len(child.Children) == 0 && child.Type == "split" {
 					node.Children = append(node.Children[:i], node.Children[i+1:]...)
