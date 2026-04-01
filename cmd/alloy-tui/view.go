@@ -14,8 +14,22 @@ func (m Model) View() string {
 		return "\n  Initializing screen size..."
 	}
 
+	accentColor := "4"
+	switch m.CurrentTheme {
+	case "lavender":
+		accentColor = "13"
+	case "forest":
+		accentColor = "2"
+	case "sunset":
+		accentColor = "202"
+	case "ocean":
+		accentColor = "33"
+	case "matrix":
+		accentColor = "10"
+	}
+
 	modeStr := " NORMAL "
-	modeStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
+	modeStyle := lipgloss.NewStyle().Background(lipgloss.Color(accentColor)).Foreground(lipgloss.Color("15")).Bold(true)
 
 	switch m.Mode {
 	case tui.ModeInsert:
@@ -114,9 +128,11 @@ func (m Model) View() string {
 					statusLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✘ CRASHED")
 				}
 
+				previewStyle = previewStyle.BorderForeground(lipgloss.Color(accentColor))
+
 				previewContent := fmt.Sprintf(
 					"%s  %s\n\n%s\n\n%s",
-					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(selected.Display),
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(accentColor)).Render(selected.Display),
 					statusLabel,
 					lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(selected.Description),
 					lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("Usage: "+selected.Raw),
@@ -142,7 +158,7 @@ func (m Model) View() string {
 					}
 
 					if group != lastGroup {
-						groupHeader := lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Bold(true).Render(" ── " + strings.ToUpper(group) + " ")
+						groupHeader := lipgloss.NewStyle().Foreground(lipgloss.Color(accentColor)).Bold(true).Render(" ── " + strings.ToUpper(group) + " ")
 						rows = append(rows, groupHeader)
 						lastGroup = group
 					}
@@ -194,7 +210,7 @@ func (m Model) View() string {
 					}
 
 					if i == m.selectedCmdIdx {
-						rows = append(rows, selectedStyle.Width(m.width).Render(line))
+						rows = append(rows, selectedStyle.Background(lipgloss.Color(accentColor)).Width(m.width).Render(line))
 					} else {
 						switch opt.Status {
 						case "crashed", "error":
@@ -284,13 +300,27 @@ func (m Model) renderLayoutNode(node *frontend.LayoutNode, width int, height int
 	if node.Type == "pane" {
 		isFocused := (node.ID == m.FocusedPaneID)
 
+		accentColor := "62"
+		switch m.CurrentTheme {
+		case "lavender":
+			accentColor = "13"
+		case "forest":
+			accentColor = "2"
+		case "sunset":
+			accentColor = "202"
+		case "ocean":
+			accentColor = "33"
+		case "matrix":
+			accentColor = "10"
+		}
+
 		// Border adjustment
 		style := lipgloss.NewStyle().Width(width).Height(height)
 		contentWidth := width
 		contentHeight := height
 
 		if isFocused {
-			style = style.Border(lipgloss.DoubleBorder(), false, true, false, true).BorderForeground(lipgloss.Color("62"))
+			style = style.Border(lipgloss.DoubleBorder(), false, true, false, true).BorderForeground(lipgloss.Color(accentColor))
 			contentWidth -= 2
 		} else {
 			style = style.Border(lipgloss.NormalBorder(), false, true, false, true).BorderForeground(lipgloss.Color("240"))
@@ -346,11 +376,25 @@ func (m Model) renderLayoutNode(node *frontend.LayoutNode, width int, height int
 }
 
 func (m Model) renderPaneNode(p *frontend.LayoutNode, width int, height int) string {
+	accentColor := "62"
+	switch m.CurrentTheme {
+	case "lavender":
+		accentColor = "13"
+	case "forest":
+		accentColor = "2"
+	case "sunset":
+		accentColor = "202"
+	case "ocean":
+		accentColor = "33"
+	case "matrix":
+		accentColor = "10"
+	}
+
 	if p.PluginID != "" {
 		if tile, ok := m.DashboardTiles[p.PluginID]; ok {
 			return lipgloss.NewStyle().Width(width).Height(height).Render(
 				lipgloss.JoinVertical(lipgloss.Left,
-					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(" "+tile.Title),
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(accentColor)).Render(" "+tile.Title),
 					lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(" "+strings.Repeat("─", width-2)),
 					lipgloss.NewStyle().Padding(0, 1).Render(string(tile.RawContent)),
 				),

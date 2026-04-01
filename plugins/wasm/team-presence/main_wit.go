@@ -3,176 +3,209 @@
 package main
 
 import (
+	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
 
-type Presence struct {
-	User      string `json:"user"`
-	Status    string `json:"status"`
+// UserPresence represents a user's status in a workspace.
+type UserPresence struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"` // online, idle, away, dnd
+	Activity  string `json:"activity,omitempty"`
+	Workspace string `json:"workspace"`
 	LastSeen  int64  `json:"last_seen"`
-	Client    string `json:"client"`
-	ProjectID string `json:"project_id,omitempty"`
-}
-
-type DashboardTile struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Content   []string `json:"content"`
-	Status    string   `json:"status"`
-	Actions   []string `json:"actions"`
-	Timestamp int64    `json:"timestamp"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 var (
-	presenceMap = make(map[string]Presence)
+	plugin   *Plugin
+	presence = make(map[string]UserPresence)
 )
 
 func main() {
-	p := guest.NewPlugin("team-presence")
+	plugin = NewPlugin("team-presence").
+		WithMetadata(
+			"Team Presence Manager",
+			"Tracks user status and activity across the workspace",
+			"0.1.0",
+			"Alloy Team",
+		).
+		WithTags("collaboration", "presence", "team").
+		WithCapability("heartbeat", "Update user presence").
+		WithCapability("list", "List all present users").WithShortcut("p l").
+		WithCapability("get", "Get presence for a specific user")
 
-	p.OnInit(func() error {
-		// Subscribe to presence events
-		subPayload, _ := json.Marshal(map[string]string{"topic": "presence:heartbeat"})
-		p.RouteMessage(guest.AlloyMessage{
-			Id:      "sub-presence",
-			MsgType: "request",
-			Sender:  "team-presence",
-			Target:  guest.Some("events"),
-			Method:  "subscribe",
-			Payload: subPayload,
-		})
+	plugin.Handle("heartbeat", handleHeartbeat)
+	plugin.Handle("list", handleList)
+	plugin.Handle("get", handleGet)
 
-		// Register the dashboard widget
-		p.RegisterWidget(guest.AlloyWidget{
-			Id:                "team-presence",
+	plugin.OnInit(func() error {
+		plugin.Log("info", "Presence manager initializing")
+
+		// Register a dashboard widget
+		plugin.RegisterWidget(AlloyWidget{
+			Id:                "presence-summary",
 			Title:             "Team Presence",
 			ContentType:       "text",
-			Content:           []byte("Initializing..."),
+			Content:           []byte("No users online"),
+			RefreshIntervalMs: 5000,
+		})
+
+		// Register an activity stream widget
+		plugin.RegisterWidget(AlloyWidget{
+			Id:                "presence-activity",
+			Title:             "Activity Stream",
+			ContentType:       "text",
+			Content:           []byte("No recent activity"),
 			RefreshIntervalMs: 0,
 		})
+
+		// Background cleanup of stale presence
+		go func() {
+			for {
+				time.Sleep(10 * time.Second)
+				now := time.Now().Unix()
+				changed := false
+				for id, p := range presence {
+					if now-p.LastSeen > 60 { // 1-minute timeout
+						delete(presence, id)
+						changed = true
+						plugin.Log("info", "User went offline: "+id)
+						
+						// Publish offline event
+						publishPresenceEvent(id, "offline")
+					}
+				}
+
+				if changed {
+					updateDashboard()
+				}
+			}
+		}()
+
 		return nil
 	})
 
-	p.RegisterMethod("list", "List all active users", func(msg guest.AlloyMessage) *guest.AlloyMessage {
-		var list []Presence
-		for _, pres := range presenceMap {
-			// Filter out stale entries (> 5 mins)
-			if time.Now().Unix()-pres.LastSeen < 300 {
-				list = append(list, pres)
-			}
-		}
-		
-		sort.Slice(list, func(i, j int) bool {
-			return list[i].User < list[j].User
-		})
-
-		payload, _ := json.Marshal(list)
-		return &guest.AlloyMessage{
-			Id:      msg.Id + "-resp",
-			Method:  "presence:list",
-			Payload: payload,
-			Target:  guest.Some(msg.Sender),
-		}
-	})
-
-	// Handle the heartbeat event
-	p.Handle("presence:heartbeat", func(rawMsg guest.AlloyMessage) guest.AlloyMessage {
-		var event struct {
-			Topic string   `json:"topic"`
-			Data  Presence `json:"data"`
-		}
-		if err := json.Unmarshal(rawMsg.Payload, &event); err == nil {
-			pres := event.Data
-			if pres.LastSeen == 0 {
-				pres.LastSeen = time.Now().Unix()
-			}
-			presenceMap[pres.User] = pres
-			
-			// Update the dashboard immediately on change
-			updateDashboard(p)
-		}
-		return guest.AlloyMessage{} // No response for events
-	})
-
-	p.Log(guest.LogLevelInfo, "Team Presence plugin initialized")
-	p.Serve()
+	if err := plugin.Run(); err != nil {
+		plugin.Log("error", "Plugin failed: "+err.Error())
+	}
 }
 
-func updateDashboard(p *guest.Plugin) {
-	var entries []string
-	onlineCount := 0
+func handleHeartbeat(msg AlloyMessage) AlloyMessage {
+	var req UserPresence
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_presence_data")
+	}
+
+	// Ensure ID is set (default to sender if empty)
+	if req.ID == "" {
+		req.ID = msg.Sender
+	}
+	if req.Name == "" {
+		req.Name = req.ID
+	}
+	if req.Status == "" {
+		req.Status = "online"
+	}
+	req.LastSeen = time.Now().Unix()
+
+	_, exists := presence[req.ID]
+
+	if !exists {
+		plugin.Log("info", "User joined: "+req.ID)
+		publishPresenceEvent(req.ID, "online")
+	} else if presence[req.ID].Activity != req.Activity && req.Activity != "" {
+		plugin.Log("info", "Activity change: "+req.ID+" -> "+req.Activity)
+		updateActivityStream(req.ID, req.Activity)
+	}
+
+	presence[req.ID] = req
+	updateDashboard()
+
+	return plugin.Reply(msg, map[string]string{"status": "ok"})
+}
+
+func handleList(msg AlloyMessage) AlloyMessage {
+	list := make([]UserPresence, 0, len(presence))
+	for _, p := range presence {
+		list = append(list, p)
+	}
+	return plugin.Reply(msg, list)
+}
+
+func handleGet(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_request")
+	}
+
+	p, ok := presence[req.ID]
+	if !ok {
+		return plugin.ErrorReply(msg, "user_not_found")
+	}
+
+	return plugin.Reply(msg, p)
+}
+
+func updateDashboard() {
+	if len(presence) == 0 {
+		plugin.UpdateWidget("presence-summary", []byte("No users online"))
+		return
+	}
+
+	var lines []string
+	for _, p := range presence {
+		icon := "●"
+		if p.Status == "away" || p.Status == "idle" {
+			icon = "○"
+		} else if p.Status == "dnd" {
+			icon = "×"
+		}
+		activity := ""
+		if p.Activity != "" {
+			activity = " [" + p.Activity + "]"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s (%s)%s", icon, p.Name, p.Status, activity))
+	}
+	plugin.UpdateWidget("presence-summary", []byte(strings.Join(lines, "\n")))
+}
+
+var activityHistory []string
+
+func updateActivityStream(user, activity string) {
+	entry := fmt.Sprintf("[%s] %s: %s", time.Now().Format("15:04:05"), user, activity)
+	activityHistory = append([]string{entry}, activityHistory...)
+	if len(activityHistory) > 10 {
+		activityHistory = activityHistory[:10]
+	}
+	plugin.UpdateWidget("presence-activity", []byte(strings.Join(activityHistory, "\n")))
+}
+
+func publishPresenceEvent(userID string, eventType string) {
+	evt := map[string]interface{}{
+		"user_id":   userID,
+		"event":     eventType,
+		"timestamp": time.Now().Unix(),
+	}
 	
-	users := make([]string, 0, len(presenceMap))
-	for u := range presenceMap {
-		users = append(users, u)
-	}
-	sort.Strings(users)
-
-	now := time.Now().Unix()
-	for _, u := range users {
-		pres := presenceMap[u]
-		if now-pres.LastSeen > 300 {
-			continue
-		}
-		
-		dot := "●"
-		if pres.Status == "away" {
-			dot = "○"
-		} else if pres.Status == "busy" {
-			dot = "◌"
-		}
-		
-		entries = append(entries, fmt.Sprintf("%s %s (%s)", dot, pres.User, pres.Client))
-		onlineCount++
-	}
-
-	if len(entries) == 0 {
-		entries = append(entries, "No one else is online")
-	}
-
-	// Update the official dynamic widget
-	p.UpdateWidget("team-presence", []byte(strings.Join(entries, "\n")))
-
-	// (Legacy support remains for a bit)
-	tile := DashboardTile{
-		ID:      "team-presence",
-		Title:   "Team Presence",
-		Content: entries,
-		Status:  fmt.Sprintf("%d Online", onlineCount),
-		Actions: []string{"Invite", "Status"},
-		Timestamp: now,
-	}
-
-	payload, _ := json.Marshal(tile)
-	p.RouteMessage(guest.AlloyMessage{
-		Id:      "dash-update-presence",
-		MsgType: "request",
-		Sender:  "team-presence",
-		Target:  guest.Some("events"),
-		Method:  "publish",
-		Payload: func() []byte {
-			ev := map[string]any{
-				"topic": "dashboard-update",
-				"data":  tile,
-			}
-			b, _ := json.Marshal(ev)
-			return b
-		}(),
+	// Create the event payload as expected by the events plugin
+	payload, _ := json.Marshal(map[string]interface{}{
+		"topic": "presence:" + eventType,
+		"data":  evt,
 	})
 	
-	// Also send directly to frontends as a dashboard update if they are listening
-	p.RouteMessage(guest.AlloyMessage{
-		Id:      "dash-direct-presence",
+	plugin.RouteMessage(AlloyMessage{
+		Id:      fmt.Sprintf("presence-evt-%d", time.Now().UnixNano()),
 		MsgType: "request",
-		Sender:  "team-presence",
-		Target:  guest.None[string](), // Broadcast-ish or routed by method
-		Method:  "dashboard-update",
+		Method:  "publish",
+		Sender:  "presence",
+		Target:  Some("events"),
 		Payload: payload,
 	})
 }

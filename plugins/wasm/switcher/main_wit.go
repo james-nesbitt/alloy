@@ -30,10 +30,12 @@ func main() {
 		).
 		WithCapability("switcher:list-projects", "List available projects").
 		WithCapability("switcher:switch", "Switch active project context").
-		WithShortcut("p s")
+		WithShortcut("p s").
+		WithIntent("intent:switch-context")
 
 	plugin.Handle("switcher:list-projects", handleListProjects)
 	plugin.Handle("switcher:switch", handleSwitch)
+	plugin.Handle("intent:switch-context", handleSwitch)
 
 	plugin.OnInit(func() error {
 		plugin.Log("info", "Project Switcher initializing")

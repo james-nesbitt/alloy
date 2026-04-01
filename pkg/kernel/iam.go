@@ -108,6 +108,12 @@ func (i *IdentityManager) Capabilities() []api.Capability {
 	}
 }
 
+func (i *IdentityManager) AssignRole(actor, role string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.identities[actor] = role
+}
+
 func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	switch msg.Method {
 	case "check", "authorize":

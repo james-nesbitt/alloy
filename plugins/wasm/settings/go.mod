@@ -1,6 +1,10 @@
-module github.com/james-nesbitt/alloy/plugins/wasm/presence
+module github.com/james-nesbitt/alloy/plugins/wasm/settings
 
 go 1.25.8
+
+replace github.com/james-nesbitt/alloy => ../../../
+
+replace github.com/james-nesbitt/alloy/wit => ../../../wit
 
 replace github.com/james-nesbitt/alloy/build/gen/bindings/guest => ../../../build/gen/bindings/guest
 

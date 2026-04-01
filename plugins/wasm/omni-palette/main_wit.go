@@ -101,21 +101,35 @@ func main() {
 }
 
 func handleOmniSearch(msg AlloyMessage) AlloyMessage {
+
 	var req OmniSearchRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "invalid_search_request")
 	}
-
 	if req.Limit <= 0 {
 		req.Limit = 15
+	} else if req.Limit > 100 {
+		req.Limit = 100
 	}
-	
+
 	query := strings.ToLower(req.Query)
 	results := []OmniResult{}
+	// Budget intermediate allocations to avoid runaway memory usage when the host has thousands of capabilities.
+	maxResultsBudget := req.Limit * 10
+	if maxResultsBudget < 200 {
+		maxResultsBudget = 200
+	} else if maxResultsBudget > 2000 {
+		maxResultsBudget = 2000
+	}
+	maxCapsBudget := maxResultsBudget * 4
 
 	// 1. Get ALL system capabilities (Commands) filtered by context
 	contextID := msg.ContextID()
 	caps := plugin.GetAllCapabilities(msg.Actor, contextID)
+	plugin.Log(LogLevelInfo, fmt.Sprintf("omni search caps=%d budget=%d query=%q", len(caps), maxCapsBudget, req.Query))
+	if len(caps) > maxCapsBudget {
+		caps = caps[:maxCapsBudget]
+	}
 	for _, cap := range caps {
 		score := 0.0
 		method := strings.ToLower(cap.Method)
@@ -152,22 +166,33 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 					"action": "execute",
 				},
 			})
+			if len(results) >= maxResultsBudget {
+				break
+			}
 		}
-	}
-
 	// 2. Get Open Buffers
+	bufListLimit := maxResultsBudget
+	if bufListLimit > 400 {
+		bufListLimit = 400
+	}
+	bufListPayload, _ := json.Marshal(map[string]any{
+		"include_content": false,
+		"limit":           bufListLimit,
+	})
 	bufResp := plugin.Call(AlloyMessage{
 		Id:      fmt.Sprintf("omni-buf-%d", time.Now().UnixNano()),
 		MsgType: "request",
 		Method:  "buffer:list",
 		Sender:  "omni-palette",
 		Target:  Some("buffer"),
-		Payload: []byte("{}"),
+		Payload: bufListPayload,
 	})
+
 
 	if bufResp.Method != "error" && len(bufResp.Payload) > 0 {
 		var bufList BufferListResponse
 		if err := json.Unmarshal(bufResp.Payload, &bufList); err == nil {
+			plugin.Log(LogLevelInfo, fmt.Sprintf("omni search buffer sample=%d limit=%d", len(bufList.Buffers), bufListLimit))
 			for _, buf := range bufList.Buffers {
 				score := 0.0
 				name := strings.ToLower(buf.Name)
@@ -186,20 +211,26 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 					score += 50.0 // Massive boost for local context
 				}
 
-				if score > 0 {
-					results = append(results, OmniResult{
-						ID:          buf.ID,
-						Title:       buf.Name,
-						Description: fmt.Sprintf("Open Buffer (%s)", buf.MimeType),
-						Type:        "buffer",
-						Score:       score,
-						Shortcut:    "", // Buffers don't have default shortcuts yet
-						Metadata: map[string]string{
-							"action":    "switch",
-							"buffer_id": buf.ID,
-						},
-					})
+			if score > 0 {
+				results = append(results, OmniResult{
+					ID:          buf.ID,
+					Title:       buf.Name,
+					Description: fmt.Sprintf("Open Buffer (%s)", buf.MimeType),
+					Type:        "buffer",
+					Score:       score,
+					Shortcut:    "",
+					Metadata: map[string]string{
+						"action":    "switch",
+						"buffer_id": buf.ID,
+					},
+				})
+				if len(results) >= maxResultsBudget {
+					break
 				}
+			}
+			if len(results) >= maxResultsBudget {
+				break
+			}
 			}
 		}
 	}
@@ -247,6 +278,12 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 							"id":     ws.ID,
 						},
 					})
+					if len(results) >= maxResultsBudget {
+						break
+					}
+				}
+				if len(results) >= maxResultsBudget {
+					break
 				}
 			}
 		}
@@ -283,6 +320,13 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 						"tags":   strings.Join(res.Document.Tags, ","),
 					},
 				})
+				if len(results) >= maxResultsBudget {
+					break
+				}
+			}
+				if len(results) >= maxResultsBudget {
+					break
+				}
 			}
 		}
 	}

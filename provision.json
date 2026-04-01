@@ -85,12 +85,19 @@
       "id": "tasks",
       "type": "wasm",
       "path": "tasks.wasm",
-      "load_time": "lazy"
+      "load_time": "boot",
+      "background": true
     },
     {
       "id": "team-presence",
       "type": "wasm",
       "path": "team-presence.wasm",
+      "load_time": "boot"
+    },
+    {
+      "id": "settings",
+      "type": "wasm",
+      "path": "settings.wasm",
       "load_time": "boot"
     }
   ]

@@ -5,12 +5,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/james-nesbitt/alloy/pkg/wasm/guest"
 )
-
 // Operation represents a buffer modification.
 type Operation struct {
 	Version int    `json:"v"`
@@ -38,10 +38,13 @@ type Buffer struct {
 }
 
 type Cursor struct {
-	Row      int    `json:"row"`
-	Col      int    `json:"col"`
-	User     string `json:"user"`
-	LastSeen int64  `json:"last_seen"`
+	Row        int    `json:"row"`
+	Col        int    `json:"col"`
+	SelectLine int    `json:"select_line,omitempty"`
+	SelectCol  int    `json:"select_col,omitempty"`
+	Selecting  bool   `json:"selecting,omitempty"`
+	User       string `json:"user"`
+	LastSeen   int64  `json:"last_seen"`
 }
 
 var (
@@ -227,9 +230,12 @@ func handleCreate(msg guest.AlloyMessage) guest.AlloyMessage {
 // handleUpdateCursor updates the cursor position for a user.
 func handleUpdateCursor(msg guest.AlloyMessage) guest.AlloyMessage {
 	var req struct {
-		ID  string `json:"id"`
-		Row int    `json:"row"`
-		Col int    `json:"col"`
+		ID         string `json:"id"`
+		Row        int    `json:"row"`
+		Col        int    `json:"col"`
+		SelectLine int    `json:"select_line"`
+		SelectCol  int    `json:"select_col"`
+		Selecting  bool   `json:"selecting"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return plugin.ErrorReply(msg, "failed_to_unmarshal_request")
@@ -246,10 +252,13 @@ func handleUpdateCursor(msg guest.AlloyMessage) guest.AlloyMessage {
 
 	actor := msg.Sender // Defaulting to sender ID for now
 	b.UserCursors[actor] = Cursor{
-		Row:      req.Row,
-		Col:      req.Col,
-		User:     actor,
-		LastSeen: time.Now().Unix(),
+		Row:        req.Row,
+		Col:        req.Col,
+		SelectLine: req.SelectLine,
+		SelectCol:  req.SelectCol,
+		Selecting:  req.Selecting,
+		User:       actor,
+		LastSeen:   time.Now().Unix(),
 	}
 
 	// Sync presence to host-side semantic presence buffer
@@ -482,13 +491,47 @@ func handleAppend(msg guest.AlloyMessage) guest.AlloyMessage {
 	})
 }
 
-// handleList handles buffer list requests.
-func handleList(msg guest.AlloyMessage) guest.AlloyMessage {
-	list := make([]*Buffer, 0, len(buffers))
-	for _, b := range buffers {
-		list = append(list, b)
-	}
+type bufferListRequest struct {
+	IncludeContent *bool `json:"include_content"`
+	Limit          *int  `json:"limit,omitempty"`
+}
 
+func handleList(msg guest.AlloyMessage) guest.AlloyMessage {
+	totalBuffers := len(buffers)
+	includeContent := true
+	limit := -1
+	if len(msg.Payload) > 0 && string(msg.Payload) != "null" {
+		var req bufferListRequest
+		if err := json.Unmarshal(msg.Payload, &req); err == nil {
+			if req.IncludeContent != nil {
+				includeContent = *req.IncludeContent
+			}
+			if req.Limit != nil {
+				limit = *req.Limit
+			}
+		}
+	}
+	if limit <= 0 || limit > totalBuffers {
+		limit = totalBuffers
+	}
+	list := make([]*Buffer, 0, totalBuffers)
+	for _, b := range buffers {
+		if includeContent {
+			list = append(list, b)
+			continue
+		}
+		copyBuf := *b
+		copyBuf.Data = nil
+		copyBuf.UserCursors = nil
+		list = append(list, &copyBuf)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Timestamp > list[j].Timestamp
+	})
+	if limit < len(list) {
+		list = list[:limit]
+	}
+	plugin.Log(guest.LogLevelInfo, fmt.Sprintf("buffer:list returning %d of %d buffers (include_content=%t, limit=%d)", len(list), totalBuffers, includeContent, limit))
 	return plugin.Reply(msg, map[string]interface{}{
 		"buffers": list,
 	})

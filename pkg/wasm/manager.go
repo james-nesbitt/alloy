@@ -69,7 +69,7 @@ func (m *Manager) LoadPlugin(
 	background bool,
 ) error {
 	// Load the plugin in the runtime
-	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps)
+	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background)
 	if err != nil {
 		return err
 	}

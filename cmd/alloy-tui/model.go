@@ -101,6 +101,8 @@ type Model struct {
 	RootLayout    *frontend.LayoutNode
 	FocusedPaneID string
 
+	CurrentTheme string
+
 	startupTicks int
 }
 

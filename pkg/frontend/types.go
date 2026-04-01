@@ -57,7 +57,18 @@ type Project struct {
 type Presence struct {
 	User      string `json:"user"`
 	Status    string `json:"status"`
+	Activity  string `json:"activity,omitempty"`
 	LastSeen  int64  `json:"last_seen"`
 	Client    string `json:"client"`
 	ProjectID string `json:"project_id,omitempty"`
+}
+
+type Cursor struct {
+	Row        int    `json:"row"`
+	Col        int    `json:"col"`
+	SelectLine int    `json:"select_line,omitempty"`
+	SelectCol  int    `json:"select_col,omitempty"`
+	Selecting  bool   `json:"selecting,omitempty"`
+	User       string `json:"user"`
+	LastSeen   int64  `json:"last_seen"`
 }

@@ -7,7 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/frontend"
+	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
 func (m Model) fetchBufferContent(id string) tea.Cmd {
@@ -115,14 +117,30 @@ func (m Model) sendPresenceHeartbeat() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
+		activity := "Idle"
+		switch m.Mode {
+		case tui.ModeChat:
+			activity = "Chatting #" + m.ActiveChannel
+		case tui.ModeEdit, tui.ModeInsert:
+			if m.activeBuffer != "" {
+				activity = "Editing " + m.activeBuffer
+			}
+		case tui.ModeDashboard:
+			activity = "Dashboard"
+		case tui.ModeInspector:
+			activity = "Tracing"
+		}
+
 		payload, _ := json.Marshal(map[string]string{
-			"status": "online",
+			"status":   "online",
+			"activity": activity,
 		})
 		_, _ = m.client.Send(ctx, "chat:presence:update", "presence:update", payload)
 
 		presence := frontend.Presence{
 			User:     m.client.Actor(),
 			Status:   "online",
+			Activity: activity,
 			Client:   "tui",
 			LastSeen: time.Now().Unix(),
 		}
@@ -137,6 +155,25 @@ func (m Model) sendPresenceHeartbeat() tea.Cmd {
 		_, _ = m.client.Send(ctx, "events:publish", "publish", eventData)
 
 		return nil
+	}
+}
+
+func (m Model) dispatchRemoteIntent(name string, payload any) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		data, _ := json.Marshal(payload)
+		intent := api.Intent{
+			Name:    name,
+			Payload: data,
+		}
+
+		resp, err := m.client.DispatchIntent(ctx, intent)
+		if err != nil {
+			return errMsg(err)
+		}
+		return messageMsg(resp)
 	}
 }
 

@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,6 +42,7 @@ type ClientInterface interface {
 	Name() string
 	Actor() string
 	Messages() []api.Message
+	DispatchIntent(ctx context.Context, intent api.Intent) (api.Message, error)
 }
 
 // Client represents a standardized frontend client for Alloy.
@@ -136,6 +138,42 @@ func (c *Client) Send(ctx context.Context, target, method string, payload []byte
 	}
 
 	if contextID != "" {
+		msg.Metadata["context"] = contextID
+	}
+
+	return c.ipc.Call(ctx, msg)
+}
+
+func (c *Client) DispatchIntent(ctx context.Context, intent api.Intent) (api.Message, error) {
+	c.mu.RLock()
+	actor := c.actor
+	contextID := c.context
+	c.mu.RUnlock()
+
+	if intent.ID == "" {
+		intent.ID = fmt.Sprintf("intent-%d", time.Now().UnixNano())
+	}
+	if intent.Sender == "" {
+		intent.Sender = c.name
+	}
+
+	payload, _ := json.Marshal(intent)
+
+	msg := api.Message{
+		ID:        intent.ID,
+		Type:      api.TypeRequest,
+		Sender:    c.name,
+		Actor:     actor,
+		Target:    "kernel",
+		Method:    "intent:dispatch",
+		Payload:   payload,
+		Timestamp: time.Now().Unix(),
+		Metadata:  make(map[string]any),
+	}
+
+	if intent.ContextID != "" {
+		msg.Metadata["context"] = intent.ContextID
+	} else if contextID != "" {
 		msg.Metadata["context"] = contextID
 	}
 

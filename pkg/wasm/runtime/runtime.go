@@ -843,16 +843,21 @@ func (r *Runtime) internalGetAllCapabilities(ctx context.Context, mod wazeroapi.
 	}
 	var allCaps []api.Capability
 	for _, t := range data.Targets {
-		allCaps = append(allCaps, t.Capabilities...)
+		for _, cap := range t.Capabilities {
+			allCaps = append(allCaps, cap)
+		}
 	}
+	totalCaps := len(allCaps)
 	alloc := mod.ExportedFunction("cabi_realloc")
-	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(allCaps)*40))
+
+	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(totalCaps*52))
 	basePtr := uint32(res[0])
 	for i, c := range allCaps {
-		r.writeCapability(ctx, mod, basePtr+uint32(i*40), c)
+		r.writeCapability(ctx, mod, basePtr+uint32(i*52), c)
 	}
+
 	mod.Memory().WriteUint32Le(resultPtr, basePtr)
-	mod.Memory().WriteUint32Le(resultPtr+4, uint32(len(allCaps)))
+	mod.Memory().WriteUint32Le(resultPtr+4, uint32(totalCaps))
 }
 
 func (r *Runtime) writeCapability(ctx context.Context, mod wazeroapi.Module, ptr uint32, cap api.Capability) {
@@ -897,6 +902,23 @@ func (r *Runtime) writeCapability(ctx context.Context, mod wazeroapi.Module, ptr
 		mod.Memory().WriteUint32Le(ptr+36, uint32(len(cap.Annotations)))
 	} else {
 		mod.Memory().WriteUint32Le(ptr+28, 0)
+	}
+
+	if len(cap.Intents) > 0 {
+		mod.Memory().WriteUint32Le(ptr+40, 1)
+		meta := make([]byte, len(cap.Intents)*8)
+		for i, intent := range cap.Intents {
+			ir, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(intent)))
+			mod.Memory().Write(uint32(ir[0]), []byte(intent))
+			i32le.PutUint32(meta[i*8:], uint32(ir[0]))
+			i32le.PutUint32(meta[i*8+4:], uint32(len(intent)))
+		}
+		res, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(meta)))
+		mod.Memory().Write(uint32(res[0]), meta)
+		mod.Memory().WriteUint32Le(ptr+44, uint32(res[0]))
+		mod.Memory().WriteUint32Le(ptr+48, uint32(len(cap.Intents)))
+	} else {
+		mod.Memory().WriteUint32Le(ptr+40, 0)
 	}
 }
 
@@ -1111,6 +1133,7 @@ func (l *loggerWriter) Write(p []byte) (n int, err error) {
 	}
 	return len(p), nil
 }
+
 // internalDispatchIntent routes a goal-oriented intent (Phase 10)
 func (r *Runtime) internalDispatchIntent(ctx context.Context, mod wazeroapi.Module, ptr uint32) {
 	readStr := func(p uint32) string {
@@ -1133,7 +1156,7 @@ func (r *Runtime) internalDispatchIntent(ctx context.Context, mod wazeroapi.Modu
 	if isSome != 0 {
 		intent.ContextID = readStr(ptr + 36)
 	}
-	
+
 	payload, _ := json.Marshal(intent)
 	r.routerFn(ctx, api.Message{
 		ID:      intent.ID,

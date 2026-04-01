@@ -163,6 +163,7 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 			}
 			if m.Mode == tui.ModeEdit {
 				m.isLocalBufferDirty = true
+				cmds = append(cmds, m.sendCursorUpdate(m.activeBuffer, m.textarea.Line(), 0))
 			}
 			if m.Mode == tui.ModeChat && it.Text == "enter" {
 				val := m.textarea.Value()
@@ -469,6 +470,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.subscribe("dashboard:widget-unregistered"),
 					m.subscribe("system:trace"),
 					m.subscribe("system:context-changed"),
+					m.subscribe("system:theme-changed"),
 					m.subscribe("component:registered"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true

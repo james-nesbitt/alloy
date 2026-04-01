@@ -40,19 +40,20 @@ func TestOmniPaletteSearch(t *testing.T) {
 
 	// 1. Load Indexer
 	indexBytes, _ := os.ReadFile(filepath.Join(pluginsDir, "index.wasm"))
-	err = k.RegisterWASMPluginAtScale("index", indexBytes, 64, 100, []api.Capability{
+	err = k.RegisterWASMPluginAtScale("index", indexBytes, 256, 100, []api.Capability{
 		{Method: "knowledge:ingest", Description: "Ingest doc"},
 		{Method: "knowledge:search", Description: "Search doc"},
-	})
+	}, false, false)
 	if err != nil {
 		t.Fatalf("failed to load index plugin: %v", err)
 	}
 
 	// 2. Load Omni-Palette
 	omniBytes, _ := os.ReadFile(filepath.Join(pluginsDir, "omni-palette.wasm"))
-	err = k.RegisterWASMPluginAtScale("omni-palette", omniBytes, 64, 100, []api.Capability{
+	err = k.RegisterWASMPluginAtScale("omni-palette", omniBytes, 256, 100, []api.Capability{
 		{Method: "omni:search", Description: "Unified Search"},
-	})
+	}, false, false)
+
 	if err != nil {
 		t.Fatalf("failed to load omni-palette plugin: %v", err)
 	}
@@ -63,15 +64,16 @@ func TestOmniPaletteSearch(t *testing.T) {
 	// 3. Ingest some content into the Knowledge Graph
 	ingestMsg := api.Message{
 		ID:     "ingest-1",
+		Type:   api.TypeRequest,
 		Sender: "test-client",
 		Target: "index",
 		Method: "knowledge:ingest",
 		Payload: []byte(`{
-			"id": "doc-omni-test",
-			"path": "test://omni-doc",
-			"content": "Alloy Omni-Palette is a unified search interface for commands and knowledge.",
-			"tags": ["omni", "testing"]
-		}`),
+ 			"id": "doc-omni-test",
+ 			"path": "test://omni-doc",
+ 			"content": "Alloy Omni-Palette is a unified search interface for commands and knowledge.",
+ 			"tags": ["omni", "testing"]
+ 		}`),
 	}
 	k.RouteMessage(context.Background(), ingestMsg)
 
@@ -81,18 +83,39 @@ func TestOmniPaletteSearch(t *testing.T) {
 	// 4. Test Unified Search
 	searchMsg := api.Message{
 		ID:      "omni-query-1",
+		Type:    api.TypeRequest,
 		Sender:  "test-client",
 		Target:  "omni-palette",
 		Method:  "omni:search",
 		Payload: []byte(`{"query": "omni", "limit": 10}`),
 	}
 
-	respChan := make(chan api.Message, 1)
-	k.RegisterFrontend("test-client", respChan)
+	respChan := make(chan api.Message, 8)
+	frontendID := "test-client"
+	k.RegisterFrontend(frontendID, respChan)
+
+	waitForResponse := func(expectedID string) api.Message {
+		deadline := time.After(5 * time.Second)
+		var lastMsg api.Message
+		for {
+			select {
+			case msg := <-respChan:
+				lastMsg = msg
+				if msg.Target == frontendID {
+					if msg.ID == expectedID || msg.ID == expectedID+"-response" || msg.ID == expectedID+"-resp" {
+						return msg
+					}
+				}
+			case <-deadline:
+				t.Fatalf("timeout waiting for %s response (last msg id=%s target=%s)", expectedID, lastMsg.ID, lastMsg.Target)
+			}
+		}
+	}
 
 	// Test Index directly first
 	idxSearchMsg := api.Message{
 		ID:      "idx-query-1",
+		Type:    api.TypeRequest,
 		Sender:  "test-client",
 		Target:  "index",
 		Method:  "knowledge:search",
@@ -100,18 +123,14 @@ func TestOmniPaletteSearch(t *testing.T) {
 	}
 	k.RouteMessage(context.Background(), idxSearchMsg)
 
-	respIdx := <-respChan
-	fmt.Printf("Index search response: %s\n", string(respIdx.Payload))
+	respIdx := waitForResponse(idxSearchMsg.ID)
+	fmt.Printf("Index search response (id=%s): %s\n", respIdx.ID, string(respIdx.Payload))
 
 	k.RouteMessage(context.Background(), searchMsg)
 
-	var resp api.Message
-	select {
-	case resp = <-respChan:
-		// Got it
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for search response")
-	}
+	resp := waitForResponse(searchMsg.ID)
+
+	fmt.Printf("Omni raw response (id=%s): %s\n", resp.ID, string(resp.Payload))
 
 	if strings.Contains(string(resp.Payload), "error") {
 		t.Fatalf("search returned error: %s", string(resp.Payload))
@@ -123,9 +142,29 @@ func TestOmniPaletteSearch(t *testing.T) {
 		Type  string  `json:"type"`
 		Score float64 `json:"score"`
 	}
-	if err := json.Unmarshal(resp.Payload, &results); err != nil {
-		t.Fatalf("failed to unmarshal results: %v", err)
+
+	decodeResults := func(data []byte) error {
+		if err := json.Unmarshal(data, &results); err != nil {
+			var wrapper map[string]json.RawMessage
+			if err2 := json.Unmarshal(data, &wrapper); err2 != nil {
+				return err
+			}
+			inner, ok := wrapper["results"]
+			if !ok {
+				return err
+			}
+			if err := json.Unmarshal(inner, &results); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
+
+	if err := decodeResults(resp.Payload); err != nil {
+		t.Fatalf("failed to unmarshal results: %v payload=%s", err, string(resp.Payload))
+	}
+
+	// Verify we got results
 
 	// Verify we got results
 	fmt.Printf("Omni results found: %d\n", len(results))

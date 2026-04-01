@@ -46,6 +46,7 @@ type PluginMetadata struct {
 	LoadTime     PluginLoadTime `json:"load_time"`
 	Intents      []string       `json:"intents,omitempty"`    // Aggregated list of intents this plugin can handle (Phase 10)
 	Background   bool           `json:"background,omitempty"` // Whether this plugin runs as a background actor (Phase 10)
+	Sidecar      bool           `json:"sidecar,omitempty"`    // Whether this plugin is a global sidecar (Phase 10)
 }
 
 // PluginLoader is an interface for components that can load a plugin on demand.
@@ -145,6 +146,7 @@ type Registration struct {
 	Status       string       `json:"status,omitempty"`
 	Capabilities []Capability `json:"capabilities,omitempty"`
 	Background   bool         `json:"background,omitempty"` // Phase 10
+	Sidecar      bool         `json:"sidecar,omitempty"`    // Phase 10
 	Intents      []string     `json:"intents,omitempty"`    // Phase 10
 }
 

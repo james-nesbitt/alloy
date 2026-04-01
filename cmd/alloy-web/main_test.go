@@ -26,6 +26,10 @@ func (m *MockClient) Send(ctx context.Context, target, method string, payload []
 	return api.Message{ID: "resp-123", Payload: []byte(`{"status":"ok"}`)}, nil
 }
 
+func (m *MockClient) DispatchIntent(ctx context.Context, intent api.Intent) (api.Message, error) {
+	return api.Message{ID: "intent-resp-123", Payload: []byte(`{"status":"ok"}`)}, nil
+}
+
 func (m *MockClient) OnMessage(h func(api.Message)) {}
 func (m *MockClient) Close() error                  { return nil }
 func (m *MockClient) Name() string                  { return "mock" }

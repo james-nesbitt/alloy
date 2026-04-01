@@ -11,9 +11,9 @@ use (
 	./plugins/wasm/iam
 	./plugins/wasm/index
 	./plugins/wasm/omni-palette
-	./plugins/wasm/presence
 	./plugins/wasm/project
 	./plugins/wasm/secrets
+	./plugins/wasm/settings
 	./plugins/wasm/switcher
 	./plugins/wasm/tasks
 	./plugins/wasm/team-presence

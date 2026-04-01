@@ -126,7 +126,7 @@ func TestRuntimePluginLifecycle(t *testing.T) {
 		{Method: "test:method", Description: "Test method"},
 	}
 
-	instance, err := rt.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps)
+	instance, err := rt.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestRuntimeMessageRouting(t *testing.T) {
 		{Method: "test:method", Description: "Test method"},
 	}
 
-	instance, err := rt.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps)
+	instance, err := rt.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false)
 	if err != nil {
 		t.Fatal(err)
 	}

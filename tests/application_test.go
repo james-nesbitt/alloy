@@ -107,6 +107,9 @@ func TestApplicationPlugins(t *testing.T) {
 	})
 	awaitResponse(t, collector, "proj-open-1-resp")
 
+	// 2.6. Wait a moment for all plugins to finish OnInit/OnStart (including subscriptions)
+	time.Sleep(500 * time.Millisecond)
+
 	// 3. User sends a message that should trigger AI response
 	chatReq, _ := json.Marshal(map[string]string{
 		"channel": "test-channel",

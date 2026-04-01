@@ -1,3 +1,5 @@
+//go:build gui
+
 package main
 
 import (
@@ -51,6 +53,8 @@ type guiState struct {
 	frequencies     map[string]int
 	rootLayout      *frontend.LayoutNode
 	focusedPaneID   string
+	remoteCursors   map[string]frontend.Cursor
+	teamPresence    map[string]frontend.Presence
 }
 
 type OmniResult struct {

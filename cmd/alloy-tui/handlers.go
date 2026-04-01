@@ -130,6 +130,19 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 		}
 	}
 
+	if msg.Sender == "events" && msg.Method == "system:theme-changed" {
+		var data struct {
+			Topic string `json:"topic"`
+			Data  struct {
+				Theme string `json:"theme"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(msg.Payload, &data); err == nil {
+			m.CurrentTheme = data.Data.Theme
+			displayMsg = fmt.Sprintf("[%s] Theme changed to: %s", time.Now().Format("15:04:05"), m.CurrentTheme)
+		}
+	}
+
 	if displayMsg == "" && msg.Method == "project:get-composed-workspace-resp" {
 		var resp struct {
 			Workspace  frontend.Workspace `json:"workspace"`
@@ -162,6 +175,7 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 			Data  struct {
 				UserID    string `json:"user_id"`
 				Event     string `json:"event"`
+				Activity  string `json:"activity,omitempty"`
 				Timestamp int64  `json:"timestamp"`
 			} `json:"data"`
 		}
@@ -170,6 +184,9 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 				displayMsg = fmt.Sprintf("[%s] User joined: %s", time.Now().Format("15:04:05"), event.Data.UserID)
 			} else if event.Data.Event == "offline" {
 				displayMsg = fmt.Sprintf("[%s] User left: %s", time.Now().Format("15:04:05"), event.Data.UserID)
+			} else if event.Data.Event == "heartbeat" && event.Data.Activity != "" {
+				// Don't spam heartbeat activity unless it's a major change or we want to log it
+				// For now, let's just let the dashboard handle it
 			}
 		}
 	}
@@ -551,111 +568,29 @@ func (m *Model) syncModeWithFocusedPane() {
 }
 
 func (m *Model) splitFocusedPane(direction string) {
-	// Find focused pane node
-	foundNode := tui.FindNodeByID(m.RootLayout, m.FocusedPaneID)
-	if foundNode == nil {
-		return
+	newNode := tui.SplitNode(m.RootLayout, m.FocusedPaneID, direction)
+	if newNode != nil {
+		m.FocusedPaneID = newNode.ID
+		m.syncModeWithFocusedPane()
 	}
-
-	// Create a new unique ID for the new pane
-	newID := fmt.Sprintf("pane-%d", time.Now().UnixNano())
-
-	// Transform this pane into a split or replace it in its parent
-	// For simplicity, we wrap this pane in a new split
-	oldNode := *foundNode
-	foundNode.Type = "split"
-	foundNode.Direction = direction
-	foundNode.PluginID = ""
-	foundNode.Mode = ""
-	foundNode.ID = ""
-	foundNode.Children = []frontend.LayoutNode{
-		oldNode,
-		{
-			ID:     newID,
-			Type:   "pane",
-			Mode:   oldNode.Mode,
-			Weight: 0.5,
-		},
-	}
-	// Re-adjust weight for the original node
-	foundNode.Children[0].Weight = 0.5
-
-	m.FocusedPaneID = newID
-	m.syncModeWithFocusedPane()
 }
 
 func (m *Model) closeFocusedPane() {
-	// Recursive function to remove node and potentially collapse parent
-	var removeNode func(*frontend.LayoutNode) bool
-	removeNode = func(node *frontend.LayoutNode) bool {
-		if node.Type != "split" {
-			return false
+	if tui.RemoveNode(&m.RootLayout, m.FocusedPaneID) {
+		panes := tui.GetPanes(m.RootLayout)
+		if len(panes) > 0 {
+			m.FocusedPaneID = panes[0].ID
+			m.syncModeWithFocusedPane()
 		}
-		for i, child := range node.Children {
-			if child.ID == m.FocusedPaneID {
-				node.Children = append(node.Children[:i], node.Children[i+1:]...)
-				return true
-			}
-			if removeNode(&child) {
-				// If child became empty, remove it?
-				// For now just check if we need to simplify this split
-				if len(child.Children) == 0 && child.Type == "split" {
-					node.Children = append(node.Children[:i], node.Children[i+1:]...)
-				}
-				return true
-			}
-		}
-		return false
-	}
-
-	if m.RootLayout.ID == m.FocusedPaneID {
-		// Can't close root if only one pane
-		return
-	}
-
-	removeNode(m.RootLayout)
-
-	// If root split has only one child, collapse it
-	if m.RootLayout.Type == "split" && len(m.RootLayout.Children) == 1 {
-		*m.RootLayout = m.RootLayout.Children[0]
-	}
-
-	// Re-focus something
-	panes := tui.GetPanes(m.RootLayout)
-	if len(panes) > 0 {
-		m.FocusedPaneID = panes[0].ID
-		m.syncModeWithFocusedPane()
 	}
 }
 
 func (m *Model) navigateFocus(dir string) {
-	panes := tui.GetPanes(m.RootLayout)
-	if len(panes) <= 1 {
-		return
+	delta := 1
+	if dir == "left" || dir == "up" {
+		delta = -1
 	}
-
-	idx := -1
-	for i, p := range panes {
-		if p.ID == m.FocusedPaneID {
-			idx = i
-			break
-		}
-	}
-
-	if idx == -1 {
-		m.FocusedPaneID = panes[0].ID
-		m.syncModeWithFocusedPane()
-		return
-	}
-
-	switch dir {
-	case "left", "up":
-		idx = (idx - 1 + len(panes)) % len(panes)
-	case "right", "down":
-		idx = (idx + 1) % len(panes)
-	}
-
-	m.FocusedPaneID = panes[idx].ID
+	m.FocusedPaneID = tui.NavigateFocus(m.RootLayout, m.FocusedPaneID, delta)
 	m.syncModeWithFocusedPane()
 }
 
@@ -1042,7 +977,7 @@ func (m Model) executeOmniResult(res OmniResult) (tea.Model, tea.Cmd) {
 		m.Mode = tui.ModeEdit
 		return m, m.fetchBufferContent(m.activeBuffer)
 	case "switch-context":
-		return m.executeCommand(fmt.Sprintf("switcher switch %s", res.Metadata["id"]))
+		return m, m.dispatchRemoteIntent("intent:switch-context", map[string]string{"id": res.Metadata["id"]})
 	case "open":
 		// Assume opening a document means loading it into a buffer
 		// We can use buffer:load-file if it exists, or project:open-file

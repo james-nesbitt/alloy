@@ -83,6 +83,8 @@ func run(w *app.Window, client *frontend.Client) error {
 	gui.recency = make(map[string]int)
 	gui.frequencies = make(map[string]int)
 	gui.dashboardTiles = make(map[string]frontend.DashboardTile)
+	gui.teamPresence = make(map[string]frontend.Presence)
+	gui.remoteCursors = make(map[string]frontend.Cursor)
 
 	discoverCh := make(chan bool, 1)
 	discoverCh <- true
@@ -119,6 +121,10 @@ func run(w *app.Window, client *frontend.Client) error {
 								_, _ = client.Send(subCtx, "events", "subscribe", subReq4)
 								subReq5, _ := json.Marshal(map[string]string{"topic": "dashboard:widget-updated"})
 								_, _ = client.Send(subCtx, "events", "subscribe", subReq5)
+								subReq6, _ := json.Marshal(map[string]string{"topic": "presence:heartbeat"})
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq6)
+								subReq7, _ := json.Marshal(map[string]string{"topic": "buffer:update"})
+								_, _ = client.Send(subCtx, "events", "subscribe", subReq7)
 								subCancel()
 								gui.subscriptions["project:opened"] = true
 							}
@@ -141,6 +147,28 @@ func run(w *app.Window, client *frontend.Client) error {
 				}
 			}
 			time.Sleep(5 * time.Second)
+		}
+	}()
+
+	// Heartbeat loop
+	go func() {
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			presence := frontend.Presence{
+				User:     client.Actor(),
+				Status:   "online",
+				Activity: "Using GUI", // TODO: Update based on mode
+				Client:   "gui",
+				LastSeen: time.Now().Unix(),
+			}
+
+			eventData, _ := json.Marshal(map[string]any{
+				"topic": "presence:heartbeat",
+				"data":  presence,
+			})
+			_, _ = client.Send(ctx, "events", "publish", eventData)
+			cancel()
+			time.Sleep(10 * time.Second)
 		}
 	}()
 
@@ -189,6 +217,14 @@ func run(w *app.Window, client *frontend.Client) error {
 					if err := json.Unmarshal(ev.Data, &data); err == nil {
 						client.SetContext(data.ContextID)
 						discoverCh <- true // Trigger immediate re-discovery
+					}
+				case "system:theme-changed":
+					var data struct {
+						Theme string `json:"theme"`
+					}
+					if err := json.Unmarshal(ev.Data, &data); err == nil {
+						// Here we could re-trigger theme application
+						// applySystemTheme would need to be updated to handle specific themes
 					}
 				}
 			}

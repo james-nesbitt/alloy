@@ -76,3 +76,11 @@ Skills provide specialized logic or instructions for specific domains.
   1. `wit/alloy.wit` updates.
   2. `just build-all` for binding regeneration.
   3. `plugins/wasm/` implementation.
+
+
+# COMMON PITFALLS & LESSONS LEARNED
+
+**WASM `cabi_realloc` Memory Allocation Mismatches**
+- **Symptom**: Panics in tests (e.g., `TestOmniPaletteSearch`) or at runtime when passing structs across the Host-WASM boundary.
+- **Cause**: If a field is added to a WIT file (e.g., `Intent` added to a struct) but not fully populated/accounted for in the host runtime's allocation calculation, the host allocates less memory (e.g., 40 bytes) than the guest requires (e.g., 52 bytes), causing memory corruption or panics.
+- **Fix**: Whenever updating `wit/alloy.wit` with new fields, verify that `pkg/wasm/runtime/runtime.go` (and related WASM host implementation files) correctly accounts for the new struct sizes during `cabi_realloc`.
