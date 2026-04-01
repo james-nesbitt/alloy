@@ -174,24 +174,21 @@ func renderMainLayout(gtx layout.Context, th *material.Theme, client *frontend.C
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			msgs := client.Messages()
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					if gui.rootLayout != nil {
+						return renderLayoutNode(gtx, th, gui, gui.rootLayout)
+					}
+					// fallback
 					return drawDashboard(gtx, th, gui)
 				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return material.List(th, list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
-						msg := msgs[i]
-						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							formatted := formatMessage(msg)
-							label := material.Body1(th, formatted)
-							label.TextSize = unit.Sp(16)
-							if msg.Method == "plugin:crashed" || msg.Method == "plugin:load_failed" {
-								label.Color = color.NRGBA{R: 255, G: 50, B: 50, A: 255}
-							} else {
-								label.Color = th.Fg
-							}
-							return label.Layout(gtx)
-						})
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Flexed(0.2, func(gtx layout.Context) layout.Dimensions {
+					return material.List(th, list).Layout(gtx, len(msgs), func(c layout.Context, idx int) layout.Dimensions {
+						msg := msgs[idx]
+						formatted := formatMessage(msg)
+						lbl := material.Body1(th, formatted)
+						lbl.TextSize = unit.Sp(14)
+						return layout.UniformInset(unit.Dp(6)).Layout(c, lbl.Layout)
 					})
 				}),
 			)
@@ -612,6 +609,104 @@ func renderModals(gtx layout.Context, th *material.Theme, client *frontend.Clien
 		})
 	}
 	return layout.Dimensions{}
+}
+
+func renderLayoutNode(gtx layout.Context, th *material.Theme, gui *guiState, node *frontend.LayoutNode) layout.Dimensions {
+	if node == nil {
+		return layout.Dimensions{}
+	}
+
+	if node.Type == "pane" {
+		return renderPaneNode(gtx, th, gui, node)
+	}
+
+	// Split
+	var children []layout.FlexChild
+	for i := range node.Children {
+		child := &node.Children[i]
+		children = append(children, layout.Flexed(float32(child.Weight), func(gtx layout.Context) layout.Dimensions {
+			return renderLayoutNode(gtx, th, gui, child)
+		}))
+	}
+
+	axis := layout.Horizontal
+	if node.Direction == "vertical" {
+		axis = layout.Vertical
+	}
+
+	return layout.Flex{Axis: axis}.Layout(gtx, children...)
+}
+
+func renderPaneNode(gtx layout.Context, th *material.Theme, gui *guiState, p *frontend.LayoutNode) layout.Dimensions {
+	isFocused := p.ID == gui.focusedPaneID
+
+	return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		borderColor := color.NRGBA{R: 120, G: 120, B: 120, A: 255}
+		borderWidth := unit.Dp(1)
+
+		if isFocused {
+			borderColor = color.NRGBA{R: 0, G: 200, B: 255, A: 255}
+			borderWidth = unit.Dp(2)
+		}
+
+		return widget.Border{
+			Color: borderColor,
+			Width: borderWidth,
+		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Stack{}.Layout(gtx,
+				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+					paint.FillShape(gtx.Ops, color.NRGBA{R: 30, G: 30, B: 30, A: 255}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+					return layout.Dimensions{Size: gtx.Constraints.Min}
+				}),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					if p.PluginID != "" {
+						if tile, ok := gui.dashboardTiles[p.PluginID]; ok {
+							return renderWidgetContent(gtx, th, tile)
+						}
+					}
+					// mode specific rendering
+					switch p.Mode {
+					case "dashboard":
+						return drawDashboard(gtx, th, gui)
+					case "chat":
+						return material.Body1(th, "CHAT PANE WIP").Layout(gtx)
+					case "editor", "insert":
+						return material.Body1(th, "EDITOR PANE WIP").Layout(gtx)
+					case "inspector":
+						return material.Body1(th, "INSPECTOR PANE WIP").Layout(gtx)
+					default:
+						return material.Body1(th, "EMPTY PANE").Layout(gtx)
+					}
+				}),
+			)
+		})
+	})
+}
+
+func renderWidgetContent(gtx layout.Context, th *material.Theme, tile frontend.DashboardTile) layout.Dimensions {
+	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						t := material.Body1(th, tile.Title)
+						t.Font.Weight = 700
+						return t.Layout(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						s := material.Caption(th, tile.Status)
+						s.Color = color.NRGBA{R: 150, G: 150, B: 150, A: 255}
+						return s.Layout(gtx)
+					}),
+				)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				content := strings.Join(tile.Content, "\n")
+				return material.Caption(th, content).Layout(gtx)
+			}),
+		)
+	})
 }
 
 func drawDashboard(gtx layout.Context, th *material.Theme, gui *guiState) layout.Dimensions {

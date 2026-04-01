@@ -105,44 +105,39 @@ func TestTuiPaneManagement(t *testing.T) {
 	m.width = 100
 	m.height = 30
 	m.Mode = tui.ModeDashboard
-	m.Panes = []tui.Pane{{Type: tui.ModeDashboard, WidthPct: 1.0}}
-	m.FocusIdx = 0
+	m.RootLayout = &frontend.LayoutNode{ID: "main", Type: "pane", Mode: "dashboard"}
+	m.FocusedPaneID = "main"
 
 	// 1. Vertical split
-	model, _ := m.executeCommand("vsplit")
-	m = model.(Model)
+	m.splitFocusedPane("horizontal")
 
-	if len(m.Panes) != 2 {
-		t.Fatalf("Expected 2 panes after vsplit, got %d", len(m.Panes))
+	panes := tui.GetPanes(m.RootLayout)
+	if len(panes) != 2 {
+		t.Fatalf("Expected 2 panes after split, got %d", len(panes))
 	}
-	if m.Panes[0].WidthPct != 0.5 || m.Panes[1].WidthPct != 0.5 {
-		t.Errorf("Expected equal width split (0.5), got %f and %f", m.Panes[0].WidthPct, m.Panes[1].WidthPct)
+	if panes[0].Weight != 0.5 || panes[1].Weight != 0.5 {
+		t.Errorf("Expected equal width split (0.5), got %f and %f", panes[0].Weight, panes[1].Weight)
 	}
-	if m.FocusIdx != 1 {
-		t.Errorf("Expected new pane to be focused (idx 1), got %d", m.FocusIdx)
-	}
-	if m.Mode != tui.ModeChat {
-		t.Errorf("Expected new pane mode to be ModeChat, got %d", m.Mode)
+	if m.FocusedPaneID != panes[1].ID {
+		t.Errorf("Expected new pane to be focused, got %s", m.FocusedPaneID)
 	}
 
-	// 2. Focus next
-	model, _ = m.executeCommand("focus-next")
+	// 2. Focus next (tab)
+	msg := tea.KeyMsg{Type: tea.KeyTab}
+	model, _ := m.Update(msg)
 	m = model.(Model)
-	if m.FocusIdx != 0 {
-		t.Errorf("Expected focus to wrap to 0, got %d", m.FocusIdx)
+	if m.FocusedPaneID != panes[0].ID {
+		t.Errorf("Expected focus to wrap to first pane, got %s", m.FocusedPaneID)
 	}
 	if m.Mode != tui.ModeDashboard {
 		t.Errorf("Expected mode to switch to ModeDashboard, got %d", m.Mode)
 	}
 
 	// 3. Close pane
-	model, _ = m.executeCommand("close-pane")
-	m = model.(Model)
-	if len(m.Panes) != 1 {
-		t.Fatalf("Expected 1 pane after close-pane, got %d", len(m.Panes))
-	}
-	if m.FocusIdx != 0 {
-		t.Errorf("Expected focus 0, got %d", m.FocusIdx)
+	m.closeFocusedPane()
+	panes = tui.GetPanes(m.RootLayout)
+	if len(panes) != 1 {
+		t.Fatalf("Expected 1 pane after close, got %d", len(panes))
 	}
 }
 
@@ -235,7 +230,7 @@ func TestTuiLayoutApplication(t *testing.T) {
 	m.ready = true
 
 	// 1. Simulate project:opened with custom layout
-	projectPayload := `{"topic":"project:opened","data":{"id":"proj-1","name":"Test Project","layout":{"layout":[{"type":"editor","width_pct":0.7},{"type":"chat","width_pct":0.3}]}}}`
+	projectPayload := `{"topic":"project:opened","data":{"id":"proj-1","name":"Test Project","layout":{"root":{"type":"split","direction":"horizontal","children":[{"id":"p1","type":"pane","mode":"editor","weight":0.7},{"id":"p2","type":"pane","mode":"chat","weight":0.3}]}}}}`
 	msg := api.Message{
 		Sender:  "events",
 		Method:  "project:opened",
@@ -244,18 +239,19 @@ func TestTuiLayoutApplication(t *testing.T) {
 
 	m.processMessage(msg)
 
-	if len(m.Panes) != 2 {
-		t.Fatalf("Expected 2 panes, got %d", len(m.Panes))
+	panes := tui.GetPanes(m.RootLayout)
+	if len(panes) != 2 {
+		t.Fatalf("Expected 2 panes, got %d", len(panes))
 	}
-	if m.Panes[0].Type != tui.ModeEdit || m.Panes[1].Type != tui.ModeChat {
-		t.Errorf("Expected panes [Edit, Chat], got [%d, %d]", m.Panes[0].Type, m.Panes[1].Type)
+	if panes[0].Mode != "editor" || panes[1].Mode != "chat" {
+		t.Errorf("Expected panes [editor, chat], got [%s, %s]", panes[0].Mode, panes[1].Mode)
 	}
 	if m.Mode != tui.ModeEdit {
 		t.Errorf("Expected initial mode to be Edit, got %d", m.Mode)
 	}
 
 	// 2. Simulate workspace:opened with override layout
-	workspacePayload := `{"topic":"workspace:opened","data":{"id":"ws-1","name":"Test Workspace","layout":"{\"layout\":[{\"type\":\"dashboard\",\"width_pct\":1.0}]}"}}`
+	workspacePayload := `{"topic":"workspace:opened","data":{"id":"ws-1","name":"Test Workspace","layout":"{\"root\":{\"id\":\"p3\",\"type\":\"pane\",\"mode\":\"dashboard\",\"weight\":1.0}}"}}`
 	msg = api.Message{
 		Sender:  "events",
 		Method:  "workspace:opened",
@@ -264,11 +260,12 @@ func TestTuiLayoutApplication(t *testing.T) {
 
 	m.processMessage(msg)
 
-	if len(m.Panes) != 1 {
-		t.Fatalf("Expected 1 pane after workspace override, got %d", len(m.Panes))
+	panes = tui.GetPanes(m.RootLayout)
+	if len(panes) != 1 {
+		t.Fatalf("Expected 1 pane after workspace override, got %d", len(panes))
 	}
-	if m.Panes[0].Type != tui.ModeDashboard {
-		t.Errorf("Expected pane mode Dashboard, got %d", m.Panes[0].Type)
+	if panes[0].Mode != "dashboard" {
+		t.Errorf("Expected pane mode dashboard, got %s", panes[0].Mode)
 	}
 	if m.Mode != tui.ModeDashboard {
 		t.Errorf("Expected mode to switch to Dashboard, got %d", m.Mode)

@@ -41,6 +41,7 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 			m.Mode = tui.ModeCommand
 			m.commandInput.Focus()
 		}
+		cmds = append(cmds, m.sendViewStateUpdate())
 
 	case modal.MoveIntent:
 		switch it.Direction {
@@ -106,22 +107,19 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 	case modal.WindowIntent:
 		switch it.Action {
 		case "split-v":
-			// Simple append logic
-			m.Panes = append(m.Panes, tui.Pane{Type: m.Mode, WidthPct: 0.5})
-			// Adjust others? For now just append
+			m.splitFocusedPane("horizontal")
+		case "split-h":
+			m.splitFocusedPane("vertical")
 		case "close":
-			if len(m.Panes) > 1 {
-				m.Panes = append(m.Panes[:m.FocusIdx], m.Panes[m.FocusIdx+1:]...)
-				m.FocusIdx = m.FocusIdx % len(m.Panes)
-				m.Mode = m.Panes[m.FocusIdx].Type
-			}
-		case "focus-left":
-			m.FocusIdx = (m.FocusIdx - 1 + len(m.Panes)) % len(m.Panes)
-			m.Mode = m.Panes[m.FocusIdx].Type
-		case "focus-right":
-			m.FocusIdx = (m.FocusIdx + 1) % len(m.Panes)
-			m.Mode = m.Panes[m.FocusIdx].Type
+			m.closeFocusedPane()
+		case "focus-left", "focus-right", "focus-up", "focus-down":
+			m.navigateFocus(it.Action[6:])
+		case "focus-next":
+			m.navigateFocus("right")
+		case "focus-prev":
+			m.navigateFocus("left")
 		}
+		cmds = append(cmds, m.sendLayoutUpdate(), m.sendViewStateUpdate())
 
 	case modal.BufferIntent:
 		switch it.Action {
@@ -174,23 +172,126 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 				}
 			}
 		case tui.ModeCommand, tui.ModeOmni:
-			// Inject into commandInput
+			input := m.commandInput.Value()
+
+			// Handle Leader mode sequences (single keys when input is empty)
+			if m.isLeader && len(it.Text) == 1 && input == "" {
+				if it.Text == ":" {
+					m.isLeader = false
+					m.breadcrumbs = nil
+					m.commandInput.SetValue(":")
+					m.selectedCmdIdx = 0
+					return m, nil
+				}
+
+				node := m.commandTree.Find(m.breadcrumbs)
+				if node != nil {
+					char := it.Text
+					if child, ok := node.Children[char]; ok {
+						if len(child.Children) == 0 {
+							m.Mode = m.lastMainMode
+							m.isLeader = false
+							m.breadcrumbs = nil
+							m.selectedCmdIdx = 0
+							m.commandInput.Blur()
+							m.commandInput.SetValue("")
+							return m.executeCommand(fmt.Sprintf("%s %s", child.Target, child.Method))
+						} else {
+							m.breadcrumbs = append(m.breadcrumbs, char)
+							m.selectedCmdIdx = 0
+							m.commandInput.SetValue("")
+							return m, nil
+						}
+					}
+				}
+			}
+
+			// Navigation and standard input
+			if it.Text == "down" {
+				filteredCount := len(m.filteredCommands())
+				if filteredCount > 0 {
+					m.selectedCmdIdx = (m.selectedCmdIdx + 1) % filteredCount
+				}
+				return m, nil
+			} else if it.Text == "up" {
+				filteredCount := len(m.filteredCommands())
+				if filteredCount > 0 {
+					m.selectedCmdIdx = (m.selectedCmdIdx - 1 + filteredCount) % filteredCount
+				}
+				return m, nil
+			} else if it.Text == "enter" {
+				filtered := m.filteredCommands()
+				if len(filtered) > 0 && m.selectedCmdIdx >= 0 && m.selectedCmdIdx < len(filtered) {
+					opt := filtered[m.selectedCmdIdx]
+					// Special selection modes (project/workspace list)
+					if m.selectType == tui.SelectProject {
+						m.Mode = m.lastMainMode
+						m.commandInput.Blur()
+						m.selectType = tui.SelectNone
+						m.commandInput.SetValue("")
+						m.isLeader = false
+						return m.executeCommand(fmt.Sprintf("project open %s", opt.Raw))
+					}
+					if m.selectType == tui.SelectWorkspace {
+						m.Mode = m.lastMainMode
+						m.commandInput.Blur()
+						m.selectType = tui.SelectNone
+						m.commandInput.SetValue("")
+						m.isLeader = false
+						return m.executeCommand(fmt.Sprintf("project set-workspace %s", opt.Raw))
+					}
+
+					// Standard command execution from filtered list
+					if len(opt.Params) > 0 {
+						m.Mode = tui.ModeForm
+						m.formTitle = opt.Raw
+						m.formParams = opt.Params
+						m.formValues = make([]string, len(opt.Params))
+						m.formIdx = 0
+						m.formError = ""
+						m.commandInput.SetValue("")
+						m.commandInput.Focus()
+						return m, nil
+					}
+					m.Mode = m.lastMainMode
+					m.commandInput.Blur()
+					m.commandInput.SetValue("")
+					m.breadcrumbs = nil
+					m.isLeader = false
+					return m.executeCommand(opt.Raw)
+				}
+
+				// Global enter fallback
+				rawCmd := m.commandInput.Value()
+				m.commandInput.SetValue("")
+				m.Mode = m.lastMainMode
+				m.isLeader = false
+				m.breadcrumbs = nil
+				return m.executeCommand(rawCmd)
+			} else if it.Text == "backspace" && m.isLeader && input == "" {
+				if len(m.breadcrumbs) > 0 {
+					m.breadcrumbs = m.breadcrumbs[:len(m.breadcrumbs)-1]
+					m.selectedCmdIdx = 0
+					return m, nil
+				} else {
+					m.isLeader = false
+					m.commandInput.SetValue(":")
+					return m, nil
+				}
+			}
+
+			// Normal text injection
 			keyMsg := tea.KeyMsg{Runes: []rune(it.Text), Type: tea.KeyRunes}
-			if it.Text == "enter" {
-				keyMsg = tea.KeyMsg{Type: tea.KeyEnter}
-			} else if it.Text == "backspace" {
+			if it.Text == "backspace" {
 				keyMsg = tea.KeyMsg{Type: tea.KeyBackspace}
 			} else if it.Text == " " {
 				keyMsg = tea.KeyMsg{Runes: []rune(" "), Type: tea.KeySpace}
+			} else if len(it.Text) > 1 {
+				return m, nil
 			}
 			m.commandInput, _ = m.commandInput.Update(keyMsg)
 			if m.Mode == tui.ModeOmni {
 				cmds = append(cmds, m.doOmniSearch(m.commandInput.Value()))
-			} else if m.Mode == tui.ModeCommand && it.Text == "enter" {
-				m.commandInput.SetValue("")
-				m.Mode = m.lastMainMode
-				newModel, cmd := m.executeCommand(m.commandInput.Value())
-				return newModel.(Model), cmd
 			}
 		}
 
@@ -198,7 +299,50 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 		switch it.Verb {
 		case "save":
 			cmds = append(cmds, m.sendBufferUpdate(m.activeBuffer, m.textarea.Value(), false))
+		case "leader-mode":
+			m.lastMainMode = m.Mode
+			m.Mode = tui.ModeCommand
+			m.isLeader = true
+			m.commandInput.SetValue("")
+			m.commandInput.Focus()
+		case "command-mode":
+			m.lastMainMode = m.Mode
+			m.Mode = tui.ModeCommand
+			m.isLeader = false
+			m.commandInput.SetValue(":")
+			m.commandInput.Focus()
+		case "insert-mode":
+			if m.hasCapability("buffer:write") || m.hasCapability("ui:view:editor") {
+				m.Mode = tui.ModeInsert
+				m.textarea.Focus()
+			} else {
+				m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("!! Editor service (buffer) not available."))
+			}
+		case "chat-mode":
+			if m.hasCapability("chat:send") || m.hasCapability("ui:view:chat") {
+				m.Mode = tui.ModeChat
+				m.textarea.Placeholder = "Type message to #" + m.ActiveChannel + "..."
+				m.textarea.Focus()
+			} else {
+				m.messages = append(m.messages, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("!! Chat service not available."))
+			}
+		case "dashboard-mode":
+			m.Mode = tui.ModeDashboard
+			m.isLeader = false
+		case "inspector-mode":
+			m.Mode = tui.ModeInspector
+			m.isLeader = false
+		case "omni-mode":
+			m.lastMainMode = m.Mode
+			m.Mode = tui.ModeOmni
+			m.isLeader = false
+			m.commandInput.SetValue("")
+			m.commandInput.Focus()
+			m.omniResults = nil
+			m.omniSelectedIdx = 0
+			cmds = append(cmds, m.doOmniSearch(""))
 		}
+		cmds = append(cmds, m.sendViewStateUpdate())
 	}
 
 	return m, tea.Batch(cmds...)
@@ -245,8 +389,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mKey := modal.Key{
 			Code:  msg.String(),
 			Alt:   msg.Alt,
-			Ctrl:  msg.Type >= tea.KeyCtrlA && msg.Type <= tea.KeyCtrlZ,
-			Shift: msg.Type == tea.KeyShiftTab, // simplified
+			Ctrl:  msg.Type >= tea.KeyCtrlA && msg.Type <= tea.KeyCtrlZ && msg.Type != tea.KeyTab && msg.Type != tea.KeyEnter && msg.Type != tea.KeyEsc,
+			Shift: msg.Type == tea.KeyShiftTab,
 		}
 
 		// Map special keys to consistent codes
@@ -324,6 +468,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.subscribe("dashboard:widget-updated"),
 					m.subscribe("dashboard:widget-unregistered"),
 					m.subscribe("system:trace"),
+					m.subscribe("system:context-changed"),
 					m.subscribe("component:registered"))
 				m.subscriptions["chat:message"] = true
 				m.subscriptions["chat:direct"] = true
@@ -369,11 +514,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 	}
 
-	// Sync mode with focused pane
-	if len(m.Panes) > 0 && m.FocusIdx < len(m.Panes) {
-		m.Panes[m.FocusIdx].Type = m.Mode
-	}
-
+	// Mode is synced within handlers now
 	return m, tea.Batch(cmds...)
 }
 

@@ -46,6 +46,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
 	projectManifest := flag.String("manifest", "alloy-project.json", "Project manifest file")
+	userConfigPath := flag.String("user-config", filepath.Join(os.Getenv("HOME"), ".alloy", "user-config.json"), "User configuration file")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -125,6 +126,47 @@ func main() {
 	// Create and start IPC server BEFORE loading plugins so tests can connect while loading
 	server := ipc.NewServer(logger, k, tlsConfig)
 
+	// Step: Load User Config
+	if *userConfigPath != "" {
+		if _, err := os.Stat(*userConfigPath); err == nil {
+			userCfg, err := project.LoadUserConfig(*userConfigPath)
+			if err != nil {
+				logger.Error("failed to load user config", "error", err)
+			} else {
+				logger.Info("applying user config", "side-cars", len(userCfg.Sidecars))
+				for _, pc := range userCfg.Sidecars {
+					pluginPath := kernel.ResolvePluginPath(*userConfigPath, pc.Path)
+					logger.Debug("registering side-car plugin", "id", pc.ID)
+
+					pDef := kernel.PluginDef{
+						ID:       pc.ID,
+						Path:     pluginPath,
+						Type:     "wasm",
+						LoadTime: pc.LoadTime,
+					}
+					// Global side-cars are provisioned directly
+					if err := k.Provision([]kernel.PluginDef{pDef}); err != nil {
+						logger.Error("failed to provision side-car", "id", pc.ID, "error", err)
+					}
+				}
+
+				// Push user config to project plugin
+				go func() {
+					time.Sleep(2 * time.Second) // Wait for project plugin to boot
+					userContent, _ := json.Marshal(userCfg)
+					k.RouteMessage(context.Background(), api.Message{
+						ID:      "bootstrap-user-config",
+						Type:    api.TypeRequest,
+						Sender:  "system",
+						Target:  "project",
+						Method:  "project:update-user-config",
+						Payload: userContent,
+					})
+				}()
+			}
+		}
+	}
+
 	// Step: Apply Project Manifest if found
 	if *projectManifest != "" {
 		if _, err := os.Stat(*projectManifest); err == nil {
@@ -135,8 +177,34 @@ func main() {
 				// Translate manifest into kernel commands
 				logger.Info("applying manifest", "project", manifest.Name, "plugins", len(manifest.Plugins))
 
-				// 1. Create the project via API (if plugin exists)
-				// Or skip for now and rely on project plugin
+				// Register the project workspace in the project plugin
+				go func() {
+					time.Sleep(3 * time.Second) // Wait for project plugin to boot
+					wsData, _ := json.Marshal(map[string]interface{}{
+						"id":     manifest.Name,
+						"name":   manifest.Name,
+						"path":   filepath.Dir(*projectManifest),
+						"layout": manifest.Layout,
+					})
+					// Use import to simplify registration from manifest
+					k.RouteMessage(context.Background(), api.Message{
+						ID:      "manifest-import",
+						Type:    api.TypeRequest,
+						Sender:  "system",
+						Target:  "project",
+						Method:  "project:import",
+						Payload: wsData,
+					})
+					// Auto-set the active workspace to the one in the manifest
+					k.RouteMessage(context.Background(), api.Message{
+						ID:      "auto-activate-active",
+						Type:    api.TypeRequest,
+						Sender:  "system",
+						Target:  "project",
+						Method:  "project:set-workspace",
+						Payload: []byte(manifest.Name),
+					})
+				}()
 
 				// 2. Load plugins defined in manifest
 				for _, pc := range manifest.Plugins {

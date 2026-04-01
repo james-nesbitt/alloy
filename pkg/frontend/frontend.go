@@ -51,6 +51,7 @@ type Client struct {
 	onMsg    []func(api.Message)
 	name     string
 	actor    string // The authenticated actor identity
+	context  string // The current active context ID
 }
 
 func NewClient(name, socket string, insecure bool) (*Client, error) {
@@ -119,6 +120,7 @@ func (c *Client) OnMessage(h func(api.Message)) {
 func (c *Client) Send(ctx context.Context, target, method string, payload []byte) (api.Message, error) {
 	c.mu.RLock()
 	actor := c.actor
+	contextID := c.context
 	c.mu.RUnlock()
 
 	msg := api.Message{
@@ -130,9 +132,20 @@ func (c *Client) Send(ctx context.Context, target, method string, payload []byte
 		Method:    method,
 		Payload:   payload,
 		Timestamp: time.Now().Unix(),
+		Metadata:  make(map[string]any),
+	}
+
+	if contextID != "" {
+		msg.Metadata["context"] = contextID
 	}
 
 	return c.ipc.Call(ctx, msg)
+}
+
+func (c *Client) SetContext(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.context = id
 }
 
 func (c *Client) Messages() []api.Message {

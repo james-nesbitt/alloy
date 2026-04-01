@@ -88,15 +88,34 @@
                     return;
                 }
 
-                // Handle Widget Updates
-                if (data.type === 'event' && data.method === 'publish') {
-                    const evt = JSON.parse(data.payload);
-                    if (evt.topic === 'dashboard:widget-registered') {
-                        bridge.registerWidget(evt.data);
+                // Handle published events from the events plugin
+                if (data.type === 'event' && data.sender === 'events') {
+                    const topic = data.method;
+                    const payload = typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload;
+
+                    if (topic === 'dashboard:widget-registered') {
+                        bridge.registerWidget(payload);
                         return;
                     }
-                    if (evt.topic === 'dashboard:widget-updated') {
-                        bridge.updateWidget(data.metadata?.widget_id, evt.data);
+                    if (topic === 'dashboard:widget-updated') {
+                        bridge.updateWidget(data.metadata?.widget_id, payload);
+                        return;
+                    }
+                    if (topic === 'project:opened' || topic === 'workspace:opened') {
+                        const evtData = payload.data || payload;
+                        if (evtData.layout && evtData.layout.root) {
+                            bridge.state.rootLayout = evtData.layout.root;
+                            bridge.renderLayout();
+                        } else if (evtData.Layout && typeof evtData.Layout === 'string') {
+                            // Workspace layout string
+                            try {
+                                const wcfg = JSON.parse(evtData.Layout);
+                                if (wcfg.root) {
+                                    bridge.state.rootLayout = wcfg.root;
+                                    bridge.renderLayout();
+                                }
+                            } catch(e) {}
+                        }
                         return;
                     }
                 }
@@ -444,13 +463,26 @@
 
         registerWidget: (widget) => {
             console.log("Registering widget:", widget.id);
-            const container = document.getElementById('dashboard-widgets');
-            if (!container) return;
+            if (!bridge.state.widgets) bridge.state.widgets = {};
+            bridge.state.widgets[widget.id] = widget;
 
-            if (document.querySelector(`[data-widget-id="${widget.id}"]`)) return;
+            // If we don't have a specific layout, we just append to a default grid
+            if (!bridge.state.rootLayout) {
+                const container = document.getElementById('dashboard');
+                if (!container) return;
 
+                if (document.querySelector(`[data-widget-id="${widget.id}"]`)) return;
+
+                const el = bridge.createWidgetElement(widget);
+                container.appendChild(el);
+            } else {
+                bridge.renderLayout();
+            }
+        },
+
+        createWidgetElement: (widget) => {
             const el = document.createElement('div');
-            el.className = 'bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col space-y-2';
+            el.className = 'bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col space-y-2 h-full';
             el.setAttribute('data-widget-id', widget.id);
             
             const title = document.createElement('h3');
@@ -458,16 +490,59 @@
             title.innerText = widget.title;
             
             const content = document.createElement('div');
-            content.className = 'text-zinc-100 widget-content';
+            content.className = 'text-zinc-100 widget-content overflow-auto flex-grow';
             content.innerText = 'Loading...';
             
             el.appendChild(title);
             el.appendChild(content);
-            container.appendChild(el);
             
             if (widget.content) {
-                bridge.updateWidget(widget.id, widget.content);
+                // ... internal update logic
+                setTimeout(() => bridge.updateWidget(widget.id, widget.content), 10);
             }
+            return el;
+        },
+
+        renderLayout: () => {
+            const container = document.getElementById('dashboard');
+            if (!container || !bridge.state.rootLayout) return;
+
+            // Change dashboard from grid to flex for recursive layout
+            container.className = "flex w-full h-full p-0 gap-0 overflow-hidden";
+            container.innerHTML = "";
+            
+            const rootEl = bridge.renderLayoutNode(bridge.state.rootLayout);
+            container.appendChild(rootEl);
+        },
+
+        renderLayoutNode: (node) => {
+            const el = document.createElement('div');
+            el.style.display = 'flex';
+            el.style.flex = node.weight || 1;
+            el.style.overflow = 'hidden';
+            el.style.boxSizing = 'border-box';
+
+            if (node.type === 'pane') {
+                el.classList.add('p-1');
+                if (node.plugin_id && bridge.state.widgets && bridge.state.widgets[node.plugin_id]) {
+                    el.appendChild(bridge.createWidgetElement(bridge.state.widgets[node.plugin_id]));
+                } else {
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'bg-zinc-950 border border-zinc-800 rounded-lg p-4 flex items-center justify-center text-zinc-600 italic h-full w-full';
+                    placeholder.innerText = `Pane: ${node.mode || 'empty'}`;
+                    el.appendChild(placeholder);
+                }
+                return el;
+            }
+
+            // Split
+            el.style.flexDirection = node.direction === 'vertical' ? 'column' : 'row';
+            if (node.children) {
+                node.children.forEach(child => {
+                    el.appendChild(bridge.renderLayoutNode(child));
+                });
+            }
+            return el;
         }
     };
 

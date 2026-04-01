@@ -27,33 +27,26 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 			displayMsg = fmt.Sprintf("[%s] Project opened: %s", time.Now().Format("15:04:05"), m.ActiveProject.Name)
 
 			// Apply multi-pane layout if defined
-			if len(m.ActiveProject.Layout.Layout) > 0 {
-				newPanes := []tui.Pane{}
-				for _, lp := range m.ActiveProject.Layout.Layout {
-					p := tui.Pane{WidthPct: lp.WidthPct}
-					switch lp.Type {
-					case "dashboard":
-						p.Type = tui.ModeDashboard
-					case "chat":
-						p.Type = tui.ModeChat
-					case "editor":
-						p.Type = tui.ModeEdit
-					default:
-						p.Type = tui.ModeNormal
-					}
-					newPanes = append(newPanes, p)
+			if m.ActiveProject.Layout.Root != nil {
+				m.RootLayout = m.ActiveProject.Layout.Root
+				panes := tui.GetPanes(m.RootLayout)
+				if len(panes) > 0 {
+					m.FocusedPaneID = panes[0].ID
+					// Sync mode with focused pane
+					m.syncModeWithFocusedPane()
 				}
-				m.Panes = newPanes
-				m.FocusIdx = 0
-				m.Mode = m.Panes[0].Type
 			} else {
-				if m.ActiveProject.Layout.DefaultMode == "dashboard" {
-					m.Mode = tui.ModeDashboard
-				} else if m.ActiveProject.Layout.DefaultMode == "chat" {
-					m.Mode = tui.ModeChat
+				mode := "dashboard"
+				if m.ActiveProject.Layout.DefaultMode != "" {
+					mode = m.ActiveProject.Layout.DefaultMode
 				}
-				m.Panes = []tui.Pane{{Type: m.Mode, WidthPct: 1.0}}
-				m.FocusIdx = 0
+				m.RootLayout = &frontend.LayoutNode{
+					ID:   "main-pane",
+					Type: "pane",
+					Mode: mode,
+				}
+				m.FocusedPaneID = "main-pane"
+				m.syncModeWithFocusedPane()
 			}
 		}
 	}
@@ -68,31 +61,98 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 			if event.Data.Layout != "" {
 				var wCfg frontend.WorkspaceConfig
 				if err := json.Unmarshal([]byte(event.Data.Layout), &wCfg); err == nil {
-					if len(wCfg.Layout) > 0 {
-						newPanes := []tui.Pane{}
-						for _, lp := range wCfg.Layout {
-							p := tui.Pane{WidthPct: lp.WidthPct}
-							switch lp.Type {
-							case "dashboard":
-								p.Type = tui.ModeDashboard
-							case "chat":
-								p.Type = tui.ModeChat
-							case "editor":
-								p.Type = tui.ModeEdit
-							default:
-								p.Type = tui.ModeNormal
-							}
-							newPanes = append(newPanes, p)
+					if wCfg.Root != nil {
+						m.RootLayout = wCfg.Root
+						panes := tui.GetPanes(m.RootLayout)
+						if len(panes) > 0 {
+							m.FocusedPaneID = panes[0].ID
+							m.syncModeWithFocusedPane()
+							displayMsg = fmt.Sprintf("[%s] Workspace layout applied: %s", time.Now().Format("15:04:05"), event.Data.Name)
 						}
-						m.Panes = newPanes
-						m.FocusIdx = 0
-						m.Mode = m.Panes[0].Type
-						displayMsg = fmt.Sprintf("[%s] Workspace layout applied: %s", time.Now().Format("15:04:05"), event.Data.Name)
 					}
 				}
 			} else {
 				displayMsg = fmt.Sprintf("[%s] Workspace active: %s", time.Now().Format("15:04:05"), event.Data.Name)
 			}
+			// Load View State if available
+			if event.Data.ViewState != "" {
+				var vs map[string]interface{}
+				if err := json.Unmarshal([]byte(event.Data.ViewState), &vs); err == nil {
+					if id, ok := vs["focused_pane_id"].(string); ok {
+						m.FocusedPaneID = id
+					}
+					if mode, ok := vs["last_mode"].(float64); ok {
+						m.Mode = int(mode)
+					}
+					if ch, ok := vs["active_channel"].(string); ok {
+						m.ActiveChannel = ch
+					}
+					if buf, ok := vs["active_buffer"].(string); ok {
+						m.activeBuffer = buf
+						if m.activeBuffer != "" {
+							cmds = append(cmds, m.fetchBufferContent(m.activeBuffer))
+						}
+					}
+					m.syncModeWithFocusedPane()
+				}
+			}
+		}
+	}
+
+	if msg.Sender == "events" && msg.Method == "system:context-changed" {
+		var event struct {
+			Topic string `json:"topic"`
+			Data  struct {
+				ContextID string `json:"context_id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(msg.Payload, &event); err == nil {
+			// Trigger re-discovery with new context
+			m.client.SetContext(event.Data.ContextID)
+
+			displayMsg = fmt.Sprintf("[%s] Context changed: %s. Refreshing...", time.Now().Format("15:04:05"), event.Data.ContextID)
+
+			// Get composed workspace from project plugin
+			go func() {
+				time.Sleep(200 * time.Millisecond) // Give system time to settle
+				kMsg := api.Message{
+					ID:      "fetch-composed-ws",
+					Type:    api.TypeRequest,
+					Sender:  m.client.Name(),
+					Target:  "project",
+					Method:  "project:get-composed-workspace",
+					Payload: []byte(event.Data.ContextID),
+				}
+				m.client.Send(context.Background(), kMsg.Target, kMsg.Method, kMsg.Payload)
+			}()
+
+			cmds = append(cmds, m.doDiscovery)
+		}
+	}
+
+	if displayMsg == "" && msg.Method == "project:get-composed-workspace-resp" {
+		var resp struct {
+			Workspace  frontend.Workspace `json:"workspace"`
+			UserConfig json.RawMessage    `json:"user_config"`
+			ActiveID   string             `json:"active_id"`
+		}
+		if err := json.Unmarshal(msg.Payload, &resp); err == nil {
+			// Apply layout from workspace
+			if resp.Workspace.Layout != "" {
+				var wCfg frontend.WorkspaceConfig
+				if err := json.Unmarshal([]byte(resp.Workspace.Layout), &wCfg); err == nil {
+					// Apply paney layout logic (duplicated from workspace:opened for now)
+					if wCfg.Root != nil {
+						m.RootLayout = wCfg.Root
+						panes := tui.GetPanes(m.RootLayout)
+						if len(panes) > 0 {
+							m.FocusedPaneID = panes[0].ID
+							m.syncModeWithFocusedPane()
+						}
+					}
+				}
+			}
+			displayMsg = fmt.Sprintf("[%s] Composed workspace loaded: %s", time.Now().Format("15:04:05"), resp.Workspace.Name)
 		}
 	}
 
@@ -291,30 +351,34 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 
 					// DYNAMIC VIEWPORT PART: Every widget registered also becomes a PANE
 					// if we are in a purely dynamic dashboard mode (no set project layout).
-					if len(m.Panes) == 1 && m.Panes[0].Type == tui.ModeDashboard && m.Panes[0].WidgetID == "" {
-						// Transition to split layout for this and future widgets
-						m.Panes = []tui.Pane{}
-						for _, id := range m.TileOrder {
-							m.Panes = append(m.Panes, tui.Pane{
-								Type:     tui.ModeDashboard,
-								WidgetID: id,
+					if m.RootLayout.Type == "pane" && m.RootLayout.Mode == "dashboard" && m.RootLayout.PluginID == "" {
+						// Single initial pane transition to split
+						m.RootLayout = &frontend.LayoutNode{
+							Type:      "split",
+							Direction: "horizontal",
+							Children: []frontend.LayoutNode{
+								{ID: w.ID, Type: "pane", Mode: "dashboard", PluginID: w.ID, Weight: 1.0},
+							},
+						}
+						m.FocusedPaneID = w.ID
+					} else {
+						// Already a split or specific pane, append to first split if it exists
+						if m.RootLayout.Type == "split" {
+							m.RootLayout.Children = append(m.RootLayout.Children, frontend.LayoutNode{
+								ID:       w.ID,
+								Type:     "pane",
+								Mode:     "dashboard",
+								PluginID: w.ID,
+								Weight:   1.0,
 							})
-						}
-					} else if len(m.Panes) > 0 && m.Panes[0].Type == tui.ModeDashboard {
-						// Already in dynamic pane mode, just add
-						m.Panes = append(m.Panes, tui.Pane{
-							Type:     tui.ModeDashboard,
-							WidgetID: w.ID,
-						})
-					}
-
-					// Auto-balance widths
-					if len(m.Panes) > 0 {
-						wPct := 1.0 / float64(len(m.Panes))
-						for i := range m.Panes {
-							m.Panes[i].WidthPct = wPct
+							// Re-balance weights
+							wPct := 1.0 / float64(len(m.RootLayout.Children))
+							for i := range m.RootLayout.Children {
+								m.RootLayout.Children[i].Weight = wPct
+							}
 						}
 					}
+					m.syncModeWithFocusedPane()
 				}
 				displayMsg = fmt.Sprintf("[%s] Dashboard widget active: %s (%s)", time.Now().Format("15:04:05"), w.Title, msg.Sender)
 			}
@@ -424,9 +488,16 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "tab":
-		if len(m.Panes) > 1 {
-			m.FocusIdx = (m.FocusIdx + 1) % len(m.Panes)
-			m.Mode = m.Panes[m.FocusIdx].Type
+		panes := tui.GetPanes(m.RootLayout)
+		if len(panes) > 1 {
+			for i, p := range panes {
+				if p.ID == m.FocusedPaneID {
+					nextIdx := (i + 1) % len(panes)
+					m.FocusedPaneID = panes[nextIdx].ID
+					m.syncModeWithFocusedPane()
+					break
+				}
+			}
 		}
 		return m, nil
 	case "ctrl+p":
@@ -439,13 +510,188 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.omniSelectedIdx = 0
 		return m, m.doOmniSearch("")
 	case "shift+tab":
-		if len(m.Panes) > 1 {
-			m.FocusIdx = (m.FocusIdx - 1 + len(m.Panes)) % len(m.Panes)
-			m.Mode = m.Panes[m.FocusIdx].Type
+		panes := tui.GetPanes(m.RootLayout)
+		if len(panes) > 1 {
+			for i, p := range panes {
+				if p.ID == m.FocusedPaneID {
+					prevIdx := (i - 1 + len(panes)) % len(panes)
+					m.FocusedPaneID = panes[prevIdx].ID
+					m.syncModeWithFocusedPane()
+					break
+				}
+			}
 		}
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *Model) syncModeWithFocusedPane() {
+	node := tui.FindNodeByID(m.RootLayout, m.FocusedPaneID)
+	if node != nil {
+		switch node.Mode {
+		case "dashboard":
+			m.Mode = tui.ModeDashboard
+		case "chat":
+			m.Mode = tui.ModeChat
+		case "editor":
+			m.Mode = tui.ModeEdit
+		case "inspector":
+			m.Mode = tui.ModeInspector
+		case "insert":
+			m.Mode = tui.ModeInsert
+		default:
+			if node.PluginID != "" {
+				m.Mode = tui.ModeDashboard // Default for plugin panes
+			} else {
+				m.Mode = tui.ModeNormal
+			}
+		}
+	}
+}
+
+func (m *Model) splitFocusedPane(direction string) {
+	// Find focused pane node
+	foundNode := tui.FindNodeByID(m.RootLayout, m.FocusedPaneID)
+	if foundNode == nil {
+		return
+	}
+
+	// Create a new unique ID for the new pane
+	newID := fmt.Sprintf("pane-%d", time.Now().UnixNano())
+
+	// Transform this pane into a split or replace it in its parent
+	// For simplicity, we wrap this pane in a new split
+	oldNode := *foundNode
+	foundNode.Type = "split"
+	foundNode.Direction = direction
+	foundNode.PluginID = ""
+	foundNode.Mode = ""
+	foundNode.ID = ""
+	foundNode.Children = []frontend.LayoutNode{
+		oldNode,
+		{
+			ID:     newID,
+			Type:   "pane",
+			Mode:   oldNode.Mode,
+			Weight: 0.5,
+		},
+	}
+	// Re-adjust weight for the original node
+	foundNode.Children[0].Weight = 0.5
+
+	m.FocusedPaneID = newID
+	m.syncModeWithFocusedPane()
+}
+
+func (m *Model) closeFocusedPane() {
+	// Recursive function to remove node and potentially collapse parent
+	var removeNode func(*frontend.LayoutNode) bool
+	removeNode = func(node *frontend.LayoutNode) bool {
+		if node.Type != "split" {
+			return false
+		}
+		for i, child := range node.Children {
+			if child.ID == m.FocusedPaneID {
+				node.Children = append(node.Children[:i], node.Children[i+1:]...)
+				return true
+			}
+			if removeNode(&child) {
+				// If child became empty, remove it? 
+				// For now just check if we need to simplify this split
+				if len(child.Children) == 0 && child.Type == "split" {
+					node.Children = append(node.Children[:i], node.Children[i+1:]...)
+				}
+				return true
+			}
+		}
+		return false
+	}
+
+	if m.RootLayout.ID == m.FocusedPaneID {
+		// Can't close root if only one pane
+		return
+	}
+
+	removeNode(m.RootLayout)
+
+	// If root split has only one child, collapse it
+	if m.RootLayout.Type == "split" && len(m.RootLayout.Children) == 1 {
+		*m.RootLayout = m.RootLayout.Children[0]
+	}
+
+	// Re-focus something
+	panes := tui.GetPanes(m.RootLayout)
+	if len(panes) > 0 {
+		m.FocusedPaneID = panes[0].ID
+		m.syncModeWithFocusedPane()
+	}
+}
+
+func (m *Model) navigateFocus(dir string) {
+	panes := tui.GetPanes(m.RootLayout)
+	if len(panes) <= 1 {
+		return
+	}
+
+	idx := -1
+	for i, p := range panes {
+		if p.ID == m.FocusedPaneID {
+			idx = i
+			break
+		}
+	}
+
+	if idx == -1 {
+		m.FocusedPaneID = panes[0].ID
+		m.syncModeWithFocusedPane()
+		return
+	}
+
+	switch dir {
+	case "left", "up":
+		idx = (idx - 1 + len(panes)) % len(panes)
+	case "right", "down":
+		idx = (idx + 1) % len(panes)
+	}
+
+	m.FocusedPaneID = panes[idx].ID
+	m.syncModeWithFocusedPane()
+}
+
+func (m Model) sendLayoutUpdate() tea.Cmd {
+	if m.RootLayout == nil {
+		return nil
+	}
+
+	payload, _ := json.Marshal(m.RootLayout)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = m.client.Send(ctx, "project", "update-layout", payload)
+		return nil
+	}
+}
+
+func (m Model) sendViewStateUpdate() tea.Cmd {
+	if m.RootLayout == nil {
+		return nil
+	}
+
+	state := map[string]interface{}{
+		"focused_pane_id": m.FocusedPaneID,
+		"last_mode":       m.Mode,
+		"active_channel":  m.ActiveChannel,
+		"active_buffer":   m.activeBuffer,
+	}
+
+	payload, _ := json.Marshal(state)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = m.client.Send(ctx, "project", "update-view-state", payload)
+		return nil
+	}
 }
 
 func (m Model) handleInsertMode(msg tea.KeyMsg, tiCmd tea.Cmd) (tea.Model, tea.Cmd) {
@@ -795,6 +1041,8 @@ func (m Model) executeOmniResult(res OmniResult) (tea.Model, tea.Cmd) {
 		m.activeBuffer = res.Metadata["buffer_id"]
 		m.Mode = tui.ModeEdit
 		return m, m.fetchBufferContent(m.activeBuffer)
+	case "switch-context":
+		return m.executeCommand(fmt.Sprintf("switcher switch %s", res.Metadata["id"]))
 	case "open":
 		// Assume opening a document means loading it into a buffer
 		// We can use buffer:load-file if it exists, or project:open-file

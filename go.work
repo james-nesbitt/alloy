@@ -14,6 +14,7 @@ use (
 	./plugins/wasm/presence
 	./plugins/wasm/project
 	./plugins/wasm/secrets
+	./plugins/wasm/switcher
 	./plugins/wasm/tasks
 	./plugins/wasm/team-presence
 )

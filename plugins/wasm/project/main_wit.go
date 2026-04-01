@@ -25,12 +25,13 @@ type Project struct {
 
 // Workspace represents a discovered workspace.
 type Workspace struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Path     string            `json:"path"`
-	TeamID   string            `json:"team_id,omitempty"`
-	Layout   string            `json:"layout,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Path      string            `json:"path"`
+	TeamID    string            `json:"team_id,omitempty"`
+	Layout    string            `json:"layout,omitempty"`
+	ViewState string            `json:"view_state,omitempty"` // Added for Target 3 persistence
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 // ProjectCreateRequest represents a request to create a project.
@@ -179,7 +180,11 @@ func main() {
 			"group":  "project",
 			"params": "id",
 		}).
-		WithCapability("project:set-security", "Set security roles for a project")
+		WithCapability("project:set-security", "Set security roles for a project").
+		WithCapability("project:update-user-config", "Update global user configuration").
+		WithCapability("project:update-layout", "Update active workspace layout").
+		WithCapability("project:update-view-state", "Update active workspace UI persistence state").
+		WithCapability("project:get-composed-workspace", "Get a unified view of the workspace")
 
 	// Set up message handlers
 	plugin.Handle("project:create", handleCreate)
@@ -194,6 +199,10 @@ func main() {
 	plugin.Handle("project:list-workspaces", handleListWorkspaces)
 	plugin.Handle("project:set-workspace", handleSetWorkspace)
 	plugin.Handle("project:set-security", handleSetSecurity)
+	plugin.Handle("project:update-user-config", handleUpdateUserConfig)
+	plugin.Handle("project:update-layout", handleUpdateLayout)
+	plugin.Handle("project:update-view-state", handleUpdateViewState)
+	plugin.Handle("project:get-composed-workspace", handleGetComposedWorkspace)
 
 	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
@@ -202,6 +211,8 @@ func main() {
 	plugin.Handle("open", handleOpen)
 	plugin.Handle("list-workspaces", handleListWorkspaces)
 	plugin.Handle("set-workspace", handleSetWorkspace)
+	plugin.Handle("update-user-config", handleUpdateUserConfig)
+	plugin.Handle("get-composed-workspace", handleGetComposedWorkspace)
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -228,6 +239,9 @@ func main() {
 		}
 		if activeID, ok := plugin.KVGet("active-workspace-id"); ok {
 			activeWorkspaceID = string(activeID)
+		}
+		if ucData, ok := plugin.KVGet("user-config"); ok {
+			currentUserConfig = ucData
 		}
 		return nil
 	})
@@ -571,6 +585,90 @@ func handleSetSecurity(msg AlloyMessage) AlloyMessage {
 	}
 
 	return plugin.Reply(msg, map[string]string{"status": "applied"})
+}
+
+var (
+	currentUserConfig json.RawMessage
+)
+
+func handleUpdateUserConfig(msg AlloyMessage) AlloyMessage {
+	currentUserConfig = msg.Payload
+	plugin.KVSet("user-config", currentUserConfig)
+	return plugin.Reply(msg, map[string]string{"status": "updated"})
+}
+
+func handleUpdateLayout(msg AlloyMessage) AlloyMessage {
+	if activeWorkspaceID == "" {
+		return plugin.ErrorReply(msg, "no_active_workspace")
+	}
+	ws, ok := workspaces[activeWorkspaceID]
+	if !ok {
+		return plugin.ErrorReply(msg, "workspace_not_found")
+	}
+	ws.Layout = string(msg.Payload)
+	saveWorkspaces()
+
+	plugin.Log("info", "Updated layout for workspace: "+ws.Name)
+	return plugin.Reply(msg, map[string]string{"status": "layout_updated"})
+}
+
+func handleUpdateViewState(msg AlloyMessage) AlloyMessage {
+	if activeWorkspaceID == "" {
+		return plugin.ErrorReply(msg, "no_active_workspace")
+	}
+	ws, ok := workspaces[activeWorkspaceID]
+	if !ok {
+		return plugin.ErrorReply(msg, "workspace_not_found")
+	}
+	ws.ViewState = string(msg.Payload)
+	saveWorkspaces()
+
+	// Optionally broadcast this update to other clients? 
+	// (Avoid for now to prevent loops unless explicit)
+	return plugin.Reply(msg, map[string]string{"status": "view_state_updated"})
+}
+
+func handleGetComposedWorkspace(msg AlloyMessage) AlloyMessage {
+	var wsID string
+	if len(msg.Payload) > 0 {
+		var req struct{ ID string }
+		if err := json.Unmarshal(msg.Payload, &req); err == nil {
+			wsID = req.ID
+		} else {
+			wsID = string(msg.Payload)
+		}
+	}
+	if wsID == "" {
+		wsID = activeWorkspaceID
+	}
+
+	ws, ok := workspaces[wsID]
+	if !ok {
+		return plugin.ErrorReply(msg, "workspace_not_found")
+	}
+
+	// Fetch ALL plugins metadata from host to find matches
+	metaResp := plugin.Call(AlloyMessage{
+		Id:      "get-plugin-meta-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "command-manager:discover",
+		Sender:  "project",
+		Target:  Some("command-manager"),
+	})
+
+	var discovery struct {
+		Targets []struct{ ID string } `json:"targets"`
+	}
+	json.Unmarshal(metaResp.Payload, &discovery)
+	
+	// Simplify: just return the workspace and user config for the frontend to compose
+	// Or we can do it here if we want to follow the "Composition Engine" pattern
+	
+	return plugin.Reply(msg, map[string]interface{}{
+		"workspace":   ws,
+		"user_config": currentUserConfig,
+		"active_id":   activeWorkspaceID,
+	})
 }
 
 // saveProjects saves all projects to persistent storage.

@@ -156,11 +156,39 @@ func run(w *app.Window, client *frontend.Client) error {
 					var p frontend.Project
 					if err := json.Unmarshal(ev.Data, &p); err == nil {
 						gui.activeProject = &p
+						if p.Layout.Root != nil {
+							gui.rootLayout = p.Layout.Root
+						} else {
+							mode := p.Layout.DefaultMode
+							if mode == "" {
+								mode = "dashboard"
+							}
+							gui.rootLayout = &frontend.LayoutNode{
+								ID:   "main-pane",
+								Type: "pane",
+								Mode: mode,
+							}
+							gui.focusedPaneID = "main-pane"
+						}
 					}
-				case "workspace:set":
+				case "workspace:set", "workspace:opened":
 					var ws frontend.Workspace
 					if err := json.Unmarshal(ev.Data, &ws); err == nil {
 						gui.activeWorkspace = &ws
+						if ws.Layout != "" {
+							var wCfg frontend.WorkspaceConfig
+							if err := json.Unmarshal([]byte(ws.Layout), &wCfg); err == nil && wCfg.Root != nil {
+								gui.rootLayout = wCfg.Root
+							}
+						}
+					}
+				case "system:context-changed":
+					var data struct {
+						ContextID string `json:"context_id"`
+					}
+					if err := json.Unmarshal(ev.Data, &data); err == nil {
+						client.SetContext(data.ContextID)
+						discoverCh <- true // Trigger immediate re-discovery
 					}
 				}
 			}

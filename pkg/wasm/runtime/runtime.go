@@ -872,7 +872,7 @@ func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, 
 				mod.Memory().WriteUint32Le(ptr+4, uint32(len(s)))
 			}
 			mod.Memory().WriteUint32Le(resultPtr, 1)
-			bufPtr := resultPtr + 4
+			bufPtr := resultPtr + 8
 			writeStr(bufPtr, b.GetID())
 			writeStr(bufPtr+8, b.GetName())
 			data := b.GetData()
@@ -908,7 +908,7 @@ func (r *Runtime) internalReadBuffer(ctx context.Context, mod wazeroapi.Module, 
 		mod.Memory().WriteUint32Le(ptr+4, uint32(len(s)))
 	}
 	mod.Memory().WriteUint32Le(resultPtr, 1)
-	bufPtr := resultPtr + 4
+	bufPtr := resultPtr + 8
 	writeStr(bufPtr, buf.ID)
 	writeStr(bufPtr+8, buf.Name)
 	cRes, _ := alloc.Call(ctx, 0, 0, 1, uint64(len(buf.Content)))

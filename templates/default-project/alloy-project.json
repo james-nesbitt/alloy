@@ -1,0 +1,19 @@
+{
+  "id": "alloy-default",
+  "name": "Default Project",
+  "description": "Standard Alloy Project Template",
+  "version": "0.9.0",
+  "plugins": [
+    { "id": "project", "path": "project.wasm", "load": "boot" },
+    { "id": "ai", "path": "ai.wasm", "load": "boot" },
+    { "id": "buffer", "path": "buffer.wasm", "load": "boot" },
+    { "id": "omni-palette", "path": "omni-palette.wasm", "load": "boot" }
+  ],
+  "layout": {
+    "default_mode": "dashboard",
+    "root": {
+      "type": "pane",
+      "mode": "dashboard"
+    }
+  }
+}

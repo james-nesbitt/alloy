@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/james-nesbitt/alloy/pkg/frontend"
 	"github.com/james-nesbitt/alloy/pkg/frontend/tui"
 )
 
@@ -73,34 +74,7 @@ func (m Model) View() string {
 		workingHeight = (m.height * 2) / 3
 	}
 
-	if len(m.Panes) > 1 {
-		var views []string
-		for i, p := range m.Panes {
-			paneWidth := int(float64(m.width) * p.WidthPct)
-			if i == len(m.Panes)-1 {
-				// Fill remaining width
-				used := 0
-				for j := 0; j < i; j++ {
-					used += int(float64(m.width) * m.Panes[j].WidthPct)
-				}
-				paneWidth = m.width - used
-			}
-
-			// Add visual border for focused pane
-			style := lipgloss.NewStyle().Width(paneWidth).Height(workingHeight)
-			if i == m.FocusIdx {
-				style = style.Border(lipgloss.DoubleBorder(), false, true, false, true).BorderForeground(lipgloss.Color("62"))
-			} else {
-				style = style.Border(lipgloss.NormalBorder(), false, true, false, true).BorderForeground(lipgloss.Color("240"))
-			}
-
-			content := m.renderPaneContent(p, paneWidth-2, workingHeight)
-			views = append(views, style.Render(content))
-		}
-		mainView = lipgloss.JoinHorizontal(lipgloss.Top, views...)
-	} else {
-		mainView = m.renderPaneContent(m.Panes[0], m.width, workingHeight)
-	}
+	mainView = m.renderLayoutNode(m.RootLayout, m.width, workingHeight)
 
 	view := lipgloss.JoinVertical(lipgloss.Left,
 		mainView,
@@ -302,9 +276,78 @@ func (m Model) omniPaletteView() string {
 	return paletteStyle.Render(m.omniList.View())
 }
 
-func (m Model) renderPaneContent(p tui.Pane, width int, height int) string {
-	if p.WidgetID != "" {
-		if tile, ok := m.DashboardTiles[p.WidgetID]; ok {
+func (m Model) renderLayoutNode(node *frontend.LayoutNode, width int, height int) string {
+	if node == nil {
+		return ""
+	}
+
+	if node.Type == "pane" {
+		isFocused := (node.ID == m.FocusedPaneID)
+
+		// Border adjustment
+		style := lipgloss.NewStyle().Width(width).Height(height)
+		contentWidth := width
+		contentHeight := height
+
+		if isFocused {
+			style = style.Border(lipgloss.DoubleBorder(), false, true, false, true).BorderForeground(lipgloss.Color("62"))
+			contentWidth -= 2
+		} else {
+			style = style.Border(lipgloss.NormalBorder(), false, true, false, true).BorderForeground(lipgloss.Color("240"))
+			contentWidth -= 2
+		}
+
+		content := m.renderPaneNode(node, contentWidth, contentHeight)
+		return style.Render(content)
+	}
+
+	// It's a split
+	var views []string
+	if node.Direction == "horizontal" {
+		totalWeight := 0.0
+		for _, child := range node.Children {
+			totalWeight += child.Weight
+		}
+		if totalWeight == 0 {
+			totalWeight = 1.0
+		}
+
+		usedWidth := 0
+		for i, child := range node.Children {
+			childWidth := int(float64(width) * (child.Weight / totalWeight))
+			if i == len(node.Children)-1 {
+				childWidth = width - usedWidth
+			}
+			usedWidth += childWidth
+			views = append(views, m.renderLayoutNode(&child, childWidth, height))
+		}
+		return lipgloss.JoinHorizontal(lipgloss.Top, views...)
+	} else {
+		// Vertical split
+		totalWeight := 0.0
+		for _, child := range node.Children {
+			totalWeight += child.Weight
+		}
+		if totalWeight == 0 {
+			totalWeight = 1.0
+		}
+
+		usedHeight := 0
+		for i, child := range node.Children {
+			childHeight := int(float64(height) * (child.Weight / totalWeight))
+			if i == len(node.Children)-1 {
+				childHeight = height - usedHeight
+			}
+			usedHeight += childHeight
+			views = append(views, m.renderLayoutNode(&child, width, childHeight))
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, views...)
+	}
+}
+
+func (m Model) renderPaneNode(p *frontend.LayoutNode, width int, height int) string {
+	if p.PluginID != "" {
+		if tile, ok := m.DashboardTiles[p.PluginID]; ok {
 			return lipgloss.NewStyle().Width(width).Height(height).Render(
 				lipgloss.JoinVertical(lipgloss.Left,
 					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render(" "+tile.Title),
@@ -315,18 +358,31 @@ func (m Model) renderPaneContent(p tui.Pane, width int, height int) string {
 		}
 	}
 
-	paneType := p.Type
-	if paneType == tui.ModeInsert || paneType == tui.ModeChat || paneType == tui.ModeEdit {
+	mode := tui.ModeNormal
+	switch p.Mode {
+	case "dashboard":
+		mode = tui.ModeDashboard
+	case "chat":
+		mode = tui.ModeChat
+	case "editor":
+		mode = tui.ModeEdit
+	case "inspector":
+		mode = tui.ModeInspector
+	case "insert":
+		mode = tui.ModeInsert
+	}
+
+	if mode == tui.ModeInsert || mode == tui.ModeChat || mode == tui.ModeEdit {
 		m.textarea.SetWidth(width)
 		m.textarea.SetHeight(height)
 		return m.textarea.View()
-	} else if paneType == tui.ModeDashboard {
+	} else if mode == tui.ModeDashboard {
 		oldW, oldH := m.width, m.height
 		m.width, m.height = width, height+3
 		view := m.dashboardView()
 		m.width, m.height = oldW, oldH
 		return view
-	} else if paneType == tui.ModeInspector {
+	} else if mode == tui.ModeInspector {
 		m.inspectorVp.Width = width
 		m.inspectorVp.Height = height
 		return m.inspectorVp.View()

@@ -13,20 +13,37 @@ type DashboardTile struct {
 }
 
 type Workspace struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Path     string            `json:"path"`
-	TeamID   string            `json:"team_id,omitempty"`
-	Layout   string            `json:"layout,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Path      string            `json:"path"`
+	TeamID    string            `json:"team_id,omitempty"`
+	Layout    string            `json:"layout,omitempty"`
+	ViewState string            `json:"view_state,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+type ViewState struct {
+	PaneID    string            `json:"pane_id,omitempty"`
+	ScrollX   int               `json:"scroll_x,omitempty"`
+	ScrollY   int               `json:"scroll_y,omitempty"`
+	ActiveTab int               `json:"active_tab,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 type WorkspaceConfig struct {
-	DefaultMode string `json:"default_mode"`
-	Layout      []struct {
-		Type     string  `json:"type"` // "dashboard", "chat", "editor", "status"
-		WidthPct float64 `json:"width_pct"`
-	} `json:"layout"`
+	DefaultMode string               `json:"default_mode"`
+	Root        *LayoutNode          `json:"root,omitempty"`
+	Views       map[string]ViewState `json:"views,omitempty"` // Map of PaneID -> ViewState
+}
+
+type LayoutNode struct {
+	ID        string       `json:"id,omitempty"`        // Unique identifier
+	Type      string       `json:"type"`                // "split" or "pane"
+	Direction string       `json:"direction,omitempty"` // "horizontal" or "vertical"
+	Weight    float64      `json:"weight,omitempty"`    // Ratio (e.g., 0.5)
+	Children  []LayoutNode `json:"children,omitempty"`  // Nested nodes
+	PluginID  string       `json:"plugin_id,omitempty"` // For "pane" type
+	Mode      string       `json:"mode,omitempty"`      // For "pane" (dashboard, chat, etc.)
 }
 
 type Project struct {

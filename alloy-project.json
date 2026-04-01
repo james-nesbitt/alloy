@@ -1,0 +1,20 @@
+{
+  "id": "alloy-core",
+  "name": "Alloy Core",
+  "description": "Primary development workspace for Alloy",
+  "version": "0.10.0",
+  "plugins": [
+    { "id": "project", "path": "project.wasm", "load": "boot" },
+    { "id": "ai", "path": "ai.wasm", "load": "boot" },
+    { "id": "buffer", "path": "buffer.wasm", "load": "boot" },
+    { "id": "omni-palette", "path": "omni-palette.wasm", "load": "boot" },
+    { "id": "secrets", "path": "secrets.wasm", "load": "lazy" }
+  ],
+  "layout": {
+    "default_mode": "dashboard",
+    "root": {
+      "type": "pane",
+      "mode": "dashboard"
+    }
+  }
+}

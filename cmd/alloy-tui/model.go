@@ -98,8 +98,8 @@ type Model struct {
 	remoteCursors      map[string]tui.Cursor
 
 	// Multi-pane state
-	Panes    []tui.Pane
-	FocusIdx int
+	RootLayout    *frontend.LayoutNode
+	FocusedPaneID string
 
 	startupTicks int
 }
@@ -164,6 +164,57 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 	}
 	engine := modal.NewEngine(driver)
 
+	// Alloy Customizations
+	driver.Customize(modal.ModeNormal, " ", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "leader-mode"}
+	})
+	driver.Customize(modal.ModeNormal, ":", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "command-mode"}
+	})
+	driver.Customize(modal.ModeNormal, "i", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "insert-mode"}
+	})
+	driver.Customize(modal.ModeNormal, "c", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "chat-mode"}
+	})
+	driver.Customize(modal.ModeNormal, "d", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "dashboard-mode"}
+	})
+	driver.Customize(modal.ModeNormal, "x", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "inspector-mode"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+p", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "omni-mode"}
+	})
+
+	driver.Customize(modal.ModeNormal, "tab", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "focus-next"}
+	})
+	driver.Customize(modal.ModeNormal, "shift+tab", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "focus-prev"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w v", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "split-v"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w s", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "split-h"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w q", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "close"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w h", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "focus-left"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w l", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "focus-right"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w k", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "focus-up"}
+	})
+	driver.Customize(modal.ModeNormal, "ctrl+w j", func(s *modal.State) modal.Intent {
+		return modal.WindowIntent{Action: "focus-down"}
+	})
+
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Universal Search"
 	l.SetShowHelp(false)
@@ -187,9 +238,11 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 		width:          80,
 		height:         24,
 		ready:          false,
-		Panes: []tui.Pane{
-			{Type: tui.ModeDashboard, WidthPct: 1.0},
+		RootLayout: &frontend.LayoutNode{
+			ID:   "main-pane",
+			Type: "pane",
+			Mode: "dashboard",
 		},
-		FocusIdx: 0,
+		FocusedPaneID: "main-pane",
 	}
 }

@@ -72,7 +72,7 @@ func TestAIDirectBufferInteraction(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// 1. Create a buffer
-	frontendCh := make(chan api.Message, 10)
+	frontendCh := make(chan api.Message, 100)
 	k.RegisterFrontend("test-user", frontendCh)
 
 	createMsg := api.Message{
@@ -86,18 +86,25 @@ func TestAIDirectBufferInteraction(t *testing.T) {
 	go k.RouteMessage(context.Background(), createMsg)
 
 	var bufferID string
-	select {
-	case resp := <-frontendCh:
-		var buf struct {
-			ID string `json:"id"`
+	timeout := time.After(5 * time.Second)
+	for bufferID == "" {
+		select {
+		case resp := <-frontendCh:
+			if resp.ID == "req-create-buf-resp" {
+				var buf struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(resp.Payload, &buf); err != nil {
+					t.Fatal(err)
+				}
+				bufferID = buf.ID
+				t.Logf("Created buffer: %s", bufferID)
+			} else {
+				t.Logf("Skipping unrelated message: %s", resp.ID)
+			}
+		case <-timeout:
+			t.Fatal("Timeout waiting for buffer creation")
 		}
-		if err := json.Unmarshal(resp.Payload, &buf); err != nil {
-			t.Fatal(err)
-		}
-		bufferID = buf.ID
-		t.Logf("Created buffer: %s", bufferID)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Timeout waiting for buffer creation")
 	}
 
 	// 2. Request summarization of that buffer from the AI plugin
@@ -111,26 +118,30 @@ func TestAIDirectBufferInteraction(t *testing.T) {
 	}
 	go k.RouteMessage(context.Background(), summarizeMsg)
 
-	select {
-	case resp := <-frontendCh:
-		if resp.ID != "req-summarize-resp" {
-			t.Errorf("Unexpected response ID: %s", resp.ID)
-		}
-		var aiResp struct {
-			Response string `json:"response"`
-		}
-		if err := json.Unmarshal(resp.Payload, &aiResp); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("AI Response: %s", aiResp.Response)
+	done := false
+	timeout = time.After(10 * time.Second)
+	for !done {
+		select {
+		case resp := <-frontendCh:
+			if resp.ID == "req-summarize-resp" {
+				var aiResp struct {
+					Response string `json:"response"`
+				}
+				if err := json.Unmarshal(resp.Payload, &aiResp); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("AI Response: %s", aiResp.Response)
 
-		// The mock provider in AI plugin currently returns "Mock AI response with system context ... to: Summarize..."
-		// or just "Mock AI response to: Summarize..." if no context
-		if aiResp.Response == "" {
-			t.Fatal("AI response empty")
+				if aiResp.Response == "" {
+					t.Fatal("AI response empty")
+				}
+				done = true
+			} else {
+				t.Logf("Skipping unrelated message: %s", resp.ID)
+			}
+		case <-timeout:
+			t.Fatal("Timeout waiting for AI summarization (direct interaction)")
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Timeout waiting for AI summarization (direct interaction)")
 	}
 
 	t.Log("AI Direct Buffer Interaction test passed!")

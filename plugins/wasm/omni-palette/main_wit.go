@@ -204,7 +204,55 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 		}
 	}
 
-	// 3. Query Knowledge Graph (Indexer) if available
+	// 3. Get Workspaces/Projects
+	wsResp := plugin.Call(AlloyMessage{
+		Id:      fmt.Sprintf("omni-ws-%d", time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "project:list-workspaces",
+		Sender:  "omni-palette",
+		Target:  Some("project"),
+		Payload: []byte("{}"),
+	})
+
+	if wsResp.Method != "error" && len(wsResp.Payload) > 0 {
+		var wsList struct {
+			Workspaces []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"workspaces"`
+		}
+		if err := json.Unmarshal(wsResp.Payload, &wsList); err == nil {
+			for _, ws := range wsList.Workspaces {
+				score := 0.0
+				name := strings.ToLower(ws.Name)
+
+				if query == "" {
+					score = 0.3
+				} else if strings.Contains(name, query) {
+					score += 15.0 // High priority for context switching
+					if strings.HasPrefix(name, query) {
+						score += 5.0
+					}
+				}
+
+				if score > 0 {
+					results = append(results, OmniResult{
+						ID:          ws.ID,
+						Title:       ws.Name,
+						Description: "Switch to project context",
+						Type:        "project",
+						Score:       score,
+						Metadata: map[string]string{
+							"action": "switch-context",
+							"id":     ws.ID,
+						},
+					})
+				}
+			}
+		}
+	}
+
+	// 4. Query Knowledge Graph (Indexer) if available
 	idxSearchReq := IndexSearchRequest{Query: req.Query, Limit: req.Limit}
 	payload, _ := json.Marshal(idxSearchReq)
 	

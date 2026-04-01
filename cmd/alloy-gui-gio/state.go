@@ -49,6 +49,8 @@ type guiState struct {
 	dashboardTiles  map[string]frontend.DashboardTile
 	tileOrder       []string
 	frequencies     map[string]int
+	rootLayout      *frontend.LayoutNode
+	focusedPaneID   string
 }
 
 type OmniResult struct {

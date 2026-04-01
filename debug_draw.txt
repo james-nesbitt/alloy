@@ -1,0 +1,21 @@
+					}
+					// fallback
+					return drawDashboard(gtx, th, gui)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Flexed(0.2, func(gtx layout.Context) layout.Dimensions {
+					return material.List(th, list).Layout(gtx, len(msgs), func(gtx layout.Context, i int) layout.Dimensions {
+						msg := msgs[i]
+						return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							formatted := formatMessage(msg)
+							label := material.Body1(th, formatted)
+							label.TextSize = unit.Sp(14)
+							if msg.Method == "plugin:crashed" || msg.Method == "plugin:load_failed" {
+								label.Color = color.NRGBA{R: 255, G: 50, B: 50, A: 255}
+							} else {
+								label.Color = th.Fg
+							}
+							return label.Layout(gtx)
+						})
+					})
+				}),
