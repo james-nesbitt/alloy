@@ -58,7 +58,7 @@ func NewManager(
 	}, nil
 }
 
-// LoadPlugin loads a WASM plugin with resource limits.
+// LoadPlugin loads a WASM plugin with resource limits. (Phase 10)
 func (m *Manager) LoadPlugin(
 	ctx context.Context,
 	id string,
@@ -66,6 +66,7 @@ func (m *Manager) LoadPlugin(
 	maxMemoryMB uint32,
 	msgPerSec int,
 	caps []api.Capability,
+	background bool,
 ) error {
 	// Load the plugin in the runtime
 	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps)
@@ -73,7 +74,7 @@ func (m *Manager) LoadPlugin(
 		return err
 	}
 
-	// Create the plugin instance
+	// Create the plugin instance (Phase 10)
 	plugin := &PluginInstance{
 		ID:           id,
 		Instance:     instance,
@@ -82,6 +83,7 @@ func (m *Manager) LoadPlugin(
 		Metadata: api.PluginMetadata{
 			ID:           id,
 			Capabilities: caps,
+			Background:   background,
 		},
 	}
 
@@ -146,6 +148,20 @@ func (m *Manager) GetPluginCapabilities(pluginID string) ([]api.Capability, bool
 }
 
 // GetPluginStatus gets the status of a plugin.
+// GetPluginMetadata gets the metadata of a plugin.
+func (m *Manager) GetPluginMetadata(pluginID string) (api.PluginMetadata, bool) {
+	m.mu.RLock()
+	plugin, ok := m.plugins[pluginID]
+	m.mu.RUnlock()
+
+	if ok {
+		return plugin.Metadata, true
+	}
+
+	return api.PluginMetadata{}, false
+}
+
+// GetPluginStatus gets the status of a plugin.
 func (m *Manager) GetPluginStatus(pluginID string) (runtime.Status, bool) {
 	m.mu.RLock()
 	plugin, ok := m.plugins[pluginID]
@@ -159,6 +175,7 @@ func (m *Manager) GetPluginStatus(pluginID string) (runtime.Status, bool) {
 }
 
 // DiscoverPlugins finds plugins that provide a specific capability.
+// DiscoveryPlugins finds plugins that provide a specific capability (or satisfy an intent).
 func (m *Manager) DiscoverPlugins(capabilityMethod string) []api.PluginMetadata {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -166,11 +183,32 @@ func (m *Manager) DiscoverPlugins(capabilityMethod string) []api.PluginMetadata 
 	var results []api.PluginMetadata
 
 	for _, plugin := range m.plugins {
+		matched := false
 		for _, cap := range plugin.Metadata.Capabilities {
 			if cap.Method == capabilityMethod {
-				results = append(results, plugin.Metadata)
+				matched = true
 				break
 			}
+			for _, intent := range cap.Intents {
+				if intent == capabilityMethod {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+		if !matched {
+			for _, intent := range plugin.Metadata.Intents {
+				if intent == capabilityMethod {
+					matched = true
+					break
+				}
+			}
+		}
+		if matched {
+			results = append(results, plugin.Metadata)
 		}
 	}
 

@@ -49,6 +49,7 @@ type Kernel struct {
 	wasmManager *wasm.Manager
 	storage     storage.StateStore
 	dataDir     string
+	intents     *IntentBroker
 
 	// telemetry
 	telemetry *Telemetry
@@ -100,6 +101,7 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	}
 
 	k.buffers = NewBufferManager(logger, dataDir)
+	k.intents = NewIntentBroker(logger, k.RouteMessage)
 
 	// Create the WASM manager
 	wm, err := wasm.NewManager(logger, storage, dataDir, k.buffers, k.RouteMessage, k.HandleMessageSync)
@@ -525,7 +527,7 @@ func (k *Kernel) lazyLoadPlugin(ctx context.Context, pluginID string) error {
 	return nil
 }
 
-// RegisterPlugin attaches an active plugin to the kernel.
+// RegisterPlugin attaches an active plugin to the kernel. (Phase 10)
 func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	id := p.ID()
 	k.mu.Lock()
@@ -533,7 +535,7 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	// Skip re-registration for core plugins
 	if existing, ok := k.plugins[id]; ok && existing != nil {
 		switch id {
-		case "events", "command-manager", "wasm-manager", "iam", "health", "logger", "kv", "storage", "network", "cache", "doc":
+		case "events", "command-manager", "wasm-manager", "iam", "health", "logger", "kv", "storage", "network", "cache", "doc", "widget-manager":
 			k.mu.Unlock()
 			return
 		}
@@ -541,25 +543,57 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 		k.telemetry.PluginCountChange(context.Background(), 1)
 	}
 
-	k.plugins[id] = p
-	k.metadata[id] = api.PluginMetadata{
-		ID:           id,
-		Capabilities: p.Capabilities(),
+	status := "active" // Default status
+	if pstatus, ok := k.wasmManager.GetPluginStatus(id); ok {
+		status = fmt.Sprintf("%v", pstatus)
 	}
 
+	k.plugins[id] = p
+	caps := p.Capabilities()
+	var intents []string
+	for _, cap := range caps {
+		intents = append(intents, cap.Intents...)
+	}
+
+	// Try to get background status/intents from p if it's a witPluginWrapper or implements background interface (Phase 10)
+	background := false
+	if _, ok := p.(*witPluginWrapper); ok {
+		if meta, ok := k.wasmManager.GetPluginMetadata(id); ok {
+			background = meta.Background // Wasm Manager holds the metadata from Instance.Metadata()
+			if len(meta.Intents) > 0 {
+				intents = meta.Intents // Use explicit aggregated intents if available
+			}
+		}
+	} else if ba, ok := p.(interface{ IsBackground() bool }); ok {
+		background = ba.IsBackground()
+	}
+
+	k.metadata[id] = api.PluginMetadata{
+		ID:           id,
+		Capabilities: caps,
+		Intents:      intents,
+		Background:   background,
+	}
+	k.mu.Unlock() // Unlock before intent registration if it needs k.mu (unlikely but safe)
+
+	// Metadata registered in the intent broker (Phase 10)
+	k.intents.Register(id, intents)
+
+	k.mu.Lock() // Re-lock for capability map update
 	// Update capability map
-	for _, cap := range p.Capabilities() {
+	for _, cap := range caps {
 		if cap.Method != "" {
 			k.capabilityMap[cap.Method] = id
 		}
 	}
-
 	// Automatically register if it implements Interceptor
 	if i, ok := p.(api.Interceptor); ok {
 		k.interceptors = append(k.interceptors, i)
 		k.logger.Info("interceptor registered", "plugin_id", p.ID())
 	}
 	k.mu.Unlock()
+
+	k.logger.Info("plugin registered", "plugin_id", id, "background", background)
 
 	k.logger.Info("plugin registered", "plugin_id", id)
 
@@ -582,7 +616,12 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	}
 }
 
-// RegisterMetadata describes a plugin to the kernel without loading it yet.
+// DispatchIntent dispatches an intent to be routed by the kernel (Phase 10)
+func (k *Kernel) DispatchIntent(ctx context.Context, intent api.Intent) error {
+	return k.intents.Dispatch(ctx, intent)
+}
+
+// RegisterMetadata describes a plugin to the kernel without loading it yet. (Phase 10)
 func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoader) {
 	k.mu.Lock()
 	k.metadata[info.ID] = info
@@ -594,13 +633,18 @@ func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoad
 	}
 	k.mu.Unlock()
 
+	// Register intents in broker for lazy-loading lookup (optional if broker only handles loaded plugins, but good for discovery)
+	k.intents.Register(info.ID, info.Intents)
+
 	k.logger.Info("plugin metadata registered", "plugin_id", info.ID)
 
 	go func() {
-		metaData, _ := json.Marshal(map[string]any{
-			"id":           info.ID,
-			"type":         "plugin-meta",
-			"capabilities": info.Capabilities,
+		metaData, _ := json.Marshal(api.Registration{
+			ID:           info.ID,
+			Type:         "plugin-meta",
+			Capabilities: info.Capabilities,
+			Intents:      info.Intents,
+			Background:   info.Background,
 		})
 		k.events.Publish(context.Background(), "component:registered", "kernel", metaData)
 	}()
@@ -693,6 +737,17 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 			Payload:   []byte(`{"status":"pong"}`),
 			Timestamp: time.Now().Unix(),
 		})
+	case "intent:dispatch":
+		var intent api.Intent
+		if err := json.Unmarshal(msg.Payload, &intent); err == nil {
+			if intent.ID == "" {
+				intent.ID = msg.ID
+			}
+			if intent.Sender == "" {
+				intent.Sender = msg.Sender
+			}
+			k.intents.Dispatch(ctx, intent)
+		}
 	case "discovery:list", "list":
 		msg.Target = "command-manager"
 		k.RouteMessage(ctx, msg)
@@ -812,6 +867,7 @@ type wasmLoader struct {
 	maxMemoryMB  uint32
 	msgPerSecond int
 	capabilities []api.Capability
+	background   bool
 }
 
 func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, error) {
@@ -830,7 +886,7 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 		l.msgPerSecond = 1000
 	}
 
-	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities); err != nil {
+	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities, l.background); err != nil {
 		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
 	}
 
@@ -844,7 +900,8 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 
 // WIT/WASM helpers
 
-func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability) error {
+// RegisterWASMPluginAtScale registers a WASM plugin with the kernel. (Phase 10)
+func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool) error {
 	plugin := &witPluginWrapper{
 		id:      pluginID,
 		manager: k.wasmManager,
@@ -852,10 +909,11 @@ func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, ma
 	}
 
 	k.RegisterPlugin(plugin)
-	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps)
-} // RegisterWASMPlugin registers a WASM plugin with default limits.
+	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps, background)
+}
+// RegisterWASMPlugin registers a WASM plugin with default limits. (Phase 10)
 func (k *Kernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
-	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps)
+	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps, false)
 }
 
 // ResolvePluginPath attempts to find the WASM file relative to several well-known locations.
@@ -970,6 +1028,7 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 			Path         string           `json:"path"`
 			MaxMemoryMB  uint32           `json:"max_memory_mb"`
 			Capabilities []api.Capability `json:"capabilities"`
+			Background   bool             `json:"background"` // Phase 10
 		}
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
 			return api.Message{}, err
@@ -978,7 +1037,7 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 		if err != nil {
 			return api.Message{}, err
 		}
-		err = w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, 1000, req.Capabilities)
+		err = w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, 1000, req.Capabilities, req.Background)
 		if err != nil {
 			return api.Message{}, err
 		}

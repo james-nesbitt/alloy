@@ -10,12 +10,12 @@ func createDefaultHost() HostInterface {
 
 type wasmHost struct{}
 
-func (w *wasmHost) Init(id string, caps []AlloyCapability) {
+func (w *wasmHost) Init(id string, caps []AlloyCapability, background bool) {
 	wCaps := make([]alloy.AlloyCapability, len(caps))
 	for i, c := range caps {
 		wCaps[i] = w.toWitCap(c)
 	}
-	alloy.AlloyInit(id, wCaps)
+	alloy.AlloyInit(id, wCaps, background)
 }
 
 func (w *wasmHost) Started() {
@@ -60,6 +60,10 @@ func (w *wasmHost) KvList(prefix string) []string {
 
 func (w *wasmHost) RouteMessage(msg AlloyMessage) {
 	alloy.AlloyRouteMessage(w.toWitMsg(msg))
+}
+
+func (w *wasmHost) DispatchIntent(intent AlloyIntent) {
+	alloy.AlloyDispatchIntent(w.toWitIntent(intent))
 }
 
 func (w *wasmHost) Call(msg AlloyMessage) AlloyMessage {
@@ -187,6 +191,7 @@ func (w *wasmHost) toWitCap(c AlloyCapability) alloy.AlloyCapability {
 		Description: c.Description,
 		Shortcut:    w.toWitOptionString(c.Shortcut),
 		Annotations: w.toWitOptionMetadata(c.Annotations),
+		Intents:     w.toWitOptionStringList(c.Intents),
 	}
 }
 
@@ -196,6 +201,17 @@ func (w *wasmHost) fromWitCap(c alloy.AlloyCapability) AlloyCapability {
 		Description: c.Description,
 		Shortcut:    w.fromWitOptionString(c.Shortcut),
 		Annotations: w.fromWitOptionMetadata(c.Annotations),
+		Intents:     w.fromWitOptionStringList(c.Intents),
+	}
+}
+
+func (w *wasmHost) toWitIntent(intent AlloyIntent) alloy.AlloyIntent {
+	return alloy.AlloyIntent{
+		Id:        intent.Id,
+		Name:      intent.Name,
+		Sender:    intent.Sender,
+		Payload:   intent.Payload,
+		ContextId: w.toWitOptionString(intent.ContextID),
 	}
 }
 
@@ -225,6 +241,20 @@ func (w *wasmHost) fromWitOptionMetadata(opt alloy.Option[[]alloy.AlloyTuple2Str
 		return None[[]AlloyTuple2StringStringT]()
 	}
 	return Some(w.fromWitMetadata(opt.Unwrap()))
+}
+
+func (w *wasmHost) toWitOptionStringList(opt Option[[]string]) alloy.Option[[]string] {
+	if opt.IsNone() {
+		return alloy.None[[]string]()
+	}
+	return alloy.Some(opt.Unwrap())
+}
+
+func (w *wasmHost) fromWitOptionStringList(opt alloy.Option[[]string]) Option[[]string] {
+	if opt.IsNone() {
+		return None[[]string]()
+	}
+	return Some(opt.Unwrap())
 }
 
 func (w *wasmHost) toWitMetadata(meta []AlloyTuple2StringStringT) []alloy.AlloyTuple2StringStringT {

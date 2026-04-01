@@ -44,6 +44,8 @@ type PluginMetadata struct {
 	ID           string         `json:"id"`
 	Capabilities []Capability   `json:"capabilities"`
 	LoadTime     PluginLoadTime `json:"load_time"`
+	Intents      []string       `json:"intents,omitempty"`    // Aggregated list of intents this plugin can handle (Phase 10)
+	Background   bool           `json:"background,omitempty"` // Whether this plugin runs as a background actor (Phase 10)
 }
 
 // PluginLoader is an interface for components that can load a plugin on demand.
@@ -124,6 +126,16 @@ type Capability struct {
 	Description string            `json:"description,omitempty"`
 	Shortcut    string            `json:"shortcut,omitempty"`    // Keyboard shortcut/mnemonic (e.g., "b l")
 	Annotations map[string]string `json:"annotations,omitempty"` // Additional metadata (e.g., {"group": "buffers"})
+	Intents     []string          `json:"intents,omitempty"`     // Intents satisfied by this method (Phase 10)
+}
+
+// Intent structure for goal-oriented routing (Phase 10)
+type Intent struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"` // e.g., "intent:save"
+	Sender    string          `json:"sender"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	ContextID string          `json:"context_id,omitempty"`
 }
 
 // Registration defines a component's presence in the system.
@@ -132,6 +144,8 @@ type Registration struct {
 	Type         string       `json:"type"`
 	Status       string       `json:"status,omitempty"`
 	Capabilities []Capability `json:"capabilities,omitempty"`
+	Background   bool         `json:"background,omitempty"` // Phase 10
+	Intents      []string     `json:"intents,omitempty"`    // Phase 10
 }
 
 // WidgetUpdate represents a content refresh for a specific widget.

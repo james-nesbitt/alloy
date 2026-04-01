@@ -95,6 +95,7 @@ type AlloyCapability struct {
 	Description string
 	Shortcut    Option[string]
 	Annotations Option[[]AlloyTuple2StringStringT]
+	Intents     Option[[]string] // Phase 10
 }
 
 // AlloyBuffer represents a direct data buffer.
@@ -113,6 +114,15 @@ type AlloyWidget struct {
 	ContentType       string
 	Content           []byte
 	RefreshIntervalMs uint32
+}
+
+// AlloyIntent represents a goal-oriented intent (Phase 10)
+type AlloyIntent struct {
+	Id        string
+	Name      string
+	Sender    string
+	Payload   []byte
+	ContextID Option[string]
 }
 
 // Log levels
@@ -153,13 +163,14 @@ type CommandResult struct {
 
 // HostInterface defines all interactions with the Alloy host.
 type HostInterface interface {
-	Init(id string, caps []AlloyCapability)
+	Init(id string, caps []AlloyCapability, background bool) // Phase 10
 	Started()
 	GetNextMessage() Option[AlloyMessage]
 	SendResponse(msg AlloyMessage)
 	Log(level string, msg string)
 	Call(msg AlloyMessage) AlloyMessage
 	RouteMessage(msg AlloyMessage)
+	DispatchIntent(intent AlloyIntent) // Phase 10
 
 	// KV
 	KvSet(key string, val []byte) bool

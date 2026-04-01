@@ -121,7 +121,11 @@ func (i *Instance) recordCrash() {
 	}
 }
 
-func (i *Instance) Metadata() api.PluginMetadata { return i.metadata }
+func (i *Instance) Metadata() api.PluginMetadata {
+	i.pmu.Lock()
+	defer i.pmu.Unlock()
+	return i.metadata
+}
 
 func (i *Instance) Close(ctx context.Context) error {
 	i.cancel()
@@ -205,6 +209,7 @@ func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.
 	builder.NewFunctionBuilder().WithFunc(r.internalRegisterWidget).Export("register-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterWidget).Export("unregister-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalUpdateWidget).Export("update-widget")
+	builder.NewFunctionBuilder().WithFunc(r.internalDispatchIntent).Export("dispatch-intent")
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
 		mod.Memory().WriteUint32Le(resPtr+4, 0)
@@ -213,12 +218,13 @@ func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.
 	return builder.Instantiate(ctx)
 }
 
-func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, capsPtr, capsLen uint32) {
+func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr, idLen, capsPtr, capsLen, background uint32) {
 	id := r.readString(mod, idPtr, idLen)
+	isBackground := background != 0
 	if capsLen > 0 {
-		data, _ := mod.Memory().Read(capsPtr, capsLen*40)
+		data, _ := mod.Memory().Read(capsPtr, capsLen*52) // Capability size is now 52 (Phase 10)
 		for i := uint32(0); i < capsLen; i++ {
-			p := i * 40
+			p := i * 52
 			cap := api.Capability{
 				Method:      r.readString(mod, i32le.Uint32(data[p:]), i32le.Uint32(data[p+4:])),
 				Description: r.readString(mod, i32le.Uint32(data[p+8:]), i32le.Uint32(data[p+12:])),
@@ -240,12 +246,36 @@ func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr,
 					}
 				}
 			}
+			// Phase 10: Intents support in Capability struct
+			if i32le.Uint32(data[p+40:]) != 0 {
+				intentsPtr := i32le.Uint32(data[p+44:])
+				intentsLen := i32le.Uint32(data[p+48:])
+				if intentsLen > 0 {
+					id, _ := mod.Memory().Read(intentsPtr, intentsLen*8) // Each string is 8 bytes (ptr+len)
+					for j := uint32(0); j < intentsLen; j++ {
+						o := j * 8
+						sPtr := i32le.Uint32(id[o:])
+						sLen := i32le.Uint32(id[o+4:])
+						cap.Intents = append(cap.Intents, r.readString(mod, sPtr, sLen))
+					}
+				}
+			}
 			payload, _ := json.Marshal(cap)
 			r.routerFn(ctx, api.Message{
 				ID:     fmt.Sprintf("init-cap-%d-%d", time.Now().UnixNano(), i),
 				Sender: id, Target: "command-manager", Method: "register-capability", Payload: payload,
 			})
 		}
+	}
+
+	// Update instance metadata with background status discovered during init (Phase 10)
+	r.mu.RLock()
+	instance, ok := r.plugins[id]
+	r.mu.RUnlock()
+	if ok {
+		r.mu.Lock()
+		instance.metadata.Background = isBackground
+		r.mu.Unlock()
 	}
 }
 
@@ -520,7 +550,7 @@ func (r *Runtime) internalSendResponse(ctx context.Context, mod wazeroapi.Module
 	}
 }
 
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability) (*Instance, error) {
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool) (*Instance, error) {
 	pluginDir := filepath.Join(r.dataDir, id)
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		return nil, err
@@ -529,7 +559,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 	startedCh := make(chan struct{})
 	instance := &Instance{
 		id: id, ctx: instCtx, cancel: instCancel, logger: r.logger, msgChan: make(chan api.Message, 1024),
-		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps},
+		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background},
 		startedCh: startedCh, pending: make(map[string]chan api.Message),
 		maxMemoryBytes: maxMemoryMB * 1024 * 1024, msgPerSecond: msgPerSec,
 		bytesPerSecond: 10 * 1024 * 1024, fuelLimit: 1000, lastMsgReset: time.Now(),
@@ -679,7 +709,7 @@ func (r *Runtime) GetResponse(ctx context.Context, pluginID string, requestID st
 	}
 }
 
-func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen uint32) {
+func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen, intentsSet, intentsPtr, intentsLen uint32) {
 	cap := api.Capability{Method: r.readString(mod, methodPtr, methodLen), Description: r.readString(mod, descPtr, descLen)}
 	if shortcutSet != 0 {
 		cap.Shortcut = r.readString(mod, shortcutPtr, shortcutLen)
@@ -692,6 +722,16 @@ func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.
 			k := r.readString(mod, i32le.Uint32(md[o:]), i32le.Uint32(md[o+4:]))
 			v := r.readString(mod, i32le.Uint32(md[o+8:]), i32le.Uint32(md[o+12:]))
 			cap.Annotations[k] = v
+		}
+	}
+	// Phase 10: Intents support in register-capability
+	if intentsSet != 0 && intentsLen > 0 {
+		id, _ := mod.Memory().Read(intentsPtr, intentsLen*8)
+		for i := uint32(0); i < intentsLen; i++ {
+			o := i * 8
+			sPtr := i32le.Uint32(id[o:])
+			sLen := i32le.Uint32(id[o+4:])
+			cap.Intents = append(cap.Intents, r.readString(mod, sPtr, sLen))
 		}
 	}
 	payload, _ := json.Marshal(cap)
@@ -1070,4 +1110,37 @@ func (l *loggerWriter) Write(p []byte) (n int, err error) {
 		}
 	}
 	return len(p), nil
+}
+// internalDispatchIntent routes a goal-oriented intent (Phase 10)
+func (r *Runtime) internalDispatchIntent(ctx context.Context, mod wazeroapi.Module, ptr uint32) {
+	readStr := func(p uint32) string {
+		sPtr, _ := mod.Memory().ReadUint32Le(p)
+		sLen, _ := mod.Memory().ReadUint32Le(p + 4)
+		return r.readString(mod, sPtr, sLen)
+	}
+	intent := api.Intent{
+		ID:     readStr(ptr),
+		Name:   readStr(ptr + 8),
+		Sender: readStr(ptr + 16),
+	}
+	pPtr, _ := mod.Memory().ReadUint32Le(ptr + 24)
+	pLen, _ := mod.Memory().ReadUint32Le(ptr + 28)
+	if pLen > 0 {
+		data, _ := mod.Memory().Read(pPtr, pLen)
+		intent.Payload = json.RawMessage(data)
+	}
+	isSome, _ := mod.Memory().ReadUint32Le(ptr + 32) // alloy_option_string_t context_id starts at 32 (bool discriminant)
+	if isSome != 0 {
+		intent.ContextID = readStr(ptr + 36)
+	}
+	
+	payload, _ := json.Marshal(intent)
+	r.routerFn(ctx, api.Message{
+		ID:      intent.ID,
+		Type:    api.TypeEvent,
+		Sender:  intent.Sender,
+		Target:  "kernel",
+		Method:  "intent:dispatch",
+		Payload: payload,
+	})
 }

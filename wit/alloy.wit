@@ -21,6 +21,7 @@ world alloy {
             description: string,
             shortcut: option<string>,
             annotations: option<list<tuple<string, string>>>,
+            intents: option<list<string>>,
         }
 
         // Buffer structure for high-performance direct data access
@@ -49,8 +50,8 @@ world alloy {
             crashed,
         }
         
-        // Initialize the plugin with its ID and capabilities
-        init: func(id: string, caps: list<capability>);
+        // Initialize the plugin with its ID, metadata and background status (Phase 10)
+        init: func(id: string, caps: list<capability>, background: bool);
         
         // Handle an incoming message
         handle-message: func(msg: message) -> message;
@@ -105,5 +106,17 @@ world alloy {
         register-widget: func(w: widget);
         unregister-widget: func(id: string);
         update-widget: func(id: string, content: list<u8>);
+
+        // Intent structure for goal-oriented routing (Phase 10)
+        record intent {
+            id: string,
+            name: string,
+            sender: string,
+            payload: list<u8>,
+            context-id: option<string>,
+        }
+
+        // Dispatch an intent to be routed by the kernel
+        dispatch-intent: func(i: intent);
     }
 }

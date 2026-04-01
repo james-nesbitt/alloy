@@ -8,7 +8,7 @@
 | **PHASE 7: ORCHESTRATION** | **DONE** | Manifest-based project orchestration & archetypes. |
 | **PHASE 8: IAM & IDENTITY** | **DONE** | Hierarchy-Aware RBAC, Role Attestation, Scoped Discovery. |
 | **PHASE 9: SYNTHESIS** | **DONE** | Multi-Project Switcher, Side-car plugins. |
-| **PHASE 10: DYNAMICS** | **IN PROGRESS** | Layout recursion, Intent routing, Headless actors. |
+| **PHASE 10: DYNAMICS** | **DONE** | Layout recursion, Intent routing, Headless actors. |
 | **PHASE 11: LIFECYCLE** | **PLANNED** | Semantic indexing (Librarian), temporal playback. |
 
 ---
@@ -19,13 +19,13 @@
 
 - [x] **Recursive Trinity Layout**: Universal split rendering with nested horizontal/vertical splits.
 - [x] **Workspace View Persistence**: Store/Restore last known good layout via the project plugin.
-- [ ] **Intent-Based Routing V1**:
-    - [ ] `alloy:intent/intent.wit` definition.
-    - [ ] Intent discovery via `alloy_capability_t`.
-    - [ ] Kernel-level `intent_broker.go` for fuzzy goal-oriented routing.
-- [ ] **Headless Actor Framework**:
-    - [ ] Background lifecycle for "Invisible" plugins (Actors).
-    - [ ] Service Discovery V2 for background services (e.g. `service:code-analysis`).
+- [x] **Intent-Based Routing V1**:
+    - [x] `alloy:intent/intent.wit` definition.
+    - [x] Intent discovery via `alloy_capability_t`.
+    - [x] Kernel-level `intent_broker.go` for fuzzy goal-oriented routing.
+- [x] **Headless Actor Framework**:
+    - [x] Background lifecycle for "Invisible" plugins (Actors).
+    - [x] Service Discovery V2 for background services (e.g. `service:code-analysis`).
 - [ ] **Presence & Activity Sync**:
     - [ ] Real-time cursor/selection synchronization across frontends.
     - [ ] Activity stream integration for "Team Presence".

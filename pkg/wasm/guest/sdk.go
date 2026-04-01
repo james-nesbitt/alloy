@@ -16,6 +16,7 @@ type Plugin struct {
 	onInit        func() error
 	onStart       func()
 	onShutdown    func()
+	background    bool           // Phase 10
 	host          HostInterface
 }
 
@@ -26,8 +27,15 @@ func NewPlugin(id string) *Plugin {
 		handlers:      make(map[string]Handler),
 		alloyHandlers: make(map[string]AlloyHandler),
 		commands:      make(map[string]Command),
+		background:    false,
 	}
 	p.host = createDefaultHost()
+	return p
+}
+
+// SetBackground sets whether this plugin runs in the background (Phase 10).
+func (p *Plugin) SetBackground(bg bool) *Plugin {
+	p.background = bg
 	return p
 }
 
@@ -53,7 +61,21 @@ func (p *Plugin) WithCapability(method, description string) *Plugin {
 		Description: description,
 		Shortcut:    None[string](),
 		Annotations: None[[]AlloyTuple2StringStringT](),
+		Intents:     None[[]string](),
 	})
+	return p
+}
+
+// WithIntent adds an intent to the last added capability (Phase 10).
+func (p *Plugin) WithIntent(intent string) *Plugin {
+	if len(p.capabilities) > 0 {
+		var intents []string
+		if p.capabilities[len(p.capabilities)-1].Intents.IsSome() {
+			intents = p.capabilities[len(p.capabilities)-1].Intents.Unwrap()
+		}
+		intents = append(intents, intent)
+		p.capabilities[len(p.capabilities)-1].Intents = Some(intents)
+	}
 	return p
 }
 
@@ -119,6 +141,7 @@ func (p *Plugin) RegisterCommand(cmd Command) *Plugin {
 		Description: cmd.Description,
 		Shortcut:    shortcut,
 		Annotations: Some(annots),
+		Intents:     None[[]string](),
 	})
 	return p
 }
@@ -144,7 +167,7 @@ func (p *Plugin) Run() error {
 // Serve starts the plugin's message loop.
 func (p *Plugin) Serve() {
 	// 1. Initialize with the host
-	p.host.Init(p.id, p.capabilities)
+	p.host.Init(p.id, p.capabilities, p.background)
 
 	// 2. Run user initialization
 	if p.onInit != nil {
@@ -260,6 +283,29 @@ func (m *AlloyMessage) ContextID() string {
 		return val
 	}
 	return ""
+}
+
+// DispatchIntent sends an intent to the host to be routed (Phase 10).
+func (p *Plugin) DispatchIntent(name string, payload any, contextID string) {
+	data, _ := json.Marshal(payload)
+	intent := AlloyIntent{
+		Id:      fmt.Sprintf("%s-%d", name, p.Timestamp()),
+		Name:    name,
+		Sender:  p.id,
+		Payload: data,
+	}
+	if contextID != "" {
+		intent.ContextID = Some(contextID)
+	} else {
+		intent.ContextID = None[string]()
+	}
+	p.host.DispatchIntent(intent)
+}
+
+// Timestamp returns a current timestamp in milliseconds.
+func (p *Plugin) Timestamp() uint64 {
+	// Best-effort timestamp from host or local (if available)
+	return 0 // TODO: Implement robust timestamp in SDK
 }
 
 // Log logs a message to the host.
