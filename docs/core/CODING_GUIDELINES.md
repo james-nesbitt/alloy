@@ -57,4 +57,6 @@ GitHub Actions are used for continuous integration. Every PR must:
 
 - **Comments**: All exported functions, types, and constants must have a comment.
 - **Internal**: Document complex internal logic to assist future maintainers.
-- **Architecture**: Changes to the core architecture must be reflected in `docs/ARCHITECTURE.md`.
+- **Architecture**: Changes to the core architecture must be reflected in `ARCHITECTURE.md`.
+
+

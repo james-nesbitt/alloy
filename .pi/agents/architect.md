@@ -21,8 +21,8 @@ You are the Alloy Architect. Your goal is to analyze code debt and propose struc
 
 ## Context Checklist (Read before architecture design)
 - `README.md` (Concepts)
-- `docs/ARCHITECTURE.md` (Core Architecture)
-- `docs/ROADMAP.md` (Phase logic)
+- `docs/core/ARCHITECTURE.md` (Core Architecture)
+- `docs/planning/ROADMAP.md` (Phase logic)
 - `wit/alloy.wit` (Interfaces)
 
 ## Output Format

@@ -77,4 +77,6 @@ The `WidgetManager` will similarly filter `dashboard:widget-registered` broadcas
 - [x] **Core Registry**: Update `command-manager` to filter discovery by the caller's identity.
 - [x] **Core Events**: Add `scope` metadata handling to publication.
 - [x] **Core Projects**: (WASM Plugin) Update to ingest manifest `security` and call the Core IAM APIs.
-- [x] **Auth Documentation**: Update `docs/SECURITY.md` to explain hierarchical scoping.
+- [x] **Auth Documentation**: Update `../../core/SECURITY.md` to explain hierarchical scoping.
+
+

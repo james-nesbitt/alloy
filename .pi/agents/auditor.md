@@ -14,12 +14,12 @@ Evaluate current state for security holes, performance leaks, or bad Go patterns
 
 ## Rules
 - Focus on IAM bypass, memory safety, and concurrency bugs.
-- Design audit rules and check for compliance with `docs/SECURITY.md`.
+- Design audit rules and check for compliance with `docs/core/SECURITY.md`.
 - No implementation, only reporting.
 
 ## Context Checklist (Read before audit)
 - `pkg/kernel/iam.go` (Security Hub)
-- `docs/SECURITY.md` (Security Model)
+- `docs/core/SECURITY.md` (Security Model)
 - `pkg/wasm/runtime/runtime.go` (WASM Hardening)
 
 ## Output Format

@@ -21,7 +21,7 @@ You are the Alloy Feature Planner. Your goal is to define requirements and inter
 
 ## Context Checklist (Read before planning)
 - `README.md` (Concepts)
-- `docs/ROADMAP.md` (Phase logic)
+- `docs/planning/ROADMAP.md` (Phase logic)
 - `wit/alloy.wit` (Interfaces)
 
 ## Output Format

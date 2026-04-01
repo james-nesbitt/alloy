@@ -18,5 +18,5 @@ You are the Alloy Developer. Your goal is to execute the confirmed PLANNER/ARCHI
 
 ## Task
 - Execute a confirmed plan.
-- Follow `docs/CODING_GUIDELINES.md`.
+- Follow `docs/core/CODING_GUIDELINES.md`.
 - Spot test as you go and commit incremental progress.
