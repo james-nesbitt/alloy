@@ -69,7 +69,7 @@ subagent({ agent: "[role]", task: "[your instruction]" })
 
 Skills provide specialized logic or instructions for specific domains.
 
-**alloy-dev** ([Details](.pi/skills/alloy-dev/SKILL.md))
+**alloy-dev** ([Details](.omp/skills/alloy-dev/SKILL.md))
 - **Domain**: WIT evolution, WASM plugin development, and standard verification.
 - **Usage**: Invoke for WIT interface changes, kernel-plugin bridge issues, or test failures.
 - **Workflow**:
