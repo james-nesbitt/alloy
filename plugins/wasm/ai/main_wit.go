@@ -49,6 +49,17 @@ type AIResponse struct {
 	Response string `json:"response"`
 }
 
+// AIEmbedRequest represents a request to get an embedding.
+type AIEmbedRequest struct {
+	Text string `json:"text"`
+}
+
+// AIEmbedResponse represents a response containing an embedding.
+type AIEmbedResponse struct {
+	Embedding []float64 `json:"embedding"`
+}
+
+
 // ProviderSetRequest represents a request to set the AI provider.
 type ProviderSetRequest struct {
 	Type  string `json:"type"`
@@ -129,7 +140,9 @@ func main() {
 		WithCapability("ai:config:get", "Get current configuration").
 		WithCapability("ai:provider:set", "Switch AI provider").WithShortcut("a p").
 		WithCapability("ai:query", "Query the AI directly").WithShortcut("a q").
+		WithCapability("ai:embed", "Generate vector embeddings for text").
 		WithCapability("ai:summarize", "Summarize provided text").WithShortcut("a s").
+
 		WithCapability("ai:summarize-buffer", "Summarize the content of a specific buffer").WithShortcut("a b").
 		WithCapability("ai:dashboard-update", "Internal dashboard update")
 
@@ -138,7 +151,9 @@ func main() {
 	plugin.Handle("ai:config:get", handleConfigGet)
 	plugin.Handle("ai:provider:set", handleProviderSet)
 	plugin.Handle("ai:query", handleQuery)
+	plugin.Handle("ai:embed", handleEmbed)
 	plugin.Handle("ai:summarize", handleSummarize)
+
 	plugin.Handle("ai:summarize-buffer", handleSummarizeBuffer)
 	plugin.Handle("ai:dashboard-update", func(msg AlloyMessage) AlloyMessage {
 		emitDashboardUpdate()
@@ -151,7 +166,9 @@ func main() {
 	plugin.Handle("config:get", handleConfigGet)
 	plugin.Handle("provider:set", handleProviderSet)
 	plugin.Handle("query", handleQuery)
+	plugin.Handle("embed", handleEmbed)
 	plugin.Handle("summarize", handleSummarize)
+
 	plugin.Handle("summarize-buffer", handleSummarizeBuffer)
 
 	// Set up initialization
@@ -298,6 +315,62 @@ func handleProviderSet(msg AlloyMessage) AlloyMessage {
 }
 
 // handleQuery handles direct AI queries.
+// handleEmbed handles requests for text embeddings.
+func handleEmbed(msg AlloyMessage) AlloyMessage {
+	var req AIEmbedRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_embed_payload")
+	}
+
+	cfg, err := configStore.Get("current")
+	if err != nil {
+		cfg = ProviderConfig{Type: ProviderMock, Model: "test-model"}
+	}
+
+	embedding, err := performEmbedding(cfg, req.Text)
+	if err != nil {
+		return plugin.ErrorReply(msg, "embedding_failed: "+err.Error())
+	}
+
+	return plugin.Reply(msg, AIEmbedResponse{Embedding: embedding})
+}
+
+func performEmbedding(cfg ProviderConfig, text string) ([]float64, error) {
+	switch cfg.Type {
+	case ProviderMock:
+		// Return a deterministic mock embedding based on the text length and first char
+		size := 1536 // Standard OpenAI size
+		embedding := make([]float64, size)
+		seed := int64(len(text))
+		if len(text) > 0 {
+			seed += int64(text[0])
+		}
+		for i := 0; i < size; i++ {
+			embedding[i] = float64(((seed + int64(i)) % 100)) / 100.0
+		}
+		return embedding, nil
+	case ProviderOllama:
+		return queryOllamaEmbedding(cfg, text)
+	case ProviderOpenAI:
+		return queryOpenAIEmbedding(cfg, text)
+	default:
+		return nil, fmt.Errorf("unsupported_embedding_provider: %s", cfg.Type)
+	}
+}
+
+func queryOllamaEmbedding(cfg ProviderConfig, text string) ([]float64, error) {
+	// Mock implementation for now
+	plugin.Log("info", "Querying Ollama Embedding: "+cfg.Model)
+	return performEmbedding(ProviderConfig{Type: ProviderMock}, text)
+}
+
+func queryOpenAIEmbedding(cfg ProviderConfig, text string) ([]float64, error) {
+	// Mock implementation for now
+	plugin.Log("info", "Querying OpenAI Embedding: "+cfg.Model)
+	return performEmbedding(ProviderConfig{Type: ProviderMock}, text)
+}
+
+
 func handleQuery(msg AlloyMessage) AlloyMessage {
 	var req AIQuery
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {

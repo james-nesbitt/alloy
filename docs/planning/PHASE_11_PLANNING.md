@@ -1,6 +1,6 @@
 # Phase 11: Lifecycle & Audit
 
-## Status: PLANNED 🚀
+## Status: ACTIVE 🚀
 **Goal**: Transition Alloy from a real-time collaboration tool into a persistent knowledge substrate with semantic memory and historical integrity.
 
 ---
@@ -8,19 +8,21 @@
 ### Workstream 0: Finishing Phase 10 (Dynamic Interactions)
 Before fully committing to Phase 11, we must close the remaining gaps in the "Dynamics" phase.
 
-- [ ] **Real-Time Cursor Synchronization**:
+- [x] **Real-Time Cursor Synchronization**:
     - Update `plugins/wasm/buffer/main_wit.go` to emit `evt-cursor-updated` events when cursors move.
-    - Update `cmd/alloy-tui` and `cmd/alloy-web` to render remote cursors in the viewport.
-- [ ] **Team Presence Enhancements**:
+    - Update `cmd/alloy-tui`, `cmd/alloy-web` and `cmd/alloy-gui-gio` to render remote cursors in the viewport.
+- [x] **Team Presence Enhancements**:
     - Integrate the `team-presence` activity stream into the Omni Palette search results (e.g., "See what others are working on").
+
 
 ### Workstream 1: The Librarian (Semantic Indexing)
 Provide the workspace with "Long-term Memory."
 
-- [ ] **Librarian Actor**: Implement a background Wasm actor that consumes workspace event streams.
-- [ ] **Local Vector Indexing**:
-    - Integrate a lightweight vector store (e.g., `bleve` or a simpler KV-based embedding index) to index buffer content and chat history.
-    - Implement `intent:search/semantic` for fuzzy, multi-modal search.
+- [x] **Librarian Actor**: Implement a background Wasm actor that consumes workspace event streams.
+22#JS:- [x] **Local Vector Indexing**:
+23#ZT:    - Integrate a lightweight vector store (linear KV scan for now) to index buffer content and chat history.
+24#QX:    - Implement `librarian:search` for fuzzy, multi-modal semantic search.
+
 - [ ] **Context Injection**: Use the Librarian to provide "Context" for AI intents, automatically attaching relevant historical snippets to requests.
 
 ### Workstream 2: Temporal Playback (The Time Machine)

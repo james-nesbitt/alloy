@@ -9,19 +9,19 @@
 | **PHASE 8: IAM & IDENTITY** | **DONE** | Hierarchy-Aware RBAC, Role Attestation, Scoped Discovery. |
 | **PHASE 9: SYNTHESIS** | **DONE** | Multi-Project Switcher, Side-car plugins. |
 | **PHASE 10: DYNAMICS** | **ARCHIVED** | Layout recursion, Intent routing, Headless actors. |
-12#RB:| **PHASE 11: LIFECYCLE** | **ACTIVE** | Semantic indexing (Librarian), temporal playback. |
+| **PHASE 11: LIFECYCLE** | **ACTIVE** | Semantic indexing (Librarian), temporal playback. |
 
 
 ---
 
 ## Current Active: PHASE 11: LIFECYCLE & AUDIT [IN PROGRESS]
-17#TJ:
-18#BN:**Goal**: Move from real-time coordination to semantic knowledge management and historical integrity.
-19#BY:
-20#XM:### Workstream 0: Finishing Phase 10 (Dynamics)
-21#VR:- [x] **Real-time cursor synchronization (TUI)**: Remote cursors now render in the status line with position and name.
-22#TS:- [ ] **Real-time cursor synchronization (Web/GUI)**: Update bridge and hardware-accelerated views.
-23#HR:- [ ] **Presence activity integration**: Activity stream integration for "Team Presence" search results.
+
+**Goal**: Move from real-time coordination to semantic knowledge management and historical integrity.
+
+### Workstream 0: Finishing Phase 10 (Dynamics)
+- [x] **Real-time cursor synchronization (TUI)**: Remote cursors now render in the status line with position and name.
+- [x] **Real-time cursor synchronization (Web/GUI)**: Update bridge and hardware-accelerated views.
+- [x] **Presence activity integration**: Activity stream integration for "Team Presence" search results.
 24#TM:
 25#PR:### Phase 11 Milestones
 26#ZT:- [ ] **The Librarian Service (Semantic Indexing)**

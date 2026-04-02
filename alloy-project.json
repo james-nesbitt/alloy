@@ -9,7 +9,9 @@
     { "id": "buffer", "path": "buffer.wasm", "load": "boot" },
     { "id": "omni-palette", "path": "omni-palette.wasm", "load": "boot" },
     { "id": "settings", "path": "settings.wasm", "load": "boot" },
-    { "id": "secrets", "path": "secrets.wasm", "load": "lazy" }
+    { "id": "secrets", "path": "secrets.wasm", "load": "lazy" },
+    { "id": "librarian", "path": "librarian.wasm", "load": "boot" }
+
   ],
   "layout": {
     "default_mode": "dashboard",
