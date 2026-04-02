@@ -115,7 +115,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 	}
 	k.RouteMessage(context.Background(), createBufMsg)
 	createResp := waitForResponse("create-buf-1")
-	
+
 	var bufInfo struct {
 		ID string `json:"id"`
 	}
@@ -126,11 +126,11 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 	content := "Machine learning is a field of artificial intelligence."
 	// TWFjaGluZSBsZWFybmluZyBpcyBhIGZpZWxkIG9mIGFydGlmaWNpYWwgaW50ZWxsaWdlbmNlLg== is "Machine learning is a field of artificial intelligence."
 	writeMsg := api.Message{
-		ID:     "write-buf-1",
-		Type:   api.TypeRequest,
-		Sender: frontendID,
-		Target: "buffer",
-		Method: "buffer:write",
+		ID:      "write-buf-1",
+		Type:    api.TypeRequest,
+		Sender:  frontendID,
+		Target:  "buffer",
+		Method:  "buffer:write",
 		Payload: []byte(`{"id": "` + bufInfo.ID + `", "content": "TWFjaGluZSBsZWFybmluZyBpcyBhIGZpZWxkIG9mIGFydGlmaWNpYWwgaW50ZWxsaWdlbmNlLg=="}`),
 	}
 	k.RouteMessage(context.Background(), writeMsg)
@@ -168,7 +168,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 	if strings.Contains(string(resp.Payload), "error") {
 		t.Fatalf("search returned error: %s", string(resp.Payload))
 	}
-	
+
 	if !strings.Contains(string(resp.Payload), "buf-") {
 		t.Errorf("expected to find semantic result referencing 'buf-', got: %s", string(resp.Payload))
 	}
