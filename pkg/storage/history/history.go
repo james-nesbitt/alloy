@@ -94,23 +94,92 @@ func (s *Store) Append(msg api.Message) (uint64, error) {
 
 // GetRange retrieves events in the given index range [start, end).
 func (s *Store) GetRange(start, end uint64) ([]Event, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if start >= uint64(len(s.indexOffsets)) {
+
+	total := uint64(len(s.indexOffsets))
+	if start >= total {
 		return []Event{}, nil
 	}
-	if end > uint64(len(s.indexOffsets)) {
-		end = uint64(len(s.indexOffsets))
+	if end == 0 || end > total {
+		end = total
 	}
 
 	events := make([]Event, 0, end-start)
-
-	// In a real implementation we would read from disk.
-	// For now we fulfill with whatever we can easily.
+	
+	// Read entire file for simplicity for now, or seek for each?
+	// Given this is a staff engineer job, let's seek correctly if we can.
+	// But actually, we don't store the offsets persistently yet (they are in memory).
+	
+	// Open a separate read-only file handle for concurrent access or just use the existing one with proper locking?
+	// Since we already have the RLock, we can seek the existing file.
+	
+	for i := start; i < end; i++ {
+		offset := s.indexOffsets[i]
+		if _, err := s.file.Seek(offset, 0); err != nil {
+			return events, err
+		}
+		
+		// Read one line (event)
+		// We could use a scanner, but we just need the next JSON object.
+		var ev Event
+		decoder := json.NewDecoder(s.file)
+		if err := decoder.Decode(&ev); err != nil {
+			return events, err
+		}
+		events = append(events, ev)
+	}
 
 	return events, nil
 }
+// Clear truncates the history store. Use with caution.
+func (s *Store) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := s.file.Seek(0, 0); err != nil {
+		return err
+	}
+	s.indexOffsets = []int64{}
+	s.nextIndex = 0
+	return nil
+}
+// Restore clears the history and imports the given events.
+func (s *Store) Restore(events []Event) error {
+	if err := s.Clear(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, event := range events {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+
+		offset, _ := s.file.Seek(0, 1) // Get current offset
+		_, err = s.file.Write(append(data, '\n'))
+		if err != nil {
+			return err
+		}
+
+		s.indexOffsets = append(s.indexOffsets, offset)
+	}
+
+	s.nextIndex = uint64(len(s.indexOffsets))
+	return nil
+}
+
+
+
+
+
 
 // Close closes the store.
 func (s *Store) Close() error {

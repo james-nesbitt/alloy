@@ -58,7 +58,7 @@ A new event topic `dashboard:widget-updated` is used to synchronize UI component
 
 The `project-manager` plugin uses a **Host-Privileged Mount** to scan for `.alloy` projects.
 
-- **Mount Point**: The plugin is instantiated with a volume mount to the user's base data directory (e.g., `~/.config/alloy/projects`).
+- **Mount Point**: The plugin is instantiated with a volume mount to the user's base data directory (e.g., `[data-dir]/project`).
 - **Scan Trigger**: Triggered on `Init()` and periodically via `system:tick`.
 - **Registration**: For every discovered project, the plugin sends a `workspace:register` message to the **Kernel**.
 - **Result**: The Kernel's workspace registry is populated without manual user entry.

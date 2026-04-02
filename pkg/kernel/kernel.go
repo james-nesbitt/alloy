@@ -258,8 +258,23 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	k.logger.Debug("kernel routing message", "id", msg.ID, "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
 	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
 
-	// Asynchronously log to history (Phase 11: Event Sourcing)
-	if k.history != nil && (msg.Type == api.TypeRequest || msg.Type == api.TypeEvent) {
+	// Asynchronously log to history (Phase 11: Event Sourcing) unless no_audit is set
+	noAudit := false
+	if ctx != nil {
+		if val, ok := ctx.Value(auditContextKey).(bool); ok {
+			noAudit = val
+		}
+	}
+	if !noAudit && msg.Metadata != nil {
+		if val, ok := msg.Metadata[auditContextKey].(bool); ok {
+			noAudit = val
+		} else if sVal, ok := msg.Metadata[auditContextKey].(string); ok {
+			noAudit = sVal == "true"
+		}
+	}
+
+	if k.history != nil && (msg.Type == api.TypeRequest || msg.Type == api.TypeEvent) && !noAudit {
+
 		select {
 		case k.eventCh <- msg:
 		default:

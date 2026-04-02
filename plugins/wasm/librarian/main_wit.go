@@ -57,6 +57,8 @@ func main() {
 		WithTags("search", "indexing", "vector", "memory", "semantic").
 		WithCapability("librarian:search", "Semantic search across workspace events and content").WithShortcut("Ctrl+Shift+F").
 		WithCapability("librarian:index-buffer", "Manually index a buffer").
+		WithCapability("librarian:index-archive", "Index metadata for a workspace archive").
+
 		WithCapability("librarian:status", "Get librarian health and stats").
 		WithCapability("knowledge:search", "Legacy semantic/keyword search interface")
 
@@ -64,6 +66,8 @@ func main() {
 	plugin.Handle("knowledge:search", handleSearch)
 	plugin.Handle("librarian:index-buffer", handleIndexBuffer)
 	plugin.Handle("librarian:status", handleStatus)
+	plugin.Handle("librarian:index-archive", handleIndexArchive)
+
 	
 	// Event Handlers
 	plugin.Handle("buffer:update", handleBufferUpdateEvent)
@@ -237,6 +241,27 @@ func handleChatMessageEvent(msg AlloyMessage) AlloyMessage {
 	}
 	return AlloyMessage{}
 }
+
+// handleIndexArchive indexes metadata for a workspace archive
+func handleIndexArchive(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		Filename  string `json:"filename"`
+		Workspace string `json:"workspace"`
+		Timestamp string `json:"timestamp"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_request")
+	}
+
+	content := fmt.Sprintf("Workspace Archive: %s | Filename: %s | Archived at: %s", req.Workspace, req.Filename, req.Timestamp)
+	err := indexContent("archive:"+req.Filename, req.Filename, "archive", content)
+	if err != nil {
+		return plugin.ErrorReply(msg, "indexing_failed: "+err.Error())
+	}
+
+	return plugin.Reply(msg, "ok")
+}
+
 
 func indexContent(id, title, docType, content string) error {
 	if len(strings.TrimSpace(content)) < 5 {

@@ -32,6 +32,12 @@ func NewPlugin(id string) *Plugin {
 	p.host = createDefaultHost()
 	return p
 }
+// ID returns the plugin's ID.
+func (p *Plugin) ID() string {
+	return p.id
+}
+
+
 
 // SetBackground sets whether this plugin runs in the background (Phase 10).
 func (p *Plugin) SetBackground(bg bool) *Plugin {

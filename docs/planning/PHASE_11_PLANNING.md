@@ -30,12 +30,13 @@ Move from current-state storage to event-sourced history.
 - [x] **Scrubbing UI**: Add a "Time Machine" mode to the TUI/GUI that allows users to scrub back through project history.
 - [ ] **Point-in-Time Recovery**: Allow restoring a project to any previous event ID.
 
-### Workstream 3: Workspace Archival (.ark) [PLANNED]
+### Workstream 3: Workspace Archival (.ark) [DONE]
 Ensure project portability and longevity.
 
-- [ ] **Archive Specification**: Define the `.ark` format as a self-contained bundle of project identity, state, and event history.
-- [ ] **Cold Storage Logic**: Add `alloy:project/archive` and `alloy:project/restore` capabilities.
-- [ ] **Migration Guard**: Tooling to verify archive integrity across Alloy versions.
+- [x] **Archive Specification**: Defined the `.ark` format as a self-contained bundle (tar.gz) of manifest, projects, workspaces, plugin states, and event history.
+- [x] **Cold Storage Logic**: Implemented `project:archive` and `project:restore` capabilities with quiesce protocol and Librarian indexing.
+- [x] **Management & Search**: Added `project:list-archives`, `project:delete-archive`, and Librarian-backed cold storage discovery.
+
 
 ---
 

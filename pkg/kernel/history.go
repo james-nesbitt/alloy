@@ -28,8 +28,10 @@ func (h *HistoryManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "history:get", Description: "Get workspace event history"},
 		{Method: "history:replay", Description: "Replay a range of events"},
+		{Method: "history:restore", Description: "Restore complete history from a set of archived events"},
 	}
 }
+
 
 func (h *HistoryManager) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	switch msg.Method {
@@ -59,10 +61,31 @@ func (h *HistoryManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 	case "history:replay":
 		// TODO: Implement replay logic (routing events back through the kernel with a 'replay' flag)
 		return api.Message{ID: msg.ID + "-resp", Type: api.TypeResponse, Method: msg.Method, Payload: []byte(`{"status":"unimplemented"}`)}, nil
-	}
 
-	return api.Message{}, fmt.Errorf("method_not_found")
+	case "history:restore":
+		var events []history.Event
+		if err := json.Unmarshal(msg.Payload, &events); err != nil {
+			return api.Message{}, err
+		}
+
+		if err := h.store.Restore(events); err != nil {
+			return api.Message{}, err
+		}
+
+		return api.Message{
+			ID:      msg.ID + "-resp",
+			Type:    api.TypeResponse,
+			Method:  msg.Method,
+			Sender:  "history",
+			Payload: []byte(`{"status":"ok"}`),
+		}, nil
+
+	default:
+		return api.Message{}, fmt.Errorf("method_not_found")
+	}
 }
+
+
 
 func (h *HistoryManager) Shutdown(ctx context.Context) error {
 	return nil // Store is managed by Kernel

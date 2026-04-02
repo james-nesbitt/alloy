@@ -129,6 +129,23 @@ func (m *Manager) RouteMessage(ctx context.Context, pluginID string, msg api.Mes
 	return m.runtime.RouteMessage(ctx, pluginID, msg)
 }
 
+// SetCall overrides the internal call function.
+func (m *Manager) SetCall(call func(ctx context.Context, msg api.Message) (api.Message, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.callFn = call
+}
+
+
+// Call is a helper that sends a message and waits for a response synchronously.
+func (m *Manager) Call(ctx context.Context, pluginID string, msg api.Message) (api.Message, error) {
+	if err := m.RouteMessage(ctx, pluginID, msg); err != nil {
+		return api.Message{}, err
+	}
+	return m.GetResponse(ctx, pluginID, msg.ID)
+}
+
+
 // GetResponse gets a response from a plugin.
 func (m *Manager) GetResponse(ctx context.Context, pluginID string, requestID string) (api.Message, error) {
 	return m.runtime.GetResponse(ctx, pluginID, requestID)

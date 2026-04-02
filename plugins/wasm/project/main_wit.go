@@ -4,11 +4,18 @@ package main
 
 import (
 	. "github.com/james-nesbitt/alloy/pkg/wasm/guest"
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+
 	"time"
+
 )
 
 // Project represents a project in the system.
@@ -184,7 +191,12 @@ func main() {
 		WithCapability("project:update-user-config", "Update global user configuration").
 		WithCapability("project:update-layout", "Update active workspace layout").
 		WithCapability("project:update-view-state", "Update active workspace UI persistence state").
-		WithCapability("project:get-composed-workspace", "Get a unified view of the workspace")
+		WithCapability("project:get-composed-workspace", "Get a unified view of the workspace").
+		WithCapability("project:archive", "Archive current workspace to an .ark file").
+		WithCapability("project:restore", "Restore workspace from an .ark file").
+		WithCapability("project:list-archives", "List all workspace archives in the data directory").
+		WithCapability("project:delete-archive", "Delete a workspace archive from the data directory")
+
 
 	// Set up message handlers
 	plugin.Handle("project:create", handleCreate)
@@ -203,6 +215,11 @@ func main() {
 	plugin.Handle("project:update-layout", handleUpdateLayout)
 	plugin.Handle("project:update-view-state", handleUpdateViewState)
 	plugin.Handle("project:get-composed-workspace", handleGetComposedWorkspace)
+	plugin.Handle("project:archive", handleArchive)
+	plugin.Handle("project:restore", handleRestore)
+	plugin.Handle("project:list-archives", handleListArchives)
+	plugin.Handle("project:delete-archive", handleDeleteArchive)
+
 
 	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
@@ -213,6 +230,9 @@ func main() {
 	plugin.Handle("set-workspace", handleSetWorkspace)
 	plugin.Handle("update-user-config", handleUpdateUserConfig)
 	plugin.Handle("get-composed-workspace", handleGetComposedWorkspace)
+	plugin.Handle("list-archives", handleListArchives)
+	plugin.Handle("delete-archive", handleDeleteArchive)
+
 
 	// Set up initialization
 	plugin.OnInit(func() error {
@@ -709,3 +729,307 @@ func notifyProjectOpened(proj *Project) {
 		Payload: evtPayload,
 	})
 }
+
+// handleArchive creates a workspace archive (.ark)
+func handleArchive(msg AlloyMessage) AlloyMessage {
+	// 1. Discover all plugins
+	plugin.Log("info", "Starting workspace archival...")
+	
+	// Fetch plugin metadata from host
+	metaResp := plugin.Call(AlloyMessage{
+		Id:      "get-plugin-meta-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "command-manager:discover",
+		Sender:  "project",
+		Target:  Some("command-manager"),
+	})
+	
+	type target struct {
+		ID string `json:"id"`
+	}
+	var discovery struct {
+		Targets []target `json:"targets"`
+	}
+	
+	if metaResp.Method == "error" || len(metaResp.Payload) == 0 {
+		plugin.Log("info", "Registry discovery failed or empty, using fallback")
+		discovery.Targets = []target{{ID: "project"}, {ID: "buffer"}, {ID: "librarian"}}
+	} else {
+		if err := json.Unmarshal(metaResp.Payload, &discovery); err != nil {
+			return plugin.ErrorReply(msg, "failed_to_discover_plugins: "+err.Error())
+		}
+	}
+
+
+
+	// Broadcast quiesce to all plugins to prepare for backup
+	for _, t := range discovery.Targets {
+		if t.ID == "project" || t.ID == "kernel" || t.ID == "command-manager" || t.ID == "iam" || t.ID == "events" || t.ID == "history" {
+			continue
+		}
+		plugin.RouteMessage(AlloyMessage{
+			Id:      "quiesce-" + fmt.Sprint(time.Now().UnixNano()),
+			MsgType: "event", // Fire and forget for now
+			Method:  "quiesce",
+			Sender:  "project",
+			Target:  Some(t.ID),
+		})
+	}
+
+	// 2. Export state from each plugin
+	states := make(map[string]json.RawMessage)
+	for _, t := range discovery.Targets {
+		if t.ID == "project" || t.ID == "kernel" || t.ID == "command-manager" || t.ID == "iam" || t.ID == "events" || t.ID == "history" {
+			continue
+		}
+
+		plugin.Log("info", "Exporting state from plugin: "+t.ID)
+		stateResp := plugin.Call(AlloyMessage{
+			Id:      "state-export-" + fmt.Sprint(time.Now().UnixNano()),
+			MsgType: "request",
+			Method:  "state:export",
+			Sender:  "project",
+			Target:  Some(t.ID),
+			Metadata: []AlloyTuple2StringStringT{{"alloy.no_audit", "true"}},
+		})
+		
+		if len(stateResp.Payload) > 0 {
+			states[t.ID] = stateResp.Payload
+		}
+	}
+
+	// 3. Get event history
+	plugin.Log("info", "Fetching event history...")
+	historyResp := plugin.Call(AlloyMessage{
+		Id:      "history-get-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "history:get",
+		Sender:  "project",
+		Target:  Some("history"),
+		Payload: []byte(`{"start": 0, "end": 0}`),
+	})
+
+	// 4. Create .tar.gz bundle
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Add manifest
+	manifest := map[string]interface{}{
+		"version":    "1.0",
+		"timestamp":  time.Now().Unix(),
+		"projects":   projects,
+		"workspaces": workspaces,
+		"active_id":  activeWorkspaceID,
+	}
+	manifestData, _ := json.MarshalIndent(manifest, "", "  ")
+	if err := addFileToTar(tw, "manifest.json", manifestData); err != nil {
+		return plugin.ErrorReply(msg, "failed_to_package_manifest: "+err.Error())
+	}
+
+	// Add history
+	if len(historyResp.Payload) > 0 {
+		if err := addFileToTar(tw, "history.json", historyResp.Payload); err != nil {
+			return plugin.ErrorReply(msg, "failed_to_package_history: "+err.Error())
+		}
+	}
+
+	// Add plugin states
+	for id, state := range states {
+		if err := addFileToTar(tw, "plugins/"+id+".json", state); err != nil {
+			return plugin.ErrorReply(msg, "failed_to_package_plugin_state_"+id+": "+err.Error())
+		}
+	}
+
+	tw.Close()
+	gw.Close()
+
+	// 5. Write archive to a file in the data directory
+	filename := fmt.Sprintf("workspace-%s-%d.ark", activeWorkspaceID, time.Now().Unix())
+	if err := os.WriteFile(filename, buf.Bytes(), 0644); err != nil {
+		return plugin.ErrorReply(msg, "failed_to_write_archive: "+err.Error())
+	}
+
+	plugin.Log("info", "Workspace archived successfully: "+filename)
+
+	// 6. Notify Librarian of new archive for indexing
+	archiveMeta, _ := json.Marshal(map[string]string{
+		"filename":   filename,
+		"workspace":  activeWorkspaceID,
+		"timestamp":  fmt.Sprintf("%d", time.Now().Unix()),
+	})
+	plugin.RouteMessage(AlloyMessage{
+		Id:      "lib-archive-" + fmt.Sprint(time.Now().UnixNano()),
+		MsgType: "event",
+		Method:  "librarian:index-archive",
+		Sender:  "project",
+		Target:  Some("librarian"),
+		Payload: archiveMeta,
+	})
+
+	return plugin.Reply(msg, map[string]string{
+		"filename": filename,
+		"status":   "archived",
+		"size":     fmt.Sprintf("%d bytes", buf.Len()),
+	})
+}
+
+// handleListArchives returns a list of all .ark files in the data directory.
+func handleListArchives(msg AlloyMessage) AlloyMessage {
+	entries, err := os.ReadDir("/")
+	if err != nil {
+		return plugin.ErrorReply(msg, "failed_to_read_data_directory: "+err.Error())
+	}
+
+	archives := []string{}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".ark") {
+			archives = append(archives, entry.Name())
+		}
+	}
+
+	return plugin.Reply(msg, map[string]interface{}{
+		"archives": archives,
+	})
+}
+
+// handleDeleteArchive deletes an archive from the data directory.
+func handleDeleteArchive(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
+	}
+
+	// Basic safety check: ensure the filename contains only an actual filename, not paths
+	if strings.Contains(req.Filename, "/") || strings.Contains(req.Filename, "..") {
+		return plugin.ErrorReply(msg, "invalid_filename")
+	}
+
+	if err := os.Remove(req.Filename); err != nil {
+		return plugin.ErrorReply(msg, "failed_to_delete_archive: "+err.Error())
+	}
+
+	plugin.Log("info", "Deleted workspace archive: "+req.Filename)
+	return plugin.Reply(msg, map[string]string{"status": "deleted"})
+}
+
+func addFileToTar(tw *tar.Writer, name string, data []byte) error {
+	hdr := &tar.Header{
+		Name: name,
+		Mode: 0644,
+		Size: int64(len(data)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err := tw.Write(data)
+	return err
+}
+
+// handleRestore restores a workspace from an .ark file
+func handleRestore(msg AlloyMessage) AlloyMessage {
+	var req struct {
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return plugin.ErrorReply(msg, "invalid_request: "+err.Error())
+	}
+
+	plugin.Log("info", "Starting workspace restoration from: "+req.Filename)
+
+	// 1. Read and unpack the archive
+	data, err := os.ReadFile(req.Filename)
+	if err != nil {
+		return plugin.ErrorReply(msg, "failed_to_read_archive: "+err.Error())
+	}
+
+	gr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return plugin.ErrorReply(msg, "invalid_archive_format (gzip): "+err.Error())
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	
+	var manifest struct {
+		Projects   map[string]*Project   `json:"projects"`
+		Workspaces map[string]*Workspace `json:"workspaces"`
+		ActiveID   string                `json:"active_id"`
+	}
+	pluginStates := make(map[string]json.RawMessage)
+	var historyData json.RawMessage
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return plugin.ErrorReply(msg, "error_reading_tar: "+err.Error())
+		}
+
+		content, _ := io.ReadAll(tr)
+
+		if header.Name == "manifest.json" {
+			json.Unmarshal(content, &manifest)
+		} else if header.Name == "history.json" {
+			historyData = content
+		} else if strings.HasPrefix(header.Name, "plugins/") {
+			id := strings.TrimPrefix(header.Name, "plugins/")
+			id = strings.TrimSuffix(id, ".json")
+			pluginStates[id] = content
+		}
+	}
+
+	// 2. Restore core metadata
+	if manifest.Projects != nil {
+		for id, p := range manifest.Projects {
+			projects[id] = p
+		}
+		saveProjects()
+	}
+	if manifest.Workspaces != nil {
+		for id, w := range manifest.Workspaces {
+			workspaces[id] = w
+		}
+		saveWorkspaces()
+	}
+	if manifest.ActiveID != "" {
+		activeWorkspaceID = manifest.ActiveID
+		plugin.KVSet("active-workspace-id", []byte(activeWorkspaceID))
+	}
+
+	// 3. Restore plugin states
+	for id, state := range pluginStates {
+		plugin.Log("info", "Importing state into plugin: "+id)
+		plugin.Call(AlloyMessage{
+			Id:      "state-import-" + fmt.Sprint(time.Now().UnixNano()),
+			MsgType: "request",
+			Method:  "state:import",
+			Sender:  "project",
+			Target:  Some(id),
+			Payload: state,
+			Metadata: []AlloyTuple2StringStringT{{"alloy.no_audit", "true"}},
+		})
+	}
+
+	// 4. Restore history
+	if historyData != nil {
+		plugin.Log("info", fmt.Sprintf("Restoring workspace history (%d bytes)...", len(historyData)))
+		hResp := plugin.Call(AlloyMessage{
+			Id:      "history-restore-" + fmt.Sprint(time.Now().UnixNano()),
+			MsgType: "request",
+			Method:  "history:restore",
+			Sender:  "project",
+			Target:  Some("history"),
+			Payload: historyData,
+		})
+		plugin.Log("info", "History restoration response: "+string(hResp.Payload))
+	}
+
+	plugin.Log("info", "Workspace restored successfully from "+req.Filename)
+	return plugin.Reply(msg, "restored")
+}
+

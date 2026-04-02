@@ -90,7 +90,8 @@ func main() {
 	plugin.Handle("buffer:load", handleLoad)
 	plugin.Handle("buffer:set_metadata", handleSetMetadata)
 	plugin.Handle("buffer:update_cursor", handleUpdateCursor)
-	plugin.Handle("ui:view:editor", func(msg guest.AlloyMessage) guest.AlloyMessage { return plugin.Reply(msg, "ok") })
+	plugin.Handle("quiesce", handleQuiesce)
+
 
 	// Backward compatibility handlers
 	plugin.Handle("create", handleCreate)
@@ -795,3 +796,23 @@ func ListBuffers() []string {
 	}
 	return ids
 }
+
+// handleQuiesce flushes all buffers to KV storage in preparation for archival or shutdown.
+func handleQuiesce(msg guest.AlloyMessage) guest.AlloyMessage {
+	plugin.Log(guest.LogLevelInfo, fmt.Sprintf("Quiescing buffer plugin: flushing %d buffers", len(buffers)))
+	for id, b := range buffers {
+		// Save metadata
+		metaKey := fmt.Sprintf("buffer:%s:meta", id)
+		metaData, _ := json.Marshal(b)
+		plugin.KVSet(metaKey, metaData)
+
+		// Save content if it's a root buffer
+		root, ok := findRootBuffer(id)
+		if ok && root.ID == id {
+			contentKey := fmt.Sprintf("buffer:%s:content", id)
+			plugin.KVSet(contentKey, root.Data)
+		}
+	}
+	return plugin.Reply(msg, "ok")
+}
+

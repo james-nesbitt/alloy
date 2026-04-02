@@ -53,6 +53,11 @@ world alloy {
         // Initialize the plugin with its ID, metadata and background status (Phase 10)
         init: func(id: string, caps: list<capability>, background: bool);
         
+        // Plugin state archival (Phase 13: Workspace Archival)
+        // Standard message methods:
+        // - "state:export": -> json-serialized blob of plugin internal state
+        // - "state:import": <- json-serialized blob to restore plugin state
+
         // Handle an incoming message
         handle-message: func(msg: message) -> message;
         
