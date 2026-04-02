@@ -22,6 +22,21 @@
             bridge.setupWS();
             bridge.setupFormActions();
 
+            // Subscribe to important events
+            setTimeout(() => {
+                const topics = [
+                    "project:opened", "workspace:opened", "workspace:set",
+                    "presence:online", "presence:offline", "presence:heartbeat",
+                    "buffer:update", "buffer:cursors_updated",
+                    "dashboard:widget-registered", "dashboard:widget-updated",
+                    "system:trace", "system:context-changed", "system:theme-changed"
+                ];
+                topics.forEach(topic => {
+                    bridge.executeCommand('events', 'subscribe', { topic: topic });
+                });
+            }, 1000);
+
+
             // Check for WASM availability
             if (typeof Go === 'undefined') {
                 console.error("Alloy: Go WASM support missing/not loaded.");
@@ -88,7 +103,19 @@
                     return;
                 }
 
+                // Handle presence and cursor events specifically
+                if (data.type === 'event' && data.sender === 'events') {
+                    const topic = data.method;
+                    if (topic === 'buffer:cursors_updated' || topic === 'buffer:update') {
+                        const evt = typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload;
+                        console.log("Buffer Event:", topic, evt);
+                        // If it's a cursor update, we should probably re-fetch the buffer presence
+                        // for now just log it
+                    }
+                }
+
                 // Handle published events from the events plugin
+
                 if (data.type === 'event' && data.sender === 'events') {
                     const topic = data.method;
                     const payload = typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload;

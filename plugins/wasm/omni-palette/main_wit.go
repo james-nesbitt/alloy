@@ -41,7 +41,10 @@ type Buffer struct {
 	Type      string `json:"type"`
 	MimeType  string `json:"mime_type"`
 	Timestamp int64  `json:"last_modified"`
+	Cursors   map[string]interface{} `json:"cursors,omitempty"`
 }
+
+
 
 type BufferListResponse struct {
 	Buffers []Buffer `json:"buffers"`
@@ -212,10 +215,19 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 				}
 
 			if score > 0 {
+				collaborators := ""
+				if len(buf.Cursors) > 0 {
+					users := make([]string, 0, len(buf.Cursors))
+					for u := range buf.Cursors {
+						users = append(users, u)
+					}
+					collaborators = " | Collaborators: " + strings.Join(users, ", ")
+				}
+
 				results = append(results, OmniResult{
 					ID:          buf.ID,
 					Title:       buf.Name,
-					Description: fmt.Sprintf("Open Buffer (%s)", buf.MimeType),
+					Description: fmt.Sprintf("Open Buffer (%s)%s", buf.MimeType, collaborators),
 					Type:        "buffer",
 					Score:       score,
 					Shortcut:    "",
@@ -224,6 +236,8 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 						"buffer_id": buf.ID,
 					},
 				})
+
+
 				if len(results) >= maxResultsBudget {
 					break
 				}
@@ -289,7 +303,58 @@ func handleOmniSearch(msg AlloyMessage) AlloyMessage {
 		}
 	}
 
-	// 4. Query Knowledge Graph (Indexer) if available
+	// 4. Get Team Presence
+	presenceResp := plugin.Call(AlloyMessage{
+		Id:      fmt.Sprintf("omni-pres-%d", time.Now().UnixNano()),
+		MsgType: "request",
+		Method:  "team-presence:list",
+		Sender:  "omni-palette",
+		Target:  Some("team-presence"),
+		Payload: []byte("{}"),
+	})
+
+	if presenceResp.Method != "error" && len(presenceResp.Payload) > 0 {
+		var presList []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Status   string `json:"status"`
+			Activity string `json:"activity"`
+		}
+		if err := json.Unmarshal(presenceResp.Payload, &presList); err == nil {
+			for _, p := range presList {
+				if p.ID == msg.Actor {
+					continue
+				}
+
+				score := 0.0
+				name := strings.ToLower(p.Name)
+				activity := strings.ToLower(p.Activity)
+
+				if query == "" {
+					score = 0.2
+				} else if strings.Contains(name, query) || strings.Contains(activity, query) {
+					score += 12.0
+				}
+
+				if score > 0 {
+					results = append(results, OmniResult{
+						ID:          "presence:" + p.ID,
+						Title:       p.Name + " (" + p.Status + ")",
+						Description: "Activity: " + p.Activity,
+						Type:        "presence",
+						Score:       score,
+						Metadata: map[string]string{
+							"action":  "dm",
+							"user_id": p.ID,
+						},
+					})
+				}
+			}
+		}
+	}
+
+	// 5. Query Knowledge Graph (Indexer) if available
+
 	idxSearchReq := IndexSearchRequest{Query: req.Query, Limit: req.Limit}
 	payload, _ := json.Marshal(idxSearchReq)
 	

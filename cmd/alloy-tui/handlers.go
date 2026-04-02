@@ -217,14 +217,14 @@ func (m *Model) processMessage(msg api.Message) tea.Cmd {
 		}
 	}
 
-	if msg.Method == "buffer:update" {
+	if msg.Method == "buffer:update" || msg.Method == "buffer:cursors_updated" {
 		var bData struct {
 			BufferID string `json:"buffer_id"`
 			Event    string `json:"event"`
 		}
 		if err := json.Unmarshal(msg.Payload, &bData); err == nil {
 			if bData.BufferID == m.activeBuffer {
-				if bData.Event == "cursor_update" || bData.Event == "cursors_updated" {
+				if bData.Event == "cursor_update" || bData.Event == "cursors_updated" || msg.Method == "buffer:cursors_updated" {
 					// We only want the cursors, and the buffer read gives them to us
 					cmds = append(cmds, m.fetchBufferContent(m.activeBuffer))
 				} else if !m.isLocalBufferDirty {

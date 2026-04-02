@@ -139,7 +139,30 @@ func main() {
 	}
 }
 
+func updateDashboard() {
+	if len(buffers) == 0 {
+		plugin.UpdateWidget("buffer-summary", []byte("No active buffers"))
+		return
+	}
+
+	var lines []string
+	for _, b := range buffers {
+		users := ""
+		if len(b.UserCursors) > 0 {
+			var uNames []string
+			for name := range b.UserCursors {
+				uNames = append(uNames, name)
+			}
+			users = " (Collaborators: " + strings.Join(uNames, ", ") + ")"
+		}
+		lines = append(lines, fmt.Sprintf("📄 %s [%s]%s", b.Name, b.ID, users))
+	}
+	plugin.UpdateWidget("buffer-summary", []byte(strings.Join(lines, "\n")))
+}
+
 // findRootBuffer finds the root buffer for a given buffer ID.
+
+
 func findRootBuffer(id string) (*Buffer, bool) {
 	curr := buffers[id]
 	if curr == nil {
@@ -223,6 +246,8 @@ func handleCreate(msg guest.AlloyMessage) guest.AlloyMessage {
 
 	// Notify subscribers
 	notifyAll(id, "create")
+	updateDashboard()
+
 
 	return plugin.Reply(msg, b)
 }
@@ -267,6 +292,8 @@ func handleUpdateCursor(msg guest.AlloyMessage) guest.AlloyMessage {
 	plugin.WriteBuffer(presenceID, presenceData)
 
 	notifyAll(req.ID, "cursor_update")
+	updateDashboard()
+
 
 	return plugin.Reply(msg, map[string]string{
 		"status": "ok",
@@ -522,8 +549,9 @@ func handleList(msg guest.AlloyMessage) guest.AlloyMessage {
 		}
 		copyBuf := *b
 		copyBuf.Data = nil
-		copyBuf.UserCursors = nil
 		list = append(list, &copyBuf)
+
+
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].Timestamp > list[j].Timestamp

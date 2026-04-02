@@ -174,61 +174,65 @@ func run(w *app.Window, client *frontend.Client) error {
 
 	client.OnMessage(func(msg api.Message) {
 		if msg.Sender == "events" {
-			var ev struct {
+			topic := msg.Method
+			payload := msg.Payload
+
+			// Support both direct payloads and wrapped (Topic/Data) payloads
+			var wrapped struct {
 				Topic string          `json:"topic"`
 				Data  json.RawMessage `json:"data"`
 			}
-			if err := json.Unmarshal(msg.Payload, &ev); err == nil {
-				switch ev.Topic {
-				case "project:opened":
-					var p frontend.Project
-					if err := json.Unmarshal(ev.Data, &p); err == nil {
-						gui.activeProject = &p
-						if p.Layout.Root != nil {
-							gui.rootLayout = p.Layout.Root
-						} else {
-							mode := p.Layout.DefaultMode
-							if mode == "" {
-								mode = "dashboard"
-							}
-							gui.rootLayout = &frontend.LayoutNode{
-								ID:   "main-pane",
-								Type: "pane",
-								Mode: mode,
-							}
-							gui.focusedPaneID = "main-pane"
+			if err := json.Unmarshal(msg.Payload, &wrapped); err == nil && wrapped.Topic != "" {
+				topic = wrapped.Topic
+				payload = wrapped.Data
+			}
+
+			switch topic {
+			case "project:opened":
+				var p frontend.Project
+				if err := json.Unmarshal(payload, &p); err == nil {
+					gui.activeProject = &p
+					if p.Layout.Root != nil {
+						gui.rootLayout = p.Layout.Root
+					} else {
+						mode := p.Layout.DefaultMode
+						if mode == "" {
+							mode = "dashboard"
 						}
-					}
-				case "workspace:set", "workspace:opened":
-					var ws frontend.Workspace
-					if err := json.Unmarshal(ev.Data, &ws); err == nil {
-						gui.activeWorkspace = &ws
-						if ws.Layout != "" {
-							var wCfg frontend.WorkspaceConfig
-							if err := json.Unmarshal([]byte(ws.Layout), &wCfg); err == nil && wCfg.Root != nil {
-								gui.rootLayout = wCfg.Root
-							}
+						gui.rootLayout = &frontend.LayoutNode{
+							ID:   "main-pane",
+							Type: "pane",
+							Mode: mode,
 						}
-					}
-				case "system:context-changed":
-					var data struct {
-						ContextID string `json:"context_id"`
-					}
-					if err := json.Unmarshal(ev.Data, &data); err == nil {
-						client.SetContext(data.ContextID)
-						discoverCh <- true // Trigger immediate re-discovery
-					}
-				case "system:theme-changed":
-					var data struct {
-						Theme string `json:"theme"`
-					}
-					if err := json.Unmarshal(ev.Data, &data); err == nil {
-						// Here we could re-trigger theme application
-						// applySystemTheme would need to be updated to handle specific themes
+						gui.focusedPaneID = "main-pane"
 					}
 				}
+			case "workspace:set", "workspace:opened":
+				var ws frontend.Workspace
+				if err := json.Unmarshal(payload, &ws); err == nil {
+					gui.activeWorkspace = &ws
+					if ws.Layout != "" {
+						var wCfg frontend.WorkspaceConfig
+						if err := json.Unmarshal([]byte(ws.Layout), &wCfg); err == nil && wCfg.Root != nil {
+							gui.rootLayout = wCfg.Root
+						}
+					}
+				}
+			case "buffer:update", "buffer:cursors_updated":
+				w.Invalidate() // Trigger redraw of dashboard widgets
+			case "system:context-changed":
+				var data struct {
+					ContextID string `json:"context_id"`
+				}
+				if err := json.Unmarshal(payload, &data); err == nil {
+					client.SetContext(data.ContextID)
+					discoverCh <- true
+				}
+			case "system:theme-changed":
+				// ... theme logic
 			}
 		}
+
 
 		if msg.Method == "dashboard:widget-registered" {
 			var w api.Widget

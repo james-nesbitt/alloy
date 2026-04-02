@@ -68,11 +68,11 @@ func (m Model) View() string {
 
 	remoteStr := ""
 	if m.remoteCursors != nil {
-		for u := range m.remoteCursors {
+		for u, c := range m.remoteCursors {
 			if u == m.client.Actor() {
 				continue
 			}
-			remoteStr += " | " + u
+			remoteStr += fmt.Sprintf(" | %s (%d:%d)", u, c.Row+1, c.Col+1)
 		}
 	}
 
