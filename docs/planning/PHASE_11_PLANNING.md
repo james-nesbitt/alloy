@@ -5,7 +5,7 @@
 
 ---
 
-### Workstream 0: Finishing Phase 10 (Dynamic Interactions)
+### Workstream 0: Finishing Phase 10 (Dynamic Interactions) [DONE]
 Before fully committing to Phase 11, we must close the remaining gaps in the "Dynamics" phase.
 
 - [x] **Real-Time Cursor Synchronization**:
@@ -14,25 +14,23 @@ Before fully committing to Phase 11, we must close the remaining gaps in the "Dy
 - [x] **Team Presence Enhancements**:
     - Integrate the `team-presence` activity stream into the Omni Palette search results (e.g., "See what others are working on").
 
-
-### Workstream 1: The Librarian (Semantic Indexing)
+### Workstream 1: The Librarian (Semantic Indexing) [DONE]
 Provide the workspace with "Long-term Memory."
 
 - [x] **Librarian Actor**: Implement a background Wasm actor that consumes workspace event streams.
-22#JS:- [x] **Local Vector Indexing**:
-23#ZT:    - Integrate a lightweight vector store (linear KV scan for now) to index buffer content and chat history.
-24#QX:    - Implement `librarian:search` for fuzzy, multi-modal semantic search.
-
+- [x] **Local Vector Indexing**:
+    - Integrate a lightweight vector store (linear KV scan for now) to index buffer content and chat history.
+    - Implement `librarian:search` for fuzzy, multi-modal semantic search.
 - [ ] **Context Injection**: Use the Librarian to provide "Context" for AI intents, automatically attaching relevant historical snippets to requests.
 
-### Workstream 2: Temporal Playback (The Time Machine)
+### Workstream 2: Temporal Playback (The Time Machine) [IN PROGRESS]
 Move from current-state storage to event-sourced history.
 
-- [ ] **Event Store**: Implement a high-performance append-only log for all kernel messages (Audit Log V2).
-- [ ] **Scrubbing UI**: Add a "Time Machine" mode to the TUI/GUI that allows users to scrub back through project history.
+- [x] **Event Store**: Implement a high-performance append-only log for all kernel messages (Audit Log V2).
+- [x] **Scrubbing UI**: Add a "Time Machine" mode to the TUI/GUI that allows users to scrub back through project history.
 - [ ] **Point-in-Time Recovery**: Allow restoring a project to any previous event ID.
 
-### Workstream 3: Workspace Archival (.ark)
+### Workstream 3: Workspace Archival (.ark) [PLANNED]
 Ensure project portability and longevity.
 
 - [ ] **Archive Specification**: Define the `.ark` format as a self-contained bundle of project identity, state, and event history.

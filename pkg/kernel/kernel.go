@@ -55,7 +55,6 @@ type Kernel struct {
 	history     *history.Store
 	eventCh     chan api.Message
 
-
 	// telemetry
 	telemetry *Telemetry
 
@@ -204,7 +203,6 @@ func (k *Kernel) processEventLog() {
 	}
 }
 
-
 // SetInsecure disables security enforcement (RBAC, mTLS, etc.) in the kernel.
 func (k *Kernel) SetInsecure(insecure bool) {
 	k.insecure = insecure
@@ -269,7 +267,6 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 		}
 	}
 
-
 	// 1. Resolve Target (Capability resolution) early for IAM
 	target := msg.Target
 	k.mu.RLock()
@@ -296,7 +293,6 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 				msg.Sender == "iam" || msg.Sender == "events" ||
 				msg.Sender == "widget-manager" || msg.Sender == "command-manager" ||
 				msg.Sender == "history"
-
 
 			if !isSystemService && msg.Type != api.TypeResponse {
 				contextID, _ := msg.Metadata["context"].(string)

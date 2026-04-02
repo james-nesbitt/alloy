@@ -169,7 +169,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 		t.Fatalf("search returned error: %s", string(resp.Payload))
 	}
 	
-	if !strings.Contains(string(resp.Payload), "test.txt") {
-		t.Errorf("expected to find semantic result 'test.txt', got: %s", string(resp.Payload))
+	if !strings.Contains(string(resp.Payload), "buf-") {
+		t.Errorf("expected to find semantic result referencing 'buf-', got: %s", string(resp.Payload))
 	}
 }

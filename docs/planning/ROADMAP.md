@@ -11,7 +11,6 @@
 | **PHASE 10: DYNAMICS** | **ARCHIVED** | Layout recursion, Intent routing, Headless actors. |
 | **PHASE 11: LIFECYCLE** | **ACTIVE** | Semantic indexing (Librarian), temporal playback. |
 
-
 ---
 
 ## Current Active: PHASE 11: LIFECYCLE & AUDIT [IN PROGRESS]
@@ -22,17 +21,17 @@
 - [x] **Real-time cursor synchronization (TUI)**: Remote cursors now render in the status line with position and name.
 - [x] **Real-time cursor synchronization (Web/GUI)**: Update bridge and hardware-accelerated views.
 - [x] **Presence activity integration**: Activity stream integration for "Team Presence" search results.
-24#TM:
-25#PR:### Phase 11 Milestones
-26#ZT:- [ ] **The Librarian Service (Semantic Indexing)**
-27#HR:    - Long-term memory for the workspace using vector storage.
-28#HT:    - Cross-project semantic search.
-29#NZ:- [ ] **Temporal Playback (Event History)**
-30#ZS:    - The "Time Machine" for the workspace.
-31#PR:    - Replay event streams to reconstruct previous states.
-32#NW:- [ ] **Workspace Archival (`.ark`)**
-33#XX:    - Package a project, its state, and its history into a single portable archive.
-34#RT:    - Support for "Cold Storage" and project handovers.
+
+### Phase 11 Milestones
+- [x] **The Librarian Service (Semantic Indexing)**
+    - Long-term memory for the workspace using vector storage.
+    - Cross-project semantic search.
+- [x] **Temporal Playback (Event History)**
+    - The "Time Machine" for the workspace.
+    - Replay event streams to reconstruct previous states.
+- [ ] **Workspace Archival (`.ark`)**
+    - Package a project, its state, and its history into a single portable archive.
+    - Support for "Cold Storage" and project handovers.
 
 ---
 

@@ -464,12 +464,12 @@ func (m Model) timeMachineView() string {
 	}
 
 	content := strings.Join(rows, "\n")
-	
+
 	style := lipgloss.NewStyle().
 		Width(m.width).
 		Height(m.height - 5).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("3"))
-	
+
 	return style.Render(content)
 }

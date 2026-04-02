@@ -391,7 +391,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyIdx = len(msg) - 1
 		return m, nil
 
-
 	case tea.KeyMsg:
 		// Global quit
 		if msg.Type == tea.KeyCtrlC {
@@ -567,4 +566,3 @@ func (m Model) fetchHistory() tea.Cmd {
 }
 
 type historyMsg []string
-

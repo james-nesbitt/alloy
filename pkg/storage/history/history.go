@@ -79,7 +79,7 @@ func (s *Store) Append(msg api.Message) (uint64, error) {
 	}
 
 	offset, _ := s.file.Seek(0, 1) // Get current offset
-	
+
 	_, err = s.file.Write(append(data, '\n'))
 	if err != nil {
 		return 0, err
@@ -105,10 +105,10 @@ func (s *Store) GetRange(start, end uint64) ([]Event, error) {
 	}
 
 	events := make([]Event, 0, end-start)
-	
+
 	// In a real implementation we would read from disk.
 	// For now we fulfill with whatever we can easily.
-	
+
 	return events, nil
 }
 

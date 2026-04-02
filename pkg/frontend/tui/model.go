@@ -34,16 +34,14 @@ const (
 )
 
 const (
-	ModeNormal    = 0
-	ModeInsert    = 1
-	ModeCommand   = 2
-	ModeChat      = 3
-	ModeForm      = 4
-	ModeDashboard = 5
-	ModeEdit      = 6
-	ModeInspector = 7
-	ModeOmni      = 8
+	ModeNormal      = 0
+	ModeInsert      = 1
+	ModeCommand     = 2
+	ModeChat        = 3
+	ModeForm        = 4
+	ModeDashboard   = 5
+	ModeEdit        = 6
+	ModeInspector   = 7
+	ModeOmni        = 8
 	ModeTimeMachine = 9
-
-
 )

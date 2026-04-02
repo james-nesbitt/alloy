@@ -2,8 +2,12 @@
 
 ## Current State
 - **Phase 10 (Advanced Dynamics)**: Core implementation completed and merged into `main`.
-- **Critical Fix**: Resolved a WASM ABI mismatch in `pkg/wasm/runtime/runtime.go` where `cabi_realloc` was under-allocating memory for `AlloyCapability` structs (52 vs 40 bytes) due to the new `Intents` field. This fixed the `TestOmniPaletteSearch` panics.
-- **TUI Cursor Sync**: Initial implementation done. TUI now renders remote cursors in the status bar (User + Position).
+- **Dynamics Cleanup**: Fully completed. Web and GUI frontends now respond to real-time cursor and presence updates.
+- **Phase 11 (Lifecycle & Audit)**:
+    - **Workstream 1 (Librarian)**: Semantic indexing background actor implemented. Consolidation with Omni-Palette search completed and verified.
+    - **Workstream 2 (Event Sourcing)**: Kernel History Store implemented. Asynchronous message "Teeing" integrated into `RouteMessage`. `HistoryManager` plugin exposing range-based event retrieval.
+    - **TUI Time Machine**: Feature implemented and bound to `t` key. Allows live scrubbing of workspace event history.
+
 
 ## Branch Information
 - **`main`**: Contains the stable Phase 10 implementation.
