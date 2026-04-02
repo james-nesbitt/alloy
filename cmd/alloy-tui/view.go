@@ -68,11 +68,11 @@ func (m Model) View() string {
 
 	remoteStr := ""
 	if m.remoteCursors != nil {
-		for u, c := range m.remoteCursors {
+		for u := range m.remoteCursors {
 			if u == m.client.Actor() {
 				continue
 			}
-			remoteStr += fmt.Sprintf(" | %s (%d:%d)", u, c.Row+1, c.Col+1)
+			remoteStr += " | " + u
 		}
 	}
 
@@ -410,6 +410,9 @@ func (m Model) renderPaneNode(p *frontend.LayoutNode, width int, height int) str
 		mode = tui.ModeChat
 	case "editor":
 		mode = tui.ModeEdit
+	case "timemachine":
+		mode = tui.ModeTimeMachine
+
 	case "inspector":
 		mode = tui.ModeInspector
 	case "insert":
@@ -430,9 +433,43 @@ func (m Model) renderPaneNode(p *frontend.LayoutNode, width int, height int) str
 		m.inspectorVp.Width = width
 		m.inspectorVp.Height = height
 		return m.inspectorVp.View()
+	} else if mode == tui.ModeTimeMachine {
+		return m.timeMachineView()
 	}
 
 	m.viewport.Width = width
 	m.viewport.Height = height
 	return m.viewport.View()
+}
+
+func (m Model) timeMachineView() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3")).MarginLeft(1)
+	itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")).MarginLeft(2)
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("3")).Foreground(lipgloss.Color("15")).Bold(true).MarginLeft(1)
+
+	var rows []string
+	rows = append(rows, titleStyle.Render("Workspace History (Scrub with Arrows)"))
+	rows = append(rows, "")
+
+	for i, ev := range m.historyEvents {
+		if i == m.historyIdx {
+			rows = append(rows, selectedStyle.Render(" > "+ev))
+		} else {
+			rows = append(rows, itemStyle.Render("   "+ev))
+		}
+	}
+
+	if len(m.historyEvents) == 0 {
+		rows = append(rows, "   (No events captured yet)")
+	}
+
+	content := strings.Join(rows, "\n")
+	
+	style := lipgloss.NewStyle().
+		Width(m.width).
+		Height(m.height - 5).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("3"))
+	
+	return style.Render(content)
 }

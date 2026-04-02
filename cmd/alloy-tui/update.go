@@ -333,6 +333,12 @@ func (m Model) dispatchIntent(intent modal.Intent) (tea.Model, tea.Cmd) {
 		case "inspector-mode":
 			m.Mode = tui.ModeInspector
 			m.isLeader = false
+		case "timemachine-mode":
+			m.lastMainMode = m.Mode
+			m.Mode = tui.ModeTimeMachine
+			m.historyIdx = 0
+			return m, m.fetchHistory()
+
 		case "omni-mode":
 			m.lastMainMode = m.Mode
 			m.Mode = tui.ModeOmni
@@ -379,6 +385,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.doDiscovery,
 			m.sendPresenceHeartbeat(),
 		)
+
+	case historyMsg:
+		m.historyEvents = msg
+		m.historyIdx = len(msg) - 1
+		return m, nil
+
 
 	case tea.KeyMsg:
 		// Global quit
@@ -533,3 +545,26 @@ func (m Model) doDiscovery() tea.Msg {
 	}
 	return dMsg
 }
+
+func (m Model) fetchHistory() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := m.client.Send(context.Background(), "history", "history:get", []byte(`{"start":0, "end":100}`))
+		if err != nil {
+			return errMsg(err)
+		}
+		var events []struct {
+			Message api.Message `json:"message"`
+		}
+		if err := json.Unmarshal(resp.Payload, &events); err == nil {
+			var eventStrs []string
+			for _, e := range events {
+				eventStrs = append(eventStrs, fmt.Sprintf("%-10s %-15s %s", e.Message.Sender, e.Message.Target, e.Message.Method))
+			}
+			return historyMsg(eventStrs)
+		}
+		return nil
+	}
+}
+
+type historyMsg []string
+

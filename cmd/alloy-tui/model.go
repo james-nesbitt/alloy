@@ -92,6 +92,10 @@ type Model struct {
 	inspectorLogs []string
 	inspectorVp   viewport.Model
 
+	historyEvents []string
+	historyIdx    int // Scrubbing index
+
+
 	lastMainMode       int
 	localBufferVersion int
 	isLocalBufferDirty bool
@@ -188,6 +192,10 @@ func NewModel(client *frontend.Client, msgCh chan api.Message) Model {
 	driver.Customize(modal.ModeNormal, "ctrl+p", func(s *modal.State) modal.Intent {
 		return modal.ActionIntent{Verb: "omni-mode"}
 	})
+	driver.Customize(modal.ModeNormal, "t", func(s *modal.State) modal.Intent {
+		return modal.ActionIntent{Verb: "timemachine-mode"}
+	})
+
 
 	driver.Customize(modal.ModeNormal, "tab", func(s *modal.State) modal.Intent {
 		return modal.WindowIntent{Action: "focus-next"}

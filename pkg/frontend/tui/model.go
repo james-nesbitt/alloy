@@ -43,4 +43,7 @@ const (
 	ModeEdit      = 6
 	ModeInspector = 7
 	ModeOmni      = 8
+	ModeTimeMachine = 9
+
+
 )

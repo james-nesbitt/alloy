@@ -14,6 +14,8 @@ import (
 
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/storage"
+	"github.com/james-nesbitt/alloy/pkg/storage/history"
+
 	"github.com/james-nesbitt/alloy/pkg/wasm"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -50,6 +52,9 @@ type Kernel struct {
 	storage     storage.StateStore
 	dataDir     string
 	intents     *IntentBroker
+	history     *history.Store
+	eventCh     chan api.Message
+
 
 	// telemetry
 	telemetry *Telemetry
@@ -167,10 +172,38 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	k.RegisterPlugin(&wasmManagerPlugin{kernel: k})
 
 	// Start the monitor
+	// Start the monitor
 	k.wasmManager.StartMonitor(k.ctx, 30*time.Second)
+
+	// Initialize History Store (Phase 11: Event Sourcing)
+	eventDir := filepath.Join(dataDir, "events")
+	hStore, _ := history.NewStore(eventDir)
+	k.history = hStore
+	k.eventCh = make(chan api.Message, 10000)
+
+	// Register History Manager to expose history to other plugins
+	if k.history != nil {
+		hManager := NewHistoryManager(logger, k.history)
+		k.RegisterPlugin(hManager)
+		go k.processEventLog()
+	}
 
 	return k, nil
 }
+
+func (k *Kernel) processEventLog() {
+	for {
+		select {
+		case msg := <-k.eventCh:
+			if k.history != nil {
+				_, _ = k.history.Append(msg)
+			}
+		case <-k.stopCh:
+			return
+		}
+	}
+}
+
 
 // SetInsecure disables security enforcement (RBAC, mTLS, etc.) in the kernel.
 func (k *Kernel) SetInsecure(insecure bool) {
@@ -227,6 +260,16 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 	k.logger.Debug("kernel routing message", "id", msg.ID, "sender", msg.Sender, "target", msg.Target, "method", msg.Method)
 	k.telemetry.RecordMessage(ctx, msg.Sender, msg.Target, msg.Method)
 
+	// Asynchronously log to history (Phase 11: Event Sourcing)
+	if k.history != nil && (msg.Type == api.TypeRequest || msg.Type == api.TypeEvent) {
+		select {
+		case k.eventCh <- msg:
+		default:
+			// Drop if channel full to avoid blocking routing
+		}
+	}
+
+
 	// 1. Resolve Target (Capability resolution) early for IAM
 	target := msg.Target
 	k.mu.RLock()
@@ -251,7 +294,9 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			// Security Check: System services are exempt from RBAC
 			isSystemService := msg.Sender == "system" || msg.Sender == "kernel" ||
 				msg.Sender == "iam" || msg.Sender == "events" ||
-				msg.Sender == "widget-manager" || msg.Sender == "command-manager"
+				msg.Sender == "widget-manager" || msg.Sender == "command-manager" ||
+				msg.Sender == "history"
+
 
 			if !isSystemService && msg.Type != api.TypeResponse {
 				contextID, _ := msg.Metadata["context"].(string)
