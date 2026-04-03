@@ -23,12 +23,13 @@ Provide the workspace with "Long-term Memory."
     - Implement `librarian:search` for fuzzy, multi-modal semantic search.
 - [ ] **Context Injection**: Use the Librarian to provide "Context" for AI intents, automatically attaching relevant historical snippets to requests.
 
-### Workstream 2: Temporal Playback (The Time Machine) [IN PROGRESS]
+### Workstream 2: Temporal Playback (The Time Machine) [DONE]
 Move from current-state storage to event-sourced history.
 
-- [x] **Event Store**: Implement a high-performance append-only log for all kernel messages (Audit Log V2).
+- [x] **Event Store**: Implement a high-performance append-only log for all kernel messages (Audit Log V2) with durability across restarts.
 - [x] **Scrubbing UI**: Add a "Time Machine" mode to the TUI/GUI that allows users to scrub back through project history.
-- [ ] **Point-in-Time Recovery**: Allow restoring a project to any previous event ID.
+- [x] **Temporal Playback (Replay)**: Re-route historical events through the kernel to recreate past states.
+- [x] **Point-in-Time Recovery**: Allow restoring history state by truncating to any previous event index.
 
 ### Workstream 3: Workspace Archival (.ark) [DONE]
 Ensure project portability and longevity.

@@ -1,7 +1,9 @@
 package history
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -51,14 +53,35 @@ func NewStore(dataDir string) (*Store, error) {
 }
 
 func (s *Store) rebuildIndex() error {
-	// For simplicity, we scan the file and find line endings
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, err := s.file.Seek(0, 0); err != nil {
 		return err
 	}
 
-	// Seek back to end for appending
-	_, err := s.file.Seek(0, 2)
+	s.indexOffsets = []int64{}
+	s.nextIndex = 0
+
+	reader := bufio.NewReader(s.file)
+	offset := int64(0)
+
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			s.indexOffsets = append(s.indexOffsets, offset)
+			offset += int64(len(line))
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+	}
+
 	s.nextIndex = uint64(len(s.indexOffsets))
+	_, err := s.file.Seek(0, 2)
 	return err
 }
 
@@ -97,7 +120,6 @@ func (s *Store) GetRange(start, end uint64) ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-
 	total := uint64(len(s.indexOffsets))
 	if start >= total {
 		return []Event{}, nil
@@ -107,20 +129,20 @@ func (s *Store) GetRange(start, end uint64) ([]Event, error) {
 	}
 
 	events := make([]Event, 0, end-start)
-	
+
 	// Read entire file for simplicity for now, or seek for each?
 	// Given this is a staff engineer job, let's seek correctly if we can.
 	// But actually, we don't store the offsets persistently yet (they are in memory).
-	
+
 	// Open a separate read-only file handle for concurrent access or just use the existing one with proper locking?
 	// Since we already have the RLock, we can seek the existing file.
-	
+
 	for i := start; i < end; i++ {
 		offset := s.indexOffsets[i]
 		if _, err := s.file.Seek(offset, 0); err != nil {
 			return events, err
 		}
-		
+
 		// Read one line (event)
 		// We could use a scanner, but we just need the next JSON object.
 		var ev Event
@@ -133,6 +155,33 @@ func (s *Store) GetRange(start, end uint64) ([]Event, error) {
 
 	return events, nil
 }
+
+// TruncateTo removes events from the history starting from the given index (inclusive).
+func (s *Store) TruncateTo(index uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	total := uint64(len(s.indexOffsets))
+	if index >= total {
+		return nil
+	}
+
+	offset := s.indexOffsets[index]
+	// Also seek back to the head of the file for the truncate to take effect in O_APPEND mode?
+	// Actually Truncate works regardless of Seek.
+	if err := s.file.Truncate(offset); err != nil {
+		return err
+	}
+
+	if _, err := s.file.Seek(offset, 0); err != nil {
+		return err
+	}
+
+	s.indexOffsets = s.indexOffsets[:index]
+	s.nextIndex = index
+	return nil
+}
+
 // Clear truncates the history store. Use with caution.
 func (s *Store) Clear() error {
 	s.mu.Lock()
@@ -148,6 +197,7 @@ func (s *Store) Clear() error {
 	s.nextIndex = 0
 	return nil
 }
+
 // Restore clears the history and imports the given events.
 func (s *Store) Restore(events []Event) error {
 	if err := s.Clear(); err != nil {
@@ -175,11 +225,6 @@ func (s *Store) Restore(events []Event) error {
 	s.nextIndex = uint64(len(s.indexOffsets))
 	return nil
 }
-
-
-
-
-
 
 // Close closes the store.
 func (s *Store) Close() error {

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
 	"github.com/james-nesbitt/alloy/pkg/storage"
@@ -39,7 +38,9 @@ func TestWorkspaceArchivalSerial(t *testing.T) {
 	}
 	defer hStore.Close()
 
-	historyManager := kernel.NewHistoryManager(logger, hStore)
+	historyManager := kernel.NewHistoryManager(logger, hStore, func(ctx context.Context, start, end uint64) error {
+		return nil // No replayer for archival smoke test
+	})
 
 	pluginDir := filepath.Join(tempDir, "plugins")
 	os.MkdirAll(pluginDir, 0755)
@@ -89,10 +90,10 @@ func TestWorkspaceArchivalSerial(t *testing.T) {
 	// Step 1: Create a project
 	t.Log("Step 1: Creating project")
 	_, err = manager.Call(context.Background(), "project", api.Message{
-		ID:     "init-1",
-		Method: "project:create",
-		Sender: "test",
-		Target: "project",
+		ID:      "init-1",
+		Method:  "project:create",
+		Sender:  "test",
+		Target:  "project",
 		Payload: []byte(`{"name": "test-project", "description": "test"}`),
 	})
 	if err != nil {
