@@ -136,7 +136,6 @@ func (m *Manager) SetCall(call func(ctx context.Context, msg api.Message) (api.M
 	m.callFn = call
 }
 
-
 // Call is a helper that sends a message and waits for a response synchronously.
 func (m *Manager) Call(ctx context.Context, pluginID string, msg api.Message) (api.Message, error) {
 	if err := m.RouteMessage(ctx, pluginID, msg); err != nil {
@@ -144,7 +143,6 @@ func (m *Manager) Call(ctx context.Context, pluginID string, msg api.Message) (a
 	}
 	return m.GetResponse(ctx, pluginID, msg.ID)
 }
-
 
 // GetResponse gets a response from a plugin.
 func (m *Manager) GetResponse(ctx context.Context, pluginID string, requestID string) (api.Message, error) {

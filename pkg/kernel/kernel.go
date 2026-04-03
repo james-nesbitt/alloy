@@ -182,7 +182,7 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 
 	// Register History Manager to expose history to other plugins
 	if k.history != nil {
-		hManager := NewHistoryManager(logger, k.history)
+		hManager := NewHistoryManager(logger, k.history, k.ReplayEvents)
 		k.RegisterPlugin(hManager)
 		go k.processEventLog()
 	}
@@ -245,6 +245,28 @@ func (k *Kernel) Shutdown(ctx context.Context) error {
 	if k.telemetry != nil {
 		return k.telemetry.Shutdown(ctx)
 	}
+	return nil
+}
+
+// ReplayEvents fetches events from the store and routes their messages with no_audit=true.
+func (k *Kernel) ReplayEvents(ctx context.Context, start, end uint64) error {
+	if k.history == nil {
+		return errors.New("history store not initialized")
+	}
+
+	events, err := k.history.GetRange(start, end)
+	if err != nil {
+		return err
+	}
+
+	// Add special context to skip auditing and prevent recursion
+	replayCtx := context.WithValue(ctx, auditContextKey, true)
+
+	for _, ev := range events {
+		k.logger.Debug("replaying event", "index", ev.Index, "id", ev.Message.ID)
+		k.RouteMessage(replayCtx, ev.Message)
+	}
+
 	return nil
 }
 
