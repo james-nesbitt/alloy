@@ -78,7 +78,7 @@ func TestStoreTruncate(t *testing.T) {
 	}
 
 	s.Close()
-	
+
 	s2, err := NewStore(tempDir)
 	if err != nil {
 		t.Fatal(err)

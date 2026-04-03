@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/storage/history"
+	"go.opentelemetry.io/otel"
 )
 
 func TestKernelHistoryReplay(t *testing.T) {
@@ -37,8 +37,8 @@ func TestKernelHistoryReplay(t *testing.T) {
 		plugins: map[string]api.Plugin{
 			"plugin-A": &dummyPlugin{received: receivedMessages},
 		},
-		history: store,
-		tracer:  otel.Tracer("test"),
+		history:   store,
+		tracer:    otel.Tracer("test"),
 		telemetry: nil,
 	}
 
@@ -94,7 +94,7 @@ type dummyPlugin struct {
 	received chan api.Message
 }
 
-func (d *dummyPlugin) ID() string { return "dummy" }
+func (d *dummyPlugin) ID() string                     { return "dummy" }
 func (d *dummyPlugin) Capabilities() []api.Capability { return nil }
 func (d *dummyPlugin) HandleMessage(ctx context.Context, msg api.Message) (api.Message, error) {
 	d.received <- msg
