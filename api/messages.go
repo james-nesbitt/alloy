@@ -136,6 +136,7 @@ type Intent struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"` // e.g., "intent:save"
 	Sender    string          `json:"sender"`
+	Target    string          `json:"target,omitempty"` // Specific target if known (Phase 12)
 	Payload   json.RawMessage `json:"payload,omitempty"`
 	ContextID string          `json:"context_id,omitempty"`
 }
@@ -197,6 +198,7 @@ type SharedBuffer interface {
 	Resize(newSize int) error
 	ApplyChange(change BufferChange) error
 	OnUpdate(callback func(id string, offset int, length int))
+	VisualIntent(intent VisualIntent) error
 }
 
 // BufferChange represents a mutation to a buffer.

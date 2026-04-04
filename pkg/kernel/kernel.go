@@ -861,9 +861,15 @@ func (k *Kernel) listRegistrations() []api.Registration {
 	}
 	// Add frontends
 	for id := range k.frontends {
+		status := "frontend"
+		headless := k.headless[id]
+		if headless {
+			status = "headless-client"
+		}
 		regs = append(regs, api.Registration{
-			ID:   id,
-			Type: "frontend",
+			ID:       id,
+			Type:     status,
+			Headless: headless,
 		})
 	}
 	return regs
