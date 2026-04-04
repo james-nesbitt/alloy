@@ -14,6 +14,7 @@ import (
 type Store struct {
 	baseDir            string
 	InsecureSkipVerify bool
+	Hardware           string // Default hardware provider for new identities
 }
 
 func NewStore(baseDir string) *Store {
@@ -21,6 +22,11 @@ func NewStore(baseDir string) *Store {
 		baseDir:            baseDir,
 		InsecureSkipVerify: true,
 	}
+}
+
+// SetHardware sets the default hardware provider (e.g. "tpm")
+func (s *Store) SetHardware(provider string) {
+	s.Hardware = provider
 }
 
 func (s *Store) CADir() string {
@@ -74,6 +80,7 @@ func (s *Store) CreateInstanceIdentity(ca *pki.KeyPair, name string) (*pki.KeyPa
 		Organization: "Alloy Instances",
 		DNSNames:     []string{"localhost", name},
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		Hardware:     s.Hardware,
 	}
 
 	pair, err := pki.SignCertificate(ca, req)
@@ -99,6 +106,7 @@ func (s *Store) GetClientTLSConfig(ca *pki.KeyPair, clientName string) (*tls.Con
 	req := pki.IssueRequest{
 		CommonName:   clientName,
 		Organization: "Alloy Clients",
+		Hardware:     s.Hardware,
 	}
 
 	pair, err := pki.SignCertificate(ca, req)
@@ -106,7 +114,7 @@ func (s *Store) GetClientTLSConfig(ca *pki.KeyPair, clientName string) (*tls.Con
 		return nil, err
 	}
 
-	tlsCert, err := tls.X509KeyPair(pair.CertPEM, pair.KeyPEM)
+	tlsCert, err := pki.LoadTLSCertificate(pair.CertPEM, pair.KeyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +132,7 @@ func (s *Store) GetClientTLSConfig(ca *pki.KeyPair, clientName string) (*tls.Con
 
 // GetServerTLSConfig returns a config for a core instance
 func (s *Store) GetServerTLSConfig(ca *pki.KeyPair, pair *pki.KeyPair) (*tls.Config, error) {
-	tlsCert, err := tls.X509KeyPair(pair.CertPEM, pair.KeyPEM)
+	tlsCert, err := pki.LoadTLSCertificate(pair.CertPEM, pair.KeyPEM)
 	if err != nil {
 		return nil, err
 	}
