@@ -14,9 +14,9 @@ ETC_DIR      := DIST_ROOT + "/etc/alloy"
 
 WASM_BUILD   := PLUGIN_DIR
 BIN_BUILD    := BIN_DIR
-GEN_DIR      := BUILD_DIR + "/gen"
+SH_DIR       := BUILD_DIR + "/gen"
 INTERNAL_BIN := BUILD_DIR + "/tmp/bin"
-BINDINGS_DIR := GEN_DIR + "/bindings"
+BINDINGS_DIR := SH_DIR + "/bindings"
 PLUGINS_SRC  := PROJECT_ROOT + "/plugins/wasm"
 
 # Default action
@@ -42,7 +42,10 @@ fmt:
 
 # Remove build artifacts and temporary files
 clean:
-    rm -rf {{BUILD_DIR}}
+    rm -rf {{BUILD_DIR}} bin/ data/
+    rm -f alloy-core alloy-tui alloy-gui-gio alloy-gui alloy-web alloy
+    rm -f build_err.txt build_output.txt debug_draw.txt
+    rm -f *.test coverage.out
     @echo "Cleanup complete."
 
 # --- PROJECT SETUP & CODE GENERATION ---
@@ -59,10 +62,17 @@ check-deps:
 # Ensure mock wasm-opt exists (TinyGo dependency)
 setup-wasm-opt:
     @mkdir -p {{INTERNAL_BIN}}
-    @if [ ! -f {{INTERNAL_BIN}}/wasm-opt ]; then \
-        printf '#!/bin/bash\n# Mock wasm-opt to skip optimization steps if Binaryen is missing\nwhile [[ $$# -gt 0 ]]; do\n  case $$1 in\n    --output)\n      OUTPUT="$$2"\n      shift; shift\n      ;;\n    *)\n      INPUT="$$1"\n      shift\n      ;;\n  esac\ndone\nif [ ! -z "$$OUTPUT" ]; then\n  cp "$$INPUT" "$$OUTPUT"\nfi\n' > {{INTERNAL_BIN}}/wasm-opt; \
-        chmod +x {{INTERNAL_BIN}}/wasm-opt; \
-    fi
+    @echo '#!/bin/bash' > {{INTERNAL_BIN}}/wasm-opt
+    @echo 'if [[ "$1" == "--version" ]]; then echo "wasm-opt version 121"; exit 0; fi' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo '# Mock wasm-opt to skip optimization steps if Binaryen is missing' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo 'while [[ $# -gt 0 ]]; do' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo '  case $1 in' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo '    --output) OUTPUT="$2"; shift; shift ;;' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo '    *) INPUT="$1"; shift ;;' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo '  esac' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo 'done' >> {{INTERNAL_BIN}}/wasm-opt
+    @echo 'if [ ! -z "$OUTPUT" ]; then cp "$INPUT" "$OUTPUT"; fi' >> {{INTERNAL_BIN}}/wasm-opt
+    @chmod +x {{INTERNAL_BIN}}/wasm-opt
 
 # Generate WIT bindings for both Go (guest) and Rust (host)
 generate: check-deps

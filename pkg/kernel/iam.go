@@ -67,6 +67,15 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 		"iam:check",
 	}}
 
+	iam.policies["actor"] = Policy{Role: "actor", Permissions: []string{
+		"health:check",
+		"chat:*",
+		"buffer:read",
+		"index:knowledge:search",
+		"intent:propose",
+		"iam:check", // Standard self-check capability
+	}}
+
 	iam.policies["reviewer"] = Policy{Role: "reviewer", Permissions: []string{
 		"*/buffer:read",       // Read-only in any namespace
 		"buffer:list",         // Discovery
@@ -286,7 +295,11 @@ func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID 
 	// 1. Get role (Global)
 	role, ok := i.identities[actor]
 	if !ok {
-		role = "guest"
+		if i.IsActor(actor) {
+			role = "actor"
+		} else {
+			role = "guest"
+		}
 	}
 
 	action := target + ":" + method

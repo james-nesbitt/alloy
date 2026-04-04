@@ -229,3 +229,28 @@ type VisualIntent struct {
 	Color    string `json:"color,omitempty"`
 	Label    string `json:"label,omitempty"`
 }
+
+// Attestation represents a cryptographic proof of identity or role (Phase 12)
+type Attestation struct {
+	ID        string `json:"id"`
+	Actor     string `json:"actor"`
+	Role      string `json:"role,omitempty"`
+	Target    string `json:"target,omitempty"` // Optional target this attestation is for
+	Timestamp int64  `json:"timestamp"`
+	PublicKey []byte `json:"public_key,omitempty"`
+	Signature []byte `json:"signature"`
+	Hardware  string `json:"hardware,omitempty"`
+}
+
+// Delegation represents a multi-step task assigned to an actor (Phase 12)
+type Delegation struct {
+	ID          string          `json:"id"`
+	ParentID    string          `json:"parent_id,omitempty"`
+	Owner       string          `json:"owner"`                // Assigner
+	Assignee    string          `json:"assignee"`             // Agent
+	Status      string          `json:"status"`               // "pending", "in_progress", "complete", "failed"
+	Task        string          `json:"task"`                 // Goal description
+	Payload     json.RawMessage `json:"payload,omitempty"`
+	Attestation *Attestation    `json:"attestation,omitempty"`
+	Chain       []string        `json:"chain,omitempty"`      // IDs of sub-task delegations
+}
