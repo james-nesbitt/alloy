@@ -550,7 +550,7 @@ func (r *Runtime) internalSendResponse(ctx context.Context, mod wazeroapi.Module
 	}
 }
 
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool) (*Instance, error) {
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, headless bool) (*Instance, error) {
 	pluginDir := filepath.Join(r.dataDir, id)
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		return nil, err
@@ -559,7 +559,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 	startedCh := make(chan struct{})
 	instance := &Instance{
 		id: id, ctx: instCtx, cancel: instCancel, logger: r.logger, msgChan: make(chan api.Message, 1024),
-		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background},
+		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background, Headless: headless},
 		startedCh: startedCh, pending: make(map[string]chan api.Message),
 		maxMemoryBytes: maxMemoryMB * 1024 * 1024, msgPerSecond: msgPerSec,
 		bytesPerSecond: 10 * 1024 * 1024, fuelLimit: 1000, lastMsgReset: time.Now(),
