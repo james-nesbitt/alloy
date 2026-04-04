@@ -1,6 +1,9 @@
 package audit
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -17,10 +20,12 @@ type Entry struct {
 	TraceID   string         `json:"trace_id,omitempty"`
 	SpanID    string         `json:"span_id,omitempty"`
 	Details   map[string]any `json:"details,omitempty"`
+	Signature []byte         `json:"signature,omitempty"`
 }
 
 type Logger struct {
-	file *os.File
+	file   *os.File
+	signer crypto.Signer
 }
 
 func NewLogger(dataDir string) (*Logger, error) {
@@ -37,6 +42,11 @@ func NewLogger(dataDir string) (*Logger, error) {
 	return &Logger{file: f}, nil
 }
 
+// SetSigner attaches a cryptographic signer to the logger for producing signed logs.
+func (l *Logger) SetSigner(s crypto.Signer) {
+	l.signer = s
+}
+
 func (l *Logger) Close() error {
 	if l.file != nil {
 		return l.file.Close()
@@ -47,6 +57,33 @@ func (l *Logger) Close() error {
 func (l *Logger) Log(entry Entry) {
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now()
+	}
+
+	if l.signer != nil {
+		// Create a hash of the unsigned entry for signature
+		entryData, _ := json.Marshal(struct {
+			Timestamp time.Time      `json:"timestamp"`
+			Actor     string         `json:"actor"`
+			Action    string         `json:"action"`
+			Target    string         `json:"target,omitempty"`
+			Status    string         `json:"status"`
+			Details   map[string]any `json:"details,omitempty"`
+		}{
+			Timestamp: entry.Timestamp,
+			Actor:     entry.Actor,
+			Action:    entry.Action,
+			Target:    entry.Target,
+			Status:    entry.Status,
+			Details:   entry.Details,
+		})
+
+		hash := sha256.Sum256(entryData)
+		sig, err := l.signer.Sign(rand.Reader, hash[:], crypto.SHA256)
+		if err == nil {
+			entry.Signature = sig
+		} else {
+			slog.Error("failed to sign audit entry", "error", err)
+		}
 	}
 
 	data, err := json.Marshal(entry)
