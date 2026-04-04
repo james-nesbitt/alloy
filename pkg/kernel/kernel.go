@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/james-nesbitt/alloy/api"
+	"github.com/james-nesbitt/alloy/pkg/security/identity"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 	"github.com/james-nesbitt/alloy/pkg/storage/history"
 
@@ -160,6 +161,19 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	}
 	k.loggerSvc, _ = NewLoggerManager(logger, auditDir)
 	if k.loggerSvc != nil {
+		// Set the system signer for audit logs using the machine identity
+		securityDir := storage.BaseDir()
+		if securityDir == "" {
+			securityDir = dataDir
+		} else {
+			securityDir = filepath.Dir(securityDir)
+		}
+
+		idStore := identity.NewStore(securityDir)
+		if ca, err := idStore.InitializeMachine(); err == nil {
+			k.loggerSvc.SetSigner(ca.Key)
+		}
+
 		k.RegisterPlugin(k.loggerSvc)
 		// Subscribe to audit events
 		k.RouteMessage(context.Background(), api.Message{

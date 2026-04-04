@@ -92,6 +92,110 @@ func TestIntentBroker_NoInjectionForNonAI(t *testing.T) {
 	}
 }
 
+func TestIntentBroker_DispatchTarget(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	var capturedMsg api.Message
+	router := func(ctx context.Context, msg api.Message) {
+		capturedMsg = msg
+	}
+
+	broker := NewIntentBroker(logger, router, nil)
+	broker.Register("default-plugin", []string{"test:intent"})
+
+	intent := api.Intent{
+		ID:     "test-intent",
+		Name:   "test:intent",
+		Sender: "user",
+		Target: "actor:claudine",
+	}
+
+	err := broker.Dispatch(context.Background(), intent)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if capturedMsg.Target != "actor:claudine" {
+		t.Fatalf("Expected target 'actor:claudine', got '%s'", capturedMsg.Target)
+	}
+}
+
+func TestIntentBroker_IntentDelegate(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	var capturedMsg api.Message
+	router := func(ctx context.Context, msg api.Message) {
+		capturedMsg = msg
+	}
+
+	broker := NewIntentBroker(logger, router, nil)
+	broker.Register("actor:claudine", []string{"intent:delegate"})
+
+	delegation := api.Delegation{
+		ID:       "task-123",
+		Owner:    "user",
+		Assignee: "actor:claudine",
+		Task:     "Implement Phase 12",
+	}
+	payload, _ := json.Marshal(delegation)
+
+	intent := api.Intent{
+		ID:      "intent-456",
+		Name:    "intent:delegate",
+		Sender:  "user",
+		Target:  "actor:claudine",
+		Payload: payload,
+	}
+
+	err := broker.Dispatch(context.Background(), intent)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if capturedMsg.Method != "intent:delegate" {
+		t.Fatalf("Expected method 'intent:delegate', got '%s'", capturedMsg.Method)
+	}
+
+	var checkedDel api.Delegation
+	if err := json.Unmarshal(capturedMsg.Payload, &checkedDel); err != nil {
+		t.Fatalf("Failed to unmarshal delegation from payload: %v", err)
+	}
+
+	if checkedDel.ID != "task-123" || checkedDel.Assignee != "actor:claudine" {
+		t.Fatalf("Delegation corrupted in dispatch: %+v", checkedDel)
+	}
+}
+
+func TestIntentBroker_ActorCollaboration(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	var capturedMsg api.Message
+	router := func(ctx context.Context, msg api.Message) {
+		capturedMsg = msg
+	}
+
+	broker := NewIntentBroker(logger, router, nil)
+	// Register a plugin that actor:claudine provides
+	broker.Register("actor:claudine", []string{"service:format"})
+
+	// actor:auditor requests formatting from actor:claudine
+	intent := api.Intent{
+		ID:     "collab-1",
+		Name:   "service:format",
+		Sender: "actor:auditor",
+		Target: "actor:claudine",
+	}
+
+	err := broker.Dispatch(context.Background(), intent)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if capturedMsg.Sender != "actor:auditor" || capturedMsg.Target != "actor:claudine" {
+		t.Fatalf("Collaboration dispatch failed: %+v", capturedMsg)
+	}
+}
+
 func TestIntentBroker_ProactiveSuggestions(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
