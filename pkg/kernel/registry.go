@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -356,12 +357,15 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 
 			// Only add registrations that have at least one allowed capability
 			// Or ones that represent frontends (no capabilities listed)
-			if len(allowedCaps) > 0 || (reg.Type == "frontend" && len(reg.Capabilities) == 0) {
+			if len(allowedCaps) > 0 || (strings.HasPrefix(reg.Type, "frontend") || reg.Type == "headless-client" && len(reg.Capabilities) == 0) {
 				filtered = append(filtered, api.Registration{
 					ID:           reg.ID,
 					Type:         reg.Type,
 					Status:       reg.Status,
 					Capabilities: allowedCaps,
+					Background:   reg.Background,
+					Sidecar:      reg.Sidecar,
+					Headless:     reg.Headless,
 				})
 			}
 		}
