@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -188,6 +189,24 @@ func SignCertificate(ca *KeyPair, req IssueRequest) (*KeyPair, error) {
 	certPEM, keyPEM, _ := EncodeToPEM(der, key)
 
 	return &KeyPair{Cert: cert, Key: key, CertPEM: certPEM, KeyPEM: keyPEM}, nil
+}
+
+// LoadTLSCertificate loads a TLS certificate from PEM data, supporting hardware keys
+func LoadTLSCertificate(certPEM, keyPEM []byte) (tls.Certificate, error) {
+	// Try parsing via pki first to detect hardware-backed keys
+	pair, err := ParseKeyPair(certPEM, keyPEM)
+	if err == nil {
+		if _, ok := pair.Key.(HardwareSigner); ok {
+			return tls.Certificate{
+				Certificate: [][]byte{pair.Cert.Raw},
+				PrivateKey:  pair.Key,
+				Leaf:        pair.Cert,
+			}, nil
+		}
+	}
+
+	// Fallback to standard loading for software keys
+	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
 // ParseKeyPair loads a certificate and key from PEM data
