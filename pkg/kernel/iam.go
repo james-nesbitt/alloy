@@ -18,6 +18,9 @@ type Policy struct {
 	Permissions []string `json:"permissions"`
 }
 
+// ActorPrefix is the required prefix for agent identities.
+const ActorPrefix = "actor:"
+
 // IdentityManager implements authorization enforcement for the kernel.
 type IdentityManager struct {
 	logger          *slog.Logger
@@ -39,6 +42,40 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 
 	// Bootstrap default roles
 	iam.policies["admin"] = Policy{Role: "admin", Permissions: []string{"*"}}
+
+	// Phase 12: Core Alloy Actor Roles
+	iam.policies["developer"] = Policy{Role: "developer", Permissions: []string{
+		"*/buffer:*",           // Managed buffers in any namespace
+		"buffer:list",          // Discovery
+		"command-manager:exec", // Running tools
+		"events:*",             // Monitoring stream
+		"index:knowledge:*",    // RAG access
+		"project:*",            // Project metadata
+		"wasm-manager:*",       // Plugin control
+		"kernel:*",             // Basic system calls
+		"iam:check",            // Perm self-check
+	}}
+
+	iam.policies["auditor"] = Policy{Role: "auditor", Permissions: []string{
+		"*/buffer:read",          // Read-only in any namespace
+		"buffer:list",            // Discovery
+		"index:knowledge:search", // RAG search
+		"iam:audit",              // Specific audit capabilities
+		"events:listen",          // Monitoring
+		"logger:read",            // Log access
+		"health:*",               // System health
+		"iam:check",
+	}}
+
+	iam.policies["reviewer"] = Policy{Role: "reviewer", Permissions: []string{
+		"*/buffer:read",       // Read-only in any namespace
+		"buffer:list",         // Discovery
+		"project:review",      // Approval flows
+		"project:merge",       // Finalizing changes
+		"iam:policy:check",    // Verifying policies
+		"wasm-manager:status", // Verification of plugin state
+		"iam:check",
+	}}
 
 	// Explicit guest permissions for core functionality
 	iam.policies["guest"] = Policy{Role: "guest", Permissions: []string{
@@ -93,16 +130,38 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 	iam.identities["project"] = "admin"
 	iam.identities["omni-palette"] = "admin"
 
+	// Phase 12: Bootstrapped Actor identities
+	iam.identities["actor:claudine"] = "developer"
+	iam.identities["actor:auditor"] = "auditor"
+	iam.identities["actor:reviewer"] = "reviewer"
+
 	return iam, nil
 }
 
 func (i *IdentityManager) ID() string { return "iam" }
+
+// IsActor checks if the given identity string represents an AI actor.
+func (i *IdentityManager) IsActor(identity string) bool {
+	return strings.HasPrefix(identity, ActorPrefix)
+}
+
+// PolicyTemplates returns standard policies for actor roles.
+func (i *IdentityManager) PolicyTemplates() map[string]Policy {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return map[string]Policy{
+		"developer": i.policies["developer"],
+		"auditor":   i.policies["auditor"],
+		"reviewer":  i.policies["reviewer"],
+	}
+}
 
 func (i *IdentityManager) Capabilities() []api.Capability {
 	return []api.Capability{
 		{Method: "authorize", Description: "Check routing permissions"},
 		{Method: "check", Description: "Check if an actor is authorized for an action"},
 		{Method: "policy:set", Description: "Update or create a role policy"},
+		{Method: "policy:templates", Description: "Get standard policy templates"},
 		{Method: "identity:set", Description: "Assign a role to an actor"},
 		{Method: "grant_namespace_role", Description: "Grant ephemeral role capabilities in a namespace"},
 	}
@@ -165,6 +224,9 @@ func (i *IdentityManager) HandleMessage(ctx context.Context, msg api.Message) (a
 		i.logger.Info("IAM policy updated", "role", req.Policy.Role, "perms", len(req.Policy.Permissions))
 		return i.reply(msg, map[string]string{"status": "ok"}), nil
 
+	case "policy:templates":
+		return i.reply(msg, i.PolicyTemplates()), nil
+
 	case "identity:set":
 		var req struct {
 			Actor string `json:"actor"`
@@ -218,6 +280,9 @@ func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID 
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
+	// Formalize Actor status
+	isAgent := i.IsActor(actor)
+
 	// 1. Get role (Global)
 	role, ok := i.identities[actor]
 	if !ok {
@@ -252,7 +317,11 @@ func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID 
 		}
 	}
 
-	i.logger.Warn("IAM denied access", "actor", actor, "role", role, "target", target, "method", method, "ctx", contextID)
+	if isAgent {
+		i.logger.Warn("IAM actor denied access", "actor", actor, "role", role, "target", target, "method", method, "ctx", contextID)
+	} else {
+		i.logger.Warn("IAM denied access", "actor", actor, "role", role, "target", target, "method", method, "ctx", contextID)
+	}
 	return false
 }
 
