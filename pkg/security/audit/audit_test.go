@@ -38,6 +38,53 @@ func TestAuditLogger(t *testing.T) {
 	}
 }
 
+func TestSignedAuditLogger(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "audit-signed-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	l, err := NewLogger(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	// Use a software key for testing
+	import (
+		"crypto/ecdsa"
+		"crypto/elliptic"
+		"crypto/rand"
+		"encoding/json"
+		"strings"
+	)
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	l.SetSigner(key)
+
+	l.Log(Entry{
+		Actor:  "test-actor-signed",
+		Action: "test-action-signed",
+		Status: "success",
+	})
+
+	l.Close()
+
+	content, _ := os.ReadFile(tempDir + "/audit.log")
+	var entry Entry
+	if err := json.Unmarshal(content, &entry); err != nil {
+		t.Fatalf("failed to unmarshal log entry: %v", err)
+	}
+
+	if len(entry.Signature) == 0 {
+		t.Error("log entry signature is missing")
+	}
+
+	if !strings.Contains(string(content), "signature") {
+		t.Error("log entry signature not found in JSON data")
+	}
+}
+
 func TestNewLoggerFail(t *testing.T) {
 	// Use a path that is unlikely to be writable or valid as a directory
 	_, err := NewLogger("/dev/null/invalid")
