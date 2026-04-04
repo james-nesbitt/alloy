@@ -13,12 +13,16 @@ plugins-bin/
 # Logs and test artifacts
 *.log
 *.test
+build_err.txt
+build_output.txt
+debug_draw.txt
 data/
 coverage.out
 coverdata/
 race_report.txt
 smoke_test_output.log
 *.html
+
 
 # Go environment
 vendor/

@@ -25,7 +25,7 @@
     - Intent Delegation: Humans delegating complex sub-tasks to actors with verified execution.
 - [ ] **Headless Coordination**
     - Zero-Frontend Clients: Backend-only clients for purely automated workflow steps.
-    - State Reconciliation: Ensuring headless actors stay in sync with GUI/TUI users during complex multi-step operations.
+    - State Reconciliation: Ensuring headless actors stay in sync with GUI/TUI users.
 - [ ] **Hardware-Verified Identity (Security)**
     - mTLS Enhancements: Moving towards hardware-backed keys.
     - Role Attestation: Cryptographic proofs for role assignments.
