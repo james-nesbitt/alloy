@@ -26,10 +26,11 @@
 - [x] **The Librarian Service (Semantic Indexing)**
     - Long-term memory for the workspace using vector storage.
     - Cross-project semantic search.
+    - [x] **Automated Context Injection**: RAG-enhanced AI intents. (Phase 11)
 - [x] **Temporal Playback (Event History)**
     - The "Time Machine" for the workspace.
     - Replay event streams to reconstruct previous states.
-- [ ] **Workspace Archival (`.ark`)**
+- [x] **Workspace Archival (`.ark`)**
     - Package a project, its state, and its history into a single portable archive.
     - Support for "Cold Storage" and project handovers.
 

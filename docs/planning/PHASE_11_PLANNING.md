@@ -21,7 +21,7 @@ Provide the workspace with "Long-term Memory."
 - [x] **Local Vector Indexing**:
     - Integrate a lightweight vector store (linear KV scan for now) to index buffer content and chat history.
     - Implement `librarian:search` for fuzzy, multi-modal semantic search.
-- [ ] **Context Injection**: Use the Librarian to provide "Context" for AI intents, automatically attaching relevant historical snippets to requests.
+- [x] **Context Injection**: Use the Librarian to provide "Context" for AI intents, automatically attaching relevant historical snippets to requests. (Phase 11: Implement on IntentBroker)
 
 ### Workstream 2: Temporal Playback (The Time Machine) [DONE]
 Move from current-state storage to event-sourced history.

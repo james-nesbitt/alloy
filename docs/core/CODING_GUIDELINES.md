@@ -60,3 +60,10 @@ GitHub Actions are used for continuous integration. Every PR must:
 - **Architecture**: Changes to the core architecture must be reflected in `ARCHITECTURE.md`.
 
 
+## 6. Workflow & AI Coordination
+
+All AI agents and human collaborators must follow the mandatory workflow:
+- **Branching**: No direct commits to `main`. Use `feat/`, `fix/`, or `docs/` branches.
+- **Verification**: All code changes must pass `just fmt`, `just build-all`, and `just test-all` before merging.
+- **Roles**: Only the **Reviewer** or **User** is authorized to merge to `main`.
+- **References**: See [AGENTS.md](../../AGENTS.md) for detailed role definitions and mandatory rules.

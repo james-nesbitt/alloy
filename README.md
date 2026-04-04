@@ -42,4 +42,4 @@ The frontend's merge of **Project Tools** (shared) and **User Tools** (private) 
 ---
 
 ## Guidelines for AI Collaborators
-- [AI Guidelines](AI_GUIDELINES.md) - Mandatory workflows and role definitions.
+- [Agent Rules & Roles](AGENTS.md) - Mandatory workflows and role definitions.

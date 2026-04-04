@@ -105,7 +105,7 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	}
 
 	k.buffers = NewBufferManager(logger, dataDir)
-	k.intents = NewIntentBroker(logger, k.RouteMessage)
+	k.intents = NewIntentBroker(logger, k.RouteMessage, k.QueryLibrarian)
 
 	// Create the WASM manager
 	wm, err := wasm.NewManager(logger, storage, dataDir, k.buffers, k.RouteMessage, k.HandleMessageSync)
@@ -454,6 +454,47 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 }
 
 // HandleMessageSync performs a synchronous message call, resolving capabilities if needed.
+// QueryLibrarian performs a semantic search via the Librarian plugin (Phase 11).
+func (k *Kernel) QueryLibrarian(ctx context.Context, query string) (string, error) {
+	// 1. Prepare search message
+	payload, _ := json.Marshal(map[string]any{"query": query, "limit": 3})
+	msg := api.Message{
+		ID:        "kernel-lib-query-" + fmt.Sprint(time.Now().UnixNano()),
+		Type:      api.TypeRequest,
+		Sender:    "kernel",
+		Target:    "librarian",
+		Method:    "librarian:search",
+		Payload:   payload,
+		Timestamp: time.Now().Unix(),
+	}
+
+	// 2. Call librarian synchronously
+	resp, err := k.HandleMessageSync(ctx, msg)
+	if err != nil {
+		return "", err
+	}
+
+	// 3. Extract content snippets
+	var results []struct {
+		Document struct {
+			Content string `json:"content"`
+		} `json:"document"`
+	}
+	if err := json.Unmarshal(resp.Payload, &results); err != nil {
+		return "", err
+	}
+
+	var builder strings.Builder
+	for _, res := range results {
+		if builder.Len() > 0 {
+			builder.WriteString("\n---\n")
+		}
+		builder.WriteString(res.Document.Content)
+	}
+
+	return builder.String(), nil
+}
+
 func (k *Kernel) HandleMessageSync(ctx context.Context, msg api.Message) (api.Message, error) {
 	k.mu.RLock()
 	target := msg.Target

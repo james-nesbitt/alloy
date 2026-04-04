@@ -2,8 +2,10 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,16 +17,18 @@ type IntentBroker struct {
 	logger *slog.Logger
 	mu     sync.RWMutex
 	// intent name -> list of plugin IDs
-	providers map[string][]string
-	router    func(context.Context, api.Message)
+	providers        map[string][]string
+	router           func(ctx context.Context, msg api.Message)
+	librarianQuerier func(ctx context.Context, query string) (string, error) // For semantic context injection (Phase 11)
 }
 
-// NewIntentBroker creates a new IntentBroker
-func NewIntentBroker(logger *slog.Logger, router func(context.Context, api.Message)) *IntentBroker {
+// NewIntentBroker creates a new IntentBroker. If querier is non-nil, it will be used for automated context injection.
+func NewIntentBroker(logger *slog.Logger, router func(ctx context.Context, msg api.Message), querier func(ctx context.Context, query string) (string, error)) *IntentBroker {
 	return &IntentBroker{
-		logger:    logger,
-		providers: make(map[string][]string),
-		router:    router,
+		logger:           logger,
+		providers:        make(map[string][]string),
+		router:           router,
+		librarianQuerier: querier,
 	}
 }
 
@@ -99,6 +103,37 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 	}
 
 	b.logger.Info("dispatching intent", "intent", intent.Name, "target", target)
+
+	// Phase 11: Semantic Context Injection - for AI-bound intents
+	if b.librarianQuerier != nil && (strings.HasPrefix(intent.Name, "ai:") || strings.HasPrefix(intent.Name, "intent:summarize") || intent.Name == "ai:query") {
+		// Try to extract a query from the payload to use for semantic search
+		var query string
+		var payloadData map[string]any
+		if err := json.Unmarshal(intent.Payload, &payloadData); err == nil {
+			if q, ok := payloadData["prompt"].(string); ok {
+				query = q
+			} else if q, ok := payloadData["text"].(string); ok {
+				query = q
+			} else if q, ok := payloadData["content"].(string); ok {
+				query = q
+			}
+		}
+
+		if query != "" {
+			b.logger.Debug("performing semantic search for intent context", "intent", intent.Name, "query", query)
+			contextContent, err := b.librarianQuerier(ctx, query)
+			if err == nil && contextContent != "" {
+				if msg.Metadata == nil {
+					msg.Metadata = make(map[string]any)
+				}
+				msg.Metadata["semantic_context"] = contextContent
+				b.logger.Debug("injected semantic context into intent", "intent", intent.Name, "size", len(contextContent))
+			} else if err != nil {
+				b.logger.Warn("librarian query failed in intent broker", "error", err)
+			}
+		}
+	}
+
 	b.router(ctx, msg)
 	return nil
 }

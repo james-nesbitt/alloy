@@ -396,8 +396,8 @@ func handleQuery(msg AlloyMessage) AlloyMessage {
 	// Get project context
 	projectContext := getProjectContext()
 
-	// Get knowledge graph context (RAG)
-	knowledgeContext := getKnowledgeContext(req.Prompt)
+	// Get knowledge graph context (RAG) - Prefer injected context from metadata (Phase 11)
+	knowledgeContext := getKnowledgeContext(msg, req.Prompt)
 
 	// Combine prompt with context
 	fullPrompt := req.Prompt
@@ -768,15 +768,22 @@ func handleSummarizeBuffer(msg AlloyMessage) AlloyMessage {
 }
 
 // getKnowledgeContext gets relevant context from the index/knowledge-graph.
-func getKnowledgeContext(query string) string {
-	// Create search request
+// getKnowledgeContext gets relevant context from the index/knowledge-graph.
+func getKnowledgeContext(msg AlloyMessage, query string) string {
+	// Check for injected semantic context in metadata (Phase 11: Automated Context Injection)
+	if ctx, ok := msg.GetMetadata("semantic_context"); ok && ctx != "" {
+		plugin.Log("info", "Librarian: using automated context injection")
+		return ctx
+	}
+
+	// Fallback to manual search request if no context was injected
 	searchReq, _ := json.Marshal(map[string]interface{}{
 		"query": query,
 		"limit": 3,
 	})
 
 	// Create call message - Decoupled: call by capability
-	msg := AlloyMessage{
+	searchMsg := AlloyMessage{
 		Id:      "ai-search-" + fmt.Sprint(time.Now().UnixNano()),
 		MsgType: "request",
 		Method:  "knowledge:search", // New method name to match capability
@@ -786,7 +793,7 @@ func getKnowledgeContext(query string) string {
 	}
 
 	// Call the indexer
-	resp := plugin.Call(msg)
+	resp := plugin.Call(searchMsg)
 	if resp.Id == "" {
 		return ""
 	}
