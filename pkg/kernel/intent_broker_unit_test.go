@@ -91,3 +91,51 @@ func TestIntentBroker_NoInjectionForNonAI(t *testing.T) {
 		}
 	}
 }
+
+func TestIntentBroker_ProactiveSuggestions(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// Mock router to capture the message
+	var capturedMsg api.Message
+	router := func(ctx context.Context, msg api.Message) {
+		capturedMsg = msg
+	}
+
+	broker := NewIntentBroker(logger, router, nil)
+
+	// Dispatch a proactive intent (intent:propose)
+	intent := api.Intent{
+		ID:      "propose-1",
+		Name:    "intent:propose",
+		Sender:  "actor:claudine",
+		Payload: []byte(`{"title":"Fix Bug","description":"..."}`),
+	}
+
+	// Should fallback to broadcast (*) because no provider is registered for it
+	err := broker.Dispatch(context.Background(), intent)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if capturedMsg.Target != "*" {
+		t.Errorf("Expected target '*', got '%s'", capturedMsg.Target)
+	}
+
+	// Verify it still works if a provider IS registered
+	broker.Register("explicit-provider", []string{"intent:suggest"})
+	intent2 := api.Intent{
+		ID:      "suggest-1",
+		Name:    "intent:suggest",
+		Sender:  "actor:claudine",
+		Payload: []byte(`{}`),
+	}
+
+	err = broker.Dispatch(context.Background(), intent2)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if capturedMsg.Target != "explicit-provider" {
+		t.Errorf("Expected target 'explicit-provider', got '%s'", capturedMsg.Target)
+	}
+}

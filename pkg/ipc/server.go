@@ -35,6 +35,7 @@ func ParseAddress(raw string) (network, address string) {
 type Router interface {
 	RouteMessage(ctx context.Context, msg api.Message)
 	RegisterFrontend(id string, ch chan<- api.Message)
+	RegisterFrontendExt(id string, ch chan<- api.Message, headless bool)
 }
 
 type Server struct {
@@ -214,9 +215,14 @@ func (s *Server) handleConn(netConn net.Conn) {
 			// In plain TCP, we trust the sender for now, but ensure it's set
 			if msg.Sender == "" {
 				msg.Sender = clientID
-			} else if msg.Sender != clientID {
-				// Re-register if sender name changed
-				s.router.RegisterFrontend(msg.Sender, sendCh)
+			}
+
+			// Capture headless intent from metadata
+			headless, _ := msg.Metadata["headless"].(bool)
+
+			if msg.Sender != clientID || headless {
+				// Re-register if sender name changed or headless flag is set
+				s.router.RegisterFrontendExt(msg.Sender, sendCh, headless)
 				// Update clientID for this connection context
 				clientID = msg.Sender
 			}

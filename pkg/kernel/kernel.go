@@ -41,6 +41,7 @@ type Kernel struct {
 	metadata  map[string]api.PluginMetadata
 	loaders   map[string]api.PluginLoader
 	frontends map[string]chan<- api.Message
+	headless  map[string]bool
 	loading   map[string]chan struct{}
 
 	// context for background tasks
@@ -93,6 +94,7 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 		metadata:      make(map[string]api.PluginMetadata),
 		loaders:       make(map[string]api.PluginLoader),
 		frontends:     make(map[string]chan<- api.Message),
+		headless:      make(map[string]bool),
 		loading:       make(map[string]chan struct{}),
 		stopCh:        make(chan struct{}),
 		ctx:           ctx,
@@ -121,6 +123,8 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	k.events = NewEventManager(logger, k.iam)
 	k.events.SetRouter(k.RouteMessage)
 	k.RegisterPlugin(k.events)
+
+	k.buffers.SetEventManager(k.events)
 
 	k.commands = NewCommandManager(logger, k.listRegistrations, k.iam)
 	k.RegisterPlugin(k.commands)
@@ -782,38 +786,51 @@ func (k *Kernel) RegisterMetadata(info api.PluginMetadata, loader api.PluginLoad
 
 // RegisterFrontend registers a frontend's response channel.
 func (k *Kernel) RegisterFrontend(id string, ch chan<- api.Message) {
+	k.RegisterFrontendExt(id, ch, false)
+}
+
+// RegisterFrontendExt registers a frontend with additional options like headless mode.
+func (k *Kernel) RegisterFrontendExt(id string, ch chan<- api.Message, headless bool) {
 	k.mu.Lock()
 	k.frontends[id] = ch
+	k.headless[id] = headless
 	k.mu.Unlock()
 
-	k.logger.Info("frontend registered", "frontend_id", id)
+	status := "frontend"
+	if headless {
+		status = "headless-client"
+	}
+	k.logger.Info("frontend registered", "frontend_id", id, "headless", headless)
 
 	go k.events.Publish(context.Background(), "component:registered", "kernel",
-		[]byte(`{"id":"`+id+`","type":"frontend"}`))
+		[]byte(`{"id":"`+id+`","type":"`+status+`","headless":`+fmt.Sprint(headless)+`}`))
 
-	// Push current system state to the new frontend
-	go func() {
-		time.Sleep(100 * time.Millisecond) // Give the frontend a moment to start its read loop
+	// Push current system state to the new frontend (skip if headless)
+	if !headless {
+		go func() {
+			time.Sleep(100 * time.Millisecond) // Give the frontend a moment to start its read loop
 
-		// 2. Push all registered widgets
-		widgets := k.ListWidgets()
-		for _, w := range widgets {
-			wData, _ := json.Marshal(w)
-			k.deliverToFrontendSync(context.Background(), id, api.Message{
-				ID:      fmt.Sprintf("init-widget-reg-%s", w.ID),
-				Type:    api.TypeEvent,
-				Sender:  "kernel",
-				Target:  id,
-				Method:  "dashboard:widget-registered",
-				Payload: wData,
-			})
-		}
-	}()
+			// 2. Push all registered widgets
+			widgets := k.ListWidgets()
+			for _, w := range widgets {
+				wData, _ := json.Marshal(w)
+				k.deliverToFrontendSync(context.Background(), id, api.Message{
+					ID:      fmt.Sprintf("init-widget-reg-%s", w.ID),
+					Type:    api.TypeEvent,
+					Sender:  "kernel",
+					Target:  id,
+					Method:  "dashboard:widget-registered",
+					Payload: wData,
+				})
+			}
+		}()
+	}
 }
 
 func (k *Kernel) UnregisterFrontend(id string) {
 	k.mu.Lock()
 	delete(k.frontends, id)
+	delete(k.headless, id)
 	k.mu.Unlock()
 }
 

@@ -1,0 +1,15 @@
+{
+  "id": "task-6",
+  "title": "Hardware-Verified Identity (mTLS)",
+  "status": "in_progress",
+  "depends_on": [],
+  "created_at": "2026-04-04T17:44:28.452Z",
+  "updated_at": "2026-04-04T17:45:25.442Z",
+  "attempt_count": 1,
+  "skills": [
+    "git-workflow"
+  ],
+  "started_at": "2026-04-04T17:45:25.436Z",
+  "base_commit": "504daab2a7a85ce578894b5ceaeacb188c4a689f",
+  "assigned_to": "RedZenith"
+}

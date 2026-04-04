@@ -76,14 +76,22 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 	plugins, ok := b.providers[intent.Name]
 	b.mu.RUnlock()
 
+	var target string
 	if !ok || len(plugins) == 0 {
-		b.logger.Warn("no provider for intent", "intent", intent.Name)
-		return fmt.Errorf("no provider for intent: %s", intent.Name)
+		// Phase 12: Broaden proactive interventions - allow 'intent:propose' and 'intent:suggest'
+		// to broadcast if no explicit provider is found (typically reaches human frontends).
+		if intent.Name == "intent:propose" || intent.Name == "intent:suggest" {
+			b.logger.Debug("routing proactive intent to broadcast (no explicit provider)", "intent", intent.Name)
+			target = "*"
+		} else {
+			b.logger.Warn("no provider for intent", "intent", intent.Name)
+			return fmt.Errorf("no provider for intent: %s", intent.Name)
+		}
+	} else {
+		// For Phase 10, picked the first available provider.
+		// Optimization: This could use priority, load-balancing, or active context in the future.
+		target = plugins[0]
 	}
-
-	// For Phase 10, picked the first available provider.
-	// Optimization: This could use priority, load-balancing, or active context in the future.
-	target := plugins[0]
 
 	msg := api.Message{
 		ID:        intent.ID,
