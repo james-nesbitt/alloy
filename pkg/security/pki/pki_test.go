@@ -60,6 +60,38 @@ func TestPKI(t *testing.T) {
 	}
 }
 
+func TestTPMPKI(t *testing.T) {
+	// TPMProvider is registered in init() in tpm.go
+	ca, _ := CreateRootCA("Alloy-TPM")
+
+	req := IssueRequest{
+		CommonName:   "tpm-instance",
+		Organization: "Alloy",
+		Hardware:     "tpm",
+	}
+
+	kp, err := SignCertificate(ca, req)
+	if err != nil {
+		t.Fatalf("failed to sign TPM cert: %v", err)
+	}
+
+	if _, ok := kp.Key.(*TPMSigner); !ok {
+		t.Errorf("expected TPM signer, got %T", kp.Key)
+	}
+
+	// Test ParseKeyPair with TPM key
+	parsed, err := ParseKeyPair(kp.CertPEM, kp.KeyPEM)
+	if err != nil {
+		t.Fatalf("failed to parse TPM key pair: %v", err)
+	}
+
+	if hws, ok := parsed.Key.(HardwareSigner); !ok {
+		t.Errorf("parsed key is not hardware signer: %T", parsed.Key)
+	} else if hws.ProviderName() != "tpm" {
+		t.Errorf("wrong provider: %s", hws.ProviderName())
+	}
+}
+
 func TestPKIFailures(t *testing.T) {
 	_, err := ParseKeyPair([]byte("invalid"), []byte("invalid"))
 	if err == nil {
