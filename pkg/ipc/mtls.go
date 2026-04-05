@@ -4,9 +4,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-
 	"github.com/james-nesbitt/alloy/pkg/security/pki"
 )
+
+
 
 // NewServerTLSConfig creates an mTLS config for the server
 func NewServerTLSConfig(caCertPEM, serverCertPEM, serverKeyPEM []byte) (*tls.Config, error) {
