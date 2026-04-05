@@ -254,4 +254,5 @@ type Delegation struct {
 	Attestation *Attestation    `json:"attestation,omitempty"`
 	Chain       []string        `json:"chain,omitempty"`     // IDs of sub-task delegations
 	SubTasks    []*Delegation   `json:"sub_tasks,omitempty"` // Expanded nested sub-task chain (Phase 12)
+
 }
