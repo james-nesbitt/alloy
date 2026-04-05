@@ -194,8 +194,9 @@ func main() {
 		WithCapability("project:get-composed-workspace", "Get a unified view of the workspace").
 		WithCapability("project:archive", "Archive current workspace to an .ark file").
 		WithCapability("project:restore", "Restore workspace from an .ark file").
-		WithCapability("project:list-archives", "List all workspace archives in the data directory").
-		WithCapability("project:delete-archive", "Delete a workspace archive from the data directory")
+		WithCapability("project:delete-archive", "Delete a workspace archive from the data directory").
+		WithCapability("config:update", "Agnostic configuration update")
+
 
 
 	// Set up message handlers
@@ -219,6 +220,8 @@ func main() {
 	plugin.Handle("project:restore", handleRestore)
 	plugin.Handle("project:list-archives", handleListArchives)
 	plugin.Handle("project:delete-archive", handleDeleteArchive)
+	plugin.Handle("config:update", handleUpdateConfig)
+
 
 
 	// Backward compatibility handlers
@@ -271,6 +274,47 @@ func main() {
 		plugin.Log("error", "Plugin failed: "+err.Error())
 	}
 }
+
+func handleUpdateConfig(msg AlloyMessage) AlloyMessage {
+	// For project plugin, config:update means registering/updating a workspace.
+	path, ok := msg.GetMetadata("project_path")
+	if !ok {
+		return plugin.ErrorReply(msg, "missing project_path in metadata")
+	}
+
+	var config struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Layout      string `json:"layout"`
+	}
+	if err := json.Unmarshal(msg.Payload, &config); err != nil {
+		return plugin.ErrorReply(msg, "failed to parse config: "+err.Error())
+	}
+
+	ws := Workspace{
+		ID:     strings.ToLower(strings.ReplaceAll(config.Name, " ", "-")),
+		Name:   config.Name,
+		Path:   path,
+		Layout: config.Layout,
+		Metadata: map[string]string{
+			"description": config.Description,
+			"source":      "bootstrap",
+		},
+	}
+	if ws.ID == "" {
+		ws.ID = filepath.Base(path)
+	}
+	if ws.Name == "" {
+		ws.Name = ws.ID
+	}
+
+	workspaces[ws.ID] = &ws
+	saveWorkspaces()
+
+	plugin.Log("info", fmt.Sprintf("Bootstrapped workspace: %s (%s)", ws.Name, ws.Path))
+	return plugin.Reply(msg, ws)
+}
+
 
 // handleCreate handles project creation requests.
 func handleCreate(msg AlloyMessage) AlloyMessage {

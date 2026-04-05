@@ -21,9 +21,9 @@ func (m *hwMockRouter) RouteMessage(ctx context.Context, msg api.Message) {
 	m.msgCh <- msg
 }
 
-func (m *hwMockRouter) RegisterFrontend(id string, ch chan<- api.Message) {}
+func (m *hwMockRouter) RegisterFrontend(id string, ch chan<- api.Message)                   {}
 func (m *hwMockRouter) RegisterFrontendExt(id string, ch chan<- api.Message, headless bool) {}
-func (m *hwMockRouter) UnregisterFrontend(id string) {}
+func (m *hwMockRouter) UnregisterFrontend(id string)                                        {}
 
 func TestHardwareMTLSDirect(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))

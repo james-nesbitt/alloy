@@ -139,6 +139,8 @@ func (m Model) Init() tea.Cmd {
 		textarea.Blink,
 		m.listenForMessages(),
 		m.doDiscovery, // Immediate discovery
+		m.doBootstrap,
+
 		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }

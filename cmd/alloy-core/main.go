@@ -10,13 +10,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
-	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 	"github.com/james-nesbitt/alloy/pkg/kernel"
-	"github.com/james-nesbitt/alloy/pkg/project"
 	"github.com/james-nesbitt/alloy/pkg/security/identity"
 	"github.com/james-nesbitt/alloy/pkg/storage"
 )
@@ -45,8 +42,6 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", ":9090", "Address for Prometheus metrics")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	provisionFile := flag.String("provision", "", "Provisioning file for initial plugins")
-	projectManifest := flag.String("manifest", "alloy-project.json", "Project manifest file")
-	userConfigPath := flag.String("user-config", filepath.Join(os.Getenv("HOME"), ".alloy", "user-config.json"), "User configuration file")
 	sf := cmdutil.RegisterSecurityFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -126,128 +121,8 @@ func main() {
 	// Create and start IPC server BEFORE loading plugins so tests can connect while loading
 	server := ipc.NewServer(logger, k, tlsConfig)
 
-	// Step: Load User Config
-	if *userConfigPath != "" {
-		if _, err := os.Stat(*userConfigPath); err == nil {
-			userCfg, err := project.LoadUserConfig(*userConfigPath)
-			if err != nil {
-				logger.Error("failed to load user config", "error", err)
-			} else {
-				logger.Info("applying user config", "side-cars", len(userCfg.Sidecars))
-				for _, pc := range userCfg.Sidecars {
-					pluginPath := kernel.ResolvePluginPath(*userConfigPath, pc.Path)
-					logger.Debug("registering side-car plugin", "id", pc.ID)
-
-					pDef := kernel.PluginDef{
-						ID:       pc.ID,
-						Path:     pluginPath,
-						Type:     "wasm",
-						LoadTime: pc.LoadTime,
-					}
-					// Global side-cars are provisioned directly
-					if err := k.Provision([]kernel.PluginDef{pDef}); err != nil {
-						logger.Error("failed to provision side-car", "id", pc.ID, "error", err)
-					}
-				}
-
-				// Push user config to project plugin
-				go func() {
-					time.Sleep(2 * time.Second) // Wait for project plugin to boot
-					userContent, _ := json.Marshal(userCfg)
-					k.RouteMessage(context.Background(), api.Message{
-						ID:      "bootstrap-user-config",
-						Type:    api.TypeRequest,
-						Sender:  "system",
-						Target:  "project",
-						Method:  "project:update-user-config",
-						Payload: userContent,
-					})
-				}()
-			}
-		}
-	}
-
-	// Step: Apply Project Manifest if found
-	if *projectManifest != "" {
-		if _, err := os.Stat(*projectManifest); err == nil {
-			manifest, err := project.LoadManifest(*projectManifest)
-			if err != nil {
-				logger.Error("failed to load project manifest", "error", err)
-			} else {
-				// Translate manifest into kernel commands
-				logger.Info("applying manifest", "project", manifest.Name, "plugins", len(manifest.Plugins))
-
-				// Register the project workspace in the project plugin
-				go func() {
-					time.Sleep(3 * time.Second) // Wait for project plugin to boot
-					wsData, _ := json.Marshal(map[string]interface{}{
-						"id":     manifest.Name,
-						"name":   manifest.Name,
-						"path":   filepath.Dir(*projectManifest),
-						"layout": manifest.Layout,
-					})
-					// Use import to simplify registration from manifest
-					k.RouteMessage(context.Background(), api.Message{
-						ID:      "manifest-import",
-						Type:    api.TypeRequest,
-						Sender:  "system",
-						Target:  "project",
-						Method:  "project:import",
-						Payload: wsData,
-					})
-					// Auto-set the active workspace to the one in the manifest
-					k.RouteMessage(context.Background(), api.Message{
-						ID:      "auto-activate-active",
-						Type:    api.TypeRequest,
-						Sender:  "system",
-						Target:  "project",
-						Method:  "project:set-workspace",
-						Payload: []byte(manifest.Name),
-					})
-				}()
-
-				// 2. Load plugins defined in manifest
-				for _, pc := range manifest.Plugins {
-					pluginPath := kernel.ResolvePluginPath(*projectManifest, pc.Path)
-					logger.Debug("registering plugin from manifest", "id", pc.ID, "load", pc.LoadTime)
-
-					pDef := kernel.PluginDef{
-						ID:       pc.ID,
-						Path:     pluginPath,
-						Type:     "wasm",
-						LoadTime: pc.LoadTime,
-					}
-
-					if err := k.Provision([]kernel.PluginDef{pDef}); err != nil {
-						logger.Error("failed to provision plugin from manifest", "id", pc.ID, "error", err)
-					}
-				}
-
-				// 3. TODO: Send project:set-security if manifest has security config
-				if manifest.Security != nil {
-					// We wait for the plugin to be ready and send it
-					// For now, we perform local core IAM grants direct since this IS the bootstrap
-					// But user wants "translated into configuration to be passed to project:create"
-					// So let's send a delayed message to the project plugin
-					go func() {
-						time.Sleep(2 * time.Second) // wait for wasm to boot
-						securityPayload, _ := json.Marshal(manifest.Security)
-						k.RouteMessage(context.Background(), api.Message{
-							ID:      "bootstrap-security",
-							Type:    api.TypeRequest,
-							Sender:  "system",
-							Target:  "project",
-							Method:  "project:set-security",
-							Payload: securityPayload,
-							Metadata: map[string]any{
-								"namespace": manifest.Name,
-							},
-						})
-					}()
-				}
-			}
-		}
-	}
+	// Set the onAddListener hook to allow registering project-specific sockets
+	k.SetOnAddListener(server.AddListener)
 
 	go func() {
 		logger.Info("starting IPC server", "addr", *listenAddr)
@@ -284,44 +159,28 @@ func main() {
 	// Load provisioned plugins if found
 	if currentProvisionFile != "" {
 		data, err := os.ReadFile(currentProvisionFile)
-		if err != nil {
-			logger.Error("failed to read provision file", "error", err)
-			os.Exit(1)
-		}
-
-		var manifest struct {
-			Plugins []kernel.PluginDef `json:"plugins"`
-		}
-		if err := json.Unmarshal(data, &manifest); err != nil {
-			logger.Error("failed to parse provision file", "error", err)
-			os.Exit(1)
-		}
-
-		// Resolve paths relative to manifest
-		for i := range manifest.Plugins {
-			if manifest.Plugins[i].Type == "wasm" {
-				manifest.Plugins[i].Path = kernel.ResolvePluginPath(currentProvisionFile, manifest.Plugins[i].Path)
+		if err == nil {
+			var manifest struct {
+				Plugins []kernel.PluginDef `json:"plugins"`
+			}
+			if err := json.Unmarshal(data, &manifest); err == nil {
+				// Resolve paths relative to manifest
+				manifestDir := filepath.Dir(currentProvisionFile)
+				for i := range manifest.Plugins {
+					if !filepath.IsAbs(manifest.Plugins[i].Path) {
+						manifest.Plugins[i].Path = filepath.Join(manifestDir, manifest.Plugins[i].Path)
+					}
+				}
+				k.Provision(manifest.Plugins)
 			}
 		}
-
-		if err := k.Provision(manifest.Plugins); err != nil {
-			logger.Error("failed to provision plugins", "error", err)
-			os.Exit(1)
-		}
 	}
 
-	// Set up signal handling
+	// Wait for interrupt
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	logger.Info("Alloy Core started", "data_dir", *dataDir)
-
-	// Wait for shutdown signal
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
-	logger.Info("shutting down")
 
-	server.Stop()
-	if err := k.Shutdown(ctx); err != nil {
-		logger.Error("kernel shutdown error", "error", err)
-	}
+	logger.Info("shutting down")
+	k.Shutdown(ctx)
 }

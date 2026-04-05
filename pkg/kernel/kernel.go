@@ -82,6 +82,15 @@ type Kernel struct {
 
 	// list of components that can filter or modify messages (Legacy interceptors)
 	interceptors []api.Interceptor
+
+	// lifecycle hooks
+	onAddListener func(string) error
+}
+
+func (k *Kernel) SetOnAddListener(f func(string) error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.onAddListener = f
 }
 
 // New creates a new instance of the Alloy Kernel.
@@ -223,7 +232,14 @@ func (k *Kernel) processEventLog() {
 
 // SetInsecure disables security enforcement (RBAC, mTLS, etc.) in the kernel.
 func (k *Kernel) SetInsecure(insecure bool) {
+	k.mu.Lock()
 	k.insecure = insecure
+	k.mu.Unlock()
+
+	if k.iam != nil {
+		k.iam.SetInsecure(insecure)
+	}
+
 	if insecure {
 		k.logger.Warn("running in INSECURE mode - RBAC enforcement disabled")
 	}
@@ -514,6 +530,10 @@ func (k *Kernel) QueryLibrarian(ctx context.Context, query string) (string, erro
 }
 
 func (k *Kernel) HandleMessageSync(ctx context.Context, msg api.Message) (api.Message, error) {
+	if msg.Target == "kernel" {
+		return k.handleKernelMessage(ctx, msg)
+	}
+
 	k.mu.RLock()
 	target := msg.Target
 	if capTarget, ok := k.capabilityMap[target]; ok {
@@ -873,6 +893,26 @@ func (k *Kernel) listRegistrations() []api.Registration {
 			Capabilities: meta.Capabilities,
 		})
 	}
+	// Add currently active plugins not in metadata (e.g. core services or boot-loaded)
+	for id, p := range k.plugins {
+		found := false
+		for _, r := range regs {
+			if r.ID == id {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		regs = append(regs, api.Registration{
+			ID:           id,
+			Type:         "plugin",
+			Status:       "active",
+			Capabilities: p.Capabilities(),
+		})
+	}
+
 	// Add frontends
 	for id := range k.frontends {
 		status := "frontend"
@@ -895,7 +935,12 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 	}
 
 	switch msg.Method {
+	case "bootstrap-path":
+		k.handleKernelMessage(ctx, msg)
+		return
+
 	case "ping":
+
 		k.deliverToFrontendSync(ctx, msg.Sender, api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,
@@ -1145,11 +1190,21 @@ func ResolvePluginPath(manifestPath, pluginPath string) string {
 func (k *Kernel) GetPluginMetadata() map[string]api.PluginMetadata {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	meta := make(map[string]api.PluginMetadata, len(k.metadata))
+	res := make(map[string]api.PluginMetadata)
 	for id, m := range k.metadata {
-		meta[id] = m
+		res[id] = m
 	}
-	return meta
+	// Add currently active plugins not in metadata
+	for id, p := range k.plugins {
+		if _, ok := res[id]; ok {
+			continue
+		}
+		res[id] = api.PluginMetadata{
+			ID:           id,
+			Capabilities: p.Capabilities(),
+		}
+	}
+	return res
 }
 
 func (k *Kernel) GetPlugin(id string) (api.Plugin, bool) {

@@ -43,10 +43,10 @@ type Server struct {
 	router Router
 	config *tls.Config
 
-	mu       sync.Mutex
-	conns    map[string]*connection
-	wg       sync.WaitGroup
-	listener net.Listener
+	mu        sync.Mutex
+	conns     map[string]*connection
+	wg        sync.WaitGroup
+	listeners []net.Listener
 }
 
 type connection struct {
@@ -67,12 +67,24 @@ func NewServer(logger *slog.Logger, router Router, tlsConfig *tls.Config) *Serve
 }
 
 func (s *Server) ListenAndServe(rawAddr string) error {
+	l, err := s.Listen(rawAddr)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.listeners = append(s.listeners, l)
+	s.mu.Unlock()
+
+	return s.Serve()
+}
+
+func (s *Server) Listen(rawAddr string) (net.Listener, error) {
 	network, addr := ParseAddress(rawAddr)
 	if network == "unix" {
 		// Ensure directory exists
 		dir := filepath.Dir(addr)
 		if strings.Contains(dir, "alloy") {
-			_ = os.MkdirAll(dir, 0700)
+			_ = os.MkdirAll(dir, 0755)
 		}
 		// Remove existing socket file if it exists
 		_ = os.Remove(addr)
@@ -87,36 +99,49 @@ func (s *Server) ListenAndServe(rawAddr string) error {
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
-	s.mu.Lock()
-	s.listener = l
-	s.mu.Unlock()
-	s.logger.Info("IPC server listening", "network", network, "addr", addr, "mtls", s.config != nil)
 
-	return s.Serve()
+	s.logger.Info("IPC server listening", "network", network, "addr", addr, "mtls", s.config != nil)
+	return l, nil
 }
 
 func (s *Server) Addr() net.Addr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.listener == nil {
+	if len(s.listeners) == 0 {
 		return nil
 	}
-	return s.listener.Addr()
+	return s.listeners[0].Addr()
 }
 
 func (s *Server) Serve() error {
+	// Serve handles all existing and future listeners
+	// For now we assume Serve blocks on the first one or we run it in a loop
+	// Actually we need to be able to add listeners while serving.
+
+	// Since Serve is expected to block, we'll just wait on a channel
+	// and accept connections from all listeners in separate goroutines.
+
+	s.mu.Lock()
+	ll := s.listeners
+	s.mu.Unlock()
+
+	for _, l := range ll {
+		go s.serveListener(l)
+	}
+
+	// Wait for stop
+	s.wg.Add(1)
+	s.wg.Wait()
+	return nil
+}
+
+func (s *Server) serveListener(l net.Listener) {
 	for {
-		s.mu.Lock()
-		l := s.listener
-		s.mu.Unlock()
-		if l == nil {
-			return net.ErrClosed
-		}
 		conn, err := l.Accept()
 		if err != nil {
-			return err
+			return
 		}
 
 		s.wg.Add(1)
@@ -124,17 +149,30 @@ func (s *Server) Serve() error {
 	}
 }
 
+func (s *Server) AddListener(rawAddr string) error {
+	l, err := s.Listen(rawAddr)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.listeners = append(s.listeners, l)
+	s.mu.Unlock()
+
+	go s.serveListener(l)
+	return nil
+}
+
 func (s *Server) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.listener != nil {
-		err := s.listener.Close()
-		if s.listener.Addr().Network() == "unix" {
-			_ = os.Remove(s.listener.Addr().String())
+	for _, l := range s.listeners {
+		_ = l.Close()
+		if l.Addr().Network() == "unix" {
+			_ = os.Remove(l.Addr().String())
 		}
-		s.listener = nil
-		return err
 	}
+	s.listeners = nil
 	return nil
 }
 

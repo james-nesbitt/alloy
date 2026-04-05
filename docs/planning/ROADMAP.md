@@ -10,25 +10,25 @@
 | **PHASE 9: SYNTHESIS** | **DONE** | Multi-Project Switcher, Side-car plugins. |
 | **PHASE 10: DYNAMICS** | **ARCHIVED** | Layout recursion, Intent routing, Headless actors. |
 | **PHASE 11: LIFECYCLE** | **DONE** | Semantic indexing (Librarian), temporal playback. |
-| **PHASE 12: SUBSTRATE** | **ACTIVE** | Agentic Actor Framework, Headless Coordination. |
+| **PHASE 12: SUBSTRATE** | **DONE** | Agentic Actor Framework, Headless Coordination. |
+| **PHASE 13: ORCHESTRATION** | **ACTIVE** | Dynamic Manifests, Simple Project Handling. |
 
 ---
 
-## Current Active: PHASE 12: AUTONOMOUS SUBSTRATE [IN PROGRESS]
+## Current Active: PHASE 13: HYPER-ORCHESTRATION [IN PROGRESS]
 
-**Goal**: Transition from semantic memory to active agentic participation. AI actors becomes first-class members of the coordination substrate.
+**Goal**: Move from autonomous substrates to a multi-agent, project-centric orchestration layer. This phase focuses on flattening the project lifecycle and enabling cross-substrate collaboration.
 
-### Phase 12 Milestones
-- [ ] **Agentic Actor Framework**
-    - Actor Identity: Assign per-actor IAM identities and standard Alloy roles.
-    - Proactive Interventions: Actors monitor event streams and suggest intents.
-    - Intent Delegation: Humans delegating complex sub-tasks to actors with verified execution.
-- [ ] **Headless Coordination**
-    - Zero-Frontend Clients: Backend-only clients for purely automated workflow steps.
-    - State Reconciliation: Ensuring headless actors stay in sync with GUI/TUI users.
-- [ ] **Hardware-Verified Identity (Security)**
-    - mTLS Enhancements: Moving towards hardware-backed keys.
-    - Role Attestation: Cryptographic proofs for role assignments.
+### Phase 13 Milestones
+- [ ] **Simple Project Management**
+    - Support for manifest-less ad-hoc projects.
+    - Implementation of standardized `project:edit` and `project:refine` intents.
+- [ ] **Dynamic Manifest Evolution**
+    - On-the-fly capability injection for established containers.
+    - Transparent role/permission escalation for agentic tasks.
+- [ ] **Cross-Substrate Bridging**
+    - Lightweight IPC bridge for non-local headless actors.
+    - Event-sourced synchronization of remote project states.
 
 ---
 

@@ -119,6 +119,10 @@ func (c *Client) OnMessage(h func(api.Message)) {
 	c.onMsg = append(c.onMsg, h)
 }
 
+func (c *Client) RouteMessage(msg api.Message) error {
+	return c.ipc.Send(msg)
+}
+
 func (c *Client) Send(ctx context.Context, target, method string, payload []byte) (api.Message, error) {
 	c.mu.RLock()
 	actor := c.actor

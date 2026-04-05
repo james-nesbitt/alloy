@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+
 	"log"
 	"net"
 	"os"
@@ -48,7 +50,10 @@ func main() {
 		launchFrontend("alloy-web", args)
 	case "version":
 		fmt.Println("Alloy Tool v0.1.0")
+	case "init":
+		initProject(args)
 	case "help":
+
 		usage()
 	default:
 		fmt.Printf("Unknown command: %s\n", cmd)
@@ -77,6 +82,55 @@ func usage() {
 	fmt.Println("  --security-dir PATH           Path to the security/identity directory (Auto-generated for dedicated sessions)")
 	fmt.Println("  --debug                       Enable verbose debug logging for all components")
 	os.Exit(1)
+}
+
+func initProject(args []string) {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	name := fs.String("name", "", "Project name")
+	description := fs.String("description", "", "Project description")
+	fs.Parse(args)
+
+	path := "."
+	if fs.NArg() > 0 {
+		path = fs.Arg(0)
+	}
+
+	alloyDir := filepath.Join(path, ".alloy")
+	if err := os.MkdirAll(alloyDir, 0755); err != nil {
+		log.Fatalf("Failed to create .alloy directory: %v", err)
+	}
+
+	projectName := *name
+	if projectName == "" {
+		absPath, _ := filepath.Abs(path)
+		projectName = filepath.Base(absPath)
+		if projectName == "." || projectName == "/" || projectName == "" {
+			projectName = "New Project"
+		}
+	}
+
+	// Create project.json
+	projectConfig := map[string]interface{}{
+		"name":        projectName,
+		"description": *description,
+		"layout":      "standard",
+	}
+	data, _ := json.MarshalIndent(projectConfig, "", "  ")
+	if err := os.WriteFile(filepath.Join(alloyDir, "project.json"), data, 0644); err != nil {
+		log.Fatalf("Failed to write project.json: %v", err)
+	}
+
+	// Default plugin configs
+	plugins := []string{"documentation", "repository"}
+	for _, p := range plugins {
+		pConfig := map[string]interface{}{
+			"name": projectName + " " + p,
+		}
+		pData, _ := json.MarshalIndent(pConfig, "", "  ")
+		os.WriteFile(filepath.Join(alloyDir, p+".json"), pData, 0644)
+	}
+
+	fmt.Printf("Initialized Alloy project in %s\n", path)
 }
 
 func findBinary(name string) (string, error) {

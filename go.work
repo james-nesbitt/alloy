@@ -7,12 +7,14 @@ use (
 	./plugins/wasm/ai
 	./plugins/wasm/buffer
 	./plugins/wasm/chat
+	./plugins/wasm/documentation
 	./plugins/wasm/health
 	./plugins/wasm/iam
 	./plugins/wasm/index
 	./plugins/wasm/librarian
 	./plugins/wasm/omni-palette
 	./plugins/wasm/project
+	./plugins/wasm/repository
 	./plugins/wasm/secrets
 	./plugins/wasm/settings
 	./plugins/wasm/switcher

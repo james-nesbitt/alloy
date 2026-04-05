@@ -33,7 +33,10 @@ func TestWorkspaceSynthesis(t *testing.T) {
 	defer k.Shutdown(context.Background())
 
 	cwd, _ := os.Getwd()
-	projectRoot := filepath.Dir(cwd)
+	projectRoot := cwd
+	if filepath.Base(cwd) == "tests" {
+		projectRoot = filepath.Dir(cwd)
+	}
 
 	// Build paths to plugins
 	aiWasm := filepath.Join(projectRoot, "build/dist/usr/lib/alloy/plugins/ai.wasm")
@@ -74,7 +77,8 @@ func TestWorkspaceSynthesis(t *testing.T) {
 	})
 
 	// Wait for boot and bootstrap messages
-	time.Sleep(3 * time.Second)
+	// Wait for boot and bootstrap messages
+	time.Sleep(10 * time.Second)
 
 	// Simulate alloy-core pushing user config
 	userContent, _ = json.Marshal(userConfig)
@@ -120,6 +124,7 @@ func TestWorkspaceSynthesis(t *testing.T) {
 		Targets []api.Registration `json:"targets"`
 	}
 	json.Unmarshal(resp.Payload, &discovery)
+	t.Logf("Discovery targets: %v", discovery.Targets)
 
 	foundSwitcher := false
 	foundAI := false

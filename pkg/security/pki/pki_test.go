@@ -165,7 +165,6 @@ func TestTPMPKI(t *testing.T) {
 	}
 }
 
-
 func TestPKIFailures(t *testing.T) {
 	_, err := ParseKeyPair([]byte("invalid"), []byte("invalid"))
 	if err == nil {

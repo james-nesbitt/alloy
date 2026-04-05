@@ -23,10 +23,12 @@ const ActorPrefix = "actor:"
 
 // IdentityManager implements authorization enforcement for the kernel.
 type IdentityManager struct {
-	logger          *slog.Logger
-	state           storage.StateStore
-	mu              sync.RWMutex
-	policies        map[string]Policy
+	logger   *slog.Logger
+	state    storage.StateStore
+	mu       sync.RWMutex
+	insecure bool
+	policies map[string]Policy
+
 	identities      map[string]string              // actor -> role
 	namespaceGrants map[string]map[string][]string // actor -> namespace -> capabilities
 }
@@ -145,6 +147,12 @@ func NewIdentityManager(ctx context.Context, logger *slog.Logger, state storage.
 	iam.identities["actor:reviewer"] = "reviewer"
 
 	return iam, nil
+}
+
+func (i *IdentityManager) SetInsecure(insecure bool) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.insecure = insecure
 }
 
 func (i *IdentityManager) ID() string { return "iam" }
@@ -287,6 +295,14 @@ func (i *IdentityManager) Authorize(actor, target, method string) bool {
 
 func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID string) bool {
 	i.mu.RLock()
+	insecure := i.insecure
+	i.mu.RUnlock()
+	if insecure {
+		return true
+	}
+
+	i.mu.RLock()
+
 	defer i.mu.RUnlock()
 
 	// Formalize Actor status

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -566,3 +568,18 @@ func (m Model) fetchHistory() tea.Cmd {
 }
 
 type historyMsg []string
+
+func (m Model) doBootstrap() tea.Msg {
+	cwd, _ := os.Getwd()
+	m.client.RouteMessage(api.Message{
+
+		ID:        fmt.Sprintf("tui-bootstrap-%d", time.Now().Unix()),
+		Type:      api.TypeRequest,
+		Sender:    m.client.Name(),
+		Target:    "kernel",
+		Method:    "bootstrap-path",
+		Payload:   []byte(cwd),
+		Timestamp: time.Now().Unix(),
+	})
+	return nil
+}
