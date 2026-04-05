@@ -11,12 +11,15 @@ BIN_DIR      := DIST_ROOT + "/usr/bin"
 LIBEXEC_DIR  := DIST_ROOT + "/usr/libexec/alloy"
 PLUGIN_DIR   := DIST_ROOT + "/usr/lib/alloy/plugins"
 ETC_DIR      := DIST_ROOT + "/etc/alloy"
+LOGS_DIR     := BUILD_DIR + "/logs"
+DATA_DIR     := BUILD_DIR + "/data"
 
+# Build configuration
 WASM_BUILD   := PLUGIN_DIR
 BIN_BUILD    := BIN_DIR
-SH_DIR       := BUILD_DIR + "/gen"
+GEN_DIR      := BUILD_DIR + "/gen"
 INTERNAL_BIN := BUILD_DIR + "/tmp/bin"
-BINDINGS_DIR := SH_DIR + "/bindings"
+BINDINGS_DIR := GEN_DIR + "/bindings"
 PLUGINS_SRC  := PROJECT_ROOT + "/plugins/wasm"
 
 # Default action
@@ -25,13 +28,6 @@ default: help
 # Show help for available tasks
 help:
     @just --list
-
-# --- FLATPAK ---
-
-# Build everything and then build a flatpak for the GUI
-flatpak: build-all
-    flatpak-builder --force-clean --user --install build/flatpak com.james_nesbitt.AlloyGui.yaml
-    @echo "Alloy GUI Flatpak (com.james-nesbitt.AlloyGui) built and installed."
 
 # --- CLEANUP ---
 
@@ -42,11 +38,9 @@ fmt:
 
 # Remove build artifacts and temporary files
 clean:
-    rm -rf {{BUILD_DIR}} bin/ data/
-    rm -f alloy-core alloy-tui alloy-gui-gio alloy-gui alloy-web alloy
-    rm -f build_err.txt build_output.txt debug_draw.txt
-    rm -f *.test coverage.out
-    @echo "Cleanup complete."
+    @echo ">> Cleaning up build directory..."
+    rm -rf {{BUILD_DIR}}
+    @echo ">> Cleanup complete."
 
 # --- PROJECT SETUP & CODE GENERATION ---
 
@@ -80,7 +74,6 @@ generate: check-deps
     mkdir -p {{BINDINGS_DIR}}/host/wit-rust {{BINDINGS_DIR}}/guest
     wit-bindgen rust --out-dir {{BINDINGS_DIR}}/host/wit-rust wit/alloy.wit
     wit-bindgen tiny-go --out-dir {{BINDINGS_DIR}}/guest wit/alloy.wit
-    # Initialize the guest bindings go.mod
     @if [ ! -f {{BINDINGS_DIR}}/guest/go.mod ]; then \
         cd {{BINDINGS_DIR}}/guest && go mod init github.com/james-nesbitt/alloy/build/gen/bindings/guest && cd -; \
     fi
@@ -113,9 +106,9 @@ build-gui:
 
 # Build Alloy Web (WASM + Host Proxy)
 build-web:
-    @echo ">> Building Web Frontend (WASM) into cmd/alloy-web/static/wasm/..."
-    mkdir -p cmd/alloy-web/static/wasm
-    GOOS=js GOARCH=wasm go build -o cmd/alloy-web/static/wasm/frontend.wasm ./cmd/alloy-web/internal/bridge/wasm_main.go
+    @echo ">> Building Web Frontend (WASM) into {{BUILD_DIR}}/web/static/wasm/..."
+    @mkdir -p {{BUILD_DIR}}/web/static/wasm
+    @GOOS=js GOARCH=wasm go build -o {{BUILD_DIR}}/web/static/wasm/frontend.wasm ./cmd/alloy-web/internal/bridge/wasm_main.go
     @echo ">> Building Web Host Proxy into {{BIN_DIR}}..."
     mkdir -p {{BIN_DIR}}
     go build -o {{BIN_DIR}}/alloy-web ./cmd/alloy-web
@@ -140,11 +133,11 @@ build-plugin name: generate
 
 # Build all WIT-based WASM plugins
 build-plugins: generate
-	@echo ">> Building all WASM plugins into {{WASM_BUILD}}..."
-	mkdir -p {{WASM_BUILD}}
-	@chmod +x scripts/build-wasm-all.sh
-	@./scripts/build-wasm-all.sh
-	@echo ">> WASM plugins built successfully."
+    @echo ">> Building all WASM plugins into {{WASM_BUILD}}..."
+    mkdir -p {{WASM_BUILD}}
+    @chmod +x scripts/build-wasm-all.sh
+    @./scripts/build-wasm-all.sh
+    @echo ">> WASM plugins built successfully."
 
 # Build everything
 build-all: setup-dev build-plugins build-binaries pack-config
@@ -156,55 +149,28 @@ pack-config:
     @if [ -f provision.json ]; then cp provision.json {{ETC_DIR}}/provision.json; fi
     @if [ -f provision-wit.json ]; then cp provision-wit.json {{ETC_DIR}}/provision.json; fi
 
-# --- EXECUTION ---
+# --- EXECUTION & TESTING ---
 
-# Run Alloy Core
-run-core *args: build-core
-    {{LIBEXEC_DIR}}/alloy-core {{args}}
-
-# Run TUI Frontend
-run-tui *args: build-alloy build-core build-tui
-    {{BIN_DIR}}/alloy tui {{args}}
-
-# Run Native GUI
-run-gui *args: build-alloy build-core build-gui
-    {{BIN_DIR}}/alloy gui {{args}}
-
-# Run Web Frontend (Host Proxy)
-run-web *args: build-alloy build-core build-web
-    {{BIN_DIR}}/alloy web {{args}}
-
-# --- TESTING ---
-
-# Run comprehensive test suite
+# Run comprehensive test suite (output test logs to build/logs)
 test:
-    @echo ">> Running unit tests..."
-    go test -v ./pkg/...
-    @echo ">> Running integration tests..."
-    go test -v ./tests/...
-
-# Run WASM specific tests
-test-wasm:
-    @echo ">> Running WASM/WIT implementation tests..."
-    go test -v -run "TestWIT" ./pkg/wasm/... ./pkg/kernel/...
-
-# Run unified sanity check (Kernel + Multiple simulated frontends)
-test-unified: build-plugins
-    @echo ">> Running Unified Sanity Check..."
-    go test -v ./tests/sanity_check_test.go
-
-# Install web frontend dependencies (JS testing tools)
-install-web-deps:
-    @echo ">> Installing web dependencies..."
-    cd cmd/alloy-web && npm install
+    @mkdir -p {{LOGS_DIR}}
+    @echo ">> Running unit tests (logs to {{LOGS_DIR}}/unit_tests.log)..."
+    go test -v ./pkg/... | tee {{LOGS_DIR}}/unit_tests.log
+    @echo ">> Running integration tests (logs to {{LOGS_DIR}}/integration_tests.log)..."
+    go test -v ./tests/... | tee {{LOGS_DIR}}/integration_tests.log
 
 # Run all tests (Unit, Integration, and Web)
 test-all: test-web test
     @echo ">> All tests completed successfully."
 
-# Run web frontend tests (Go and JS/WASM Bridge)
+# JS/WASM bridge UX tests
 test-web: install-web-deps
-    @echo ">> Running Go tests for web proxy..."
-    go test -v ./cmd/alloy-web
+    @mkdir -p {{LOGS_DIR}}
+    @echo ">> Running Go tests for web proxy (logs to {{LOGS_DIR}}/web_tests.log)..."
+    go test -v ./cmd/alloy-web | tee {{LOGS_DIR}}/web_tests.log
     @echo ">> Running JS/WASM Bridge UX tests..."
     cd cmd/alloy-web && npm test
+
+install-web-deps:
+    @echo ">> Installing web dependencies..."
+    cd cmd/alloy-web && npm install

@@ -1,36 +1,24 @@
-# Binaries and build artifacts
+# --- BUILD ARTIFACTS ---
 build/
-bin/
-*.wasm
-/alloy-core
-/alloy
-/alloy-tui
-/alloy-gui-gio
-/alloy-gui-wayland-native
-/alloy-core-wit
-plugins-bin/
+.bin/
 
-# Logs and test artifacts
-*.log
+# --- GO & BINDINGS ---
+build/gen/
+build/dist/
+build/tmp/
 *.test
-build_err.txt
-build_output.txt
-debug_draw.txt
-data/
 coverage.out
-coverdata/
-race_report.txt
-smoke_test_output.log
-*.html
+debug_draw.txt
 
+# --- LOGS & RUNTIME ---
+*.log
+data/
+.alloy/
+.pi/
+.pi/messenger/crew/artifacts/
 
-# Go environment
-vendor/
-go.work
-go.work.sum
-
-# IDEs
+# --- OS & IDE ---
+.DS_Store
 .vscode/
 .idea/
-.DS_Store
-cmd/alloy-web/node_modules
+vendor/

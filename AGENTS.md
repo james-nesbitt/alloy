@@ -22,6 +22,8 @@ When the effort is considered "complete," you **MUST** run the full verification
 2. **FULL BUILD**: `just build-all` (All 14+ plugins and all frontends must compile).
 3. **FULL TEST**: `go test ./pkg/...` and any relevant plugin tests.
 4. **NO SUPPRESSION**: You **MUST NOT** ignore failures or suppress tests to "finish" a task.
+5. **DOCUMENTATION EXCEPTION**: Full build and test verification may be skipped if the effort consists **ONLY** of documentation changes (e.g., `.md` files).
+
 
 ### 4. FINALIZATION & CLEANUP
 Closing an effort involves strict surgical cleanup:
@@ -66,6 +68,12 @@ Closing an effort involves strict surgical cleanup:
 - **Correction**: `just build-all` is non-negotiable. If it doesn't build, it doesn't exist.
 
 ---
+### 5. BUILD & RUNTIME ISOLATION
+- **ALL** build artifacts, compiled binaries, generated bindings, and test logs **MUST** be stored in the `build/` directory.
+- **NEVER** commit files in the `build/` directory to `main`.
+- **NEVER** write logs, temporary data, or configuration files (e.g., `.alloy/`, `.pi/`) directly into the root folder. Use `build/logs/`, `build/data/`, etc.
+- Use `just clean` to safely remove all build-related clutter.
+
 
 ## 🧬 SKILLS & TOOLS
 
