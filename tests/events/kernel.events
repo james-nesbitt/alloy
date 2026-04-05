@@ -96,3 +96,4 @@
 {"index":95,"timestamp":1775386581,"message":{"id":"audit-conn-test-client","type":"event","sender":"ipc-server","target":"events","method":"publish","payload":{"topic":"system:audit","data":{"actor":"test-client","action":"connection","status":"success","details":{"type":"mtls"}}},"timestamp":0}}
 {"index":96,"timestamp":1775386581,"message":{"id":"ping-mtls","type":"request","sender":"test-client","target":"kernel","method":"ping","timestamp":1775386581,"actor":"test-client"}}
 {"index":97,"timestamp":1775386581,"message":{"id":"evt-135621.841","type":"event","sender":"events","target":"logger","method":"system:audit","payload":{"actor":"test-client","action":"connection","status":"success","details":{"type":"mtls"}},"timestamp":1775386581,"metadata":{"scope":""}}}
+
