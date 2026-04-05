@@ -106,17 +106,17 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 					b.logger.Debug("added sub-task to delegation chain", "parent", del.ParentID, "child", del.ID)
 				}
 			}
-			
+
 			// If target was found via providers but assignee is empty, use it.
 			if del.Assignee == "" && target != "" {
 				del.Assignee = target
 			}
-			
+
 			b.delegations[del.ID] = &del
 			b.delegationsLock.Unlock()
 
 			b.logger.Info("tracking intent delegation", "id", del.ID, "owner", del.Owner, "assignee", del.Assignee)
-			
+
 			// Override target to assignee for delegation delivery
 			if del.Assignee != "" {
 				target = del.Assignee
@@ -143,7 +143,7 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 			}
 			b.delegationsLock.Unlock()
 		}
-		// Treat update/complete as events to broadcast 
+		// Treat update/complete as events to broadcast
 		target = "*"
 	}
 
@@ -247,7 +247,6 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 	b.router(ctx, msg)
 	return nil
 }
-
 
 func (b *IntentBroker) populateDeepDelegation(del *api.Delegation, depth int) {
 	if depth > 10 || len(del.Chain) == 0 {

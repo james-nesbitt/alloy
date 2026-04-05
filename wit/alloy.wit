@@ -121,7 +121,22 @@ world alloy {
             context-id: option<string>,
         }
 
+        // Shared memory visual overlay intent (Phase 12)
+        record visual-intent {
+            buffer-id: string,
+            intent-type: string,
+            offset: u32,
+            length: u32,
+            color: string,
+            label: string,
+        }
+
         // Dispatch an intent to be routed by the kernel
         dispatch-intent: func(i: intent);
+
+        // Broadcast a visual intent (cursor, highlight, comment) tied to a buffer
+        dispatch-visual-intent: func(i: visual-intent);
+
+
     }
 }

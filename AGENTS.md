@@ -25,6 +25,8 @@ Before any merge, the REVIEWER **MUST** run and pass:
 1. `just fmt`
 2. `just build-all`
 3. `just test-all`
+- **FINAL CHECK**: At the end of every effort, before changes are merged, these full verification steps **MUST** be performed to confirm system integrity.
+
 - **EXCEPTION**: Changes restricted to `docs/`, `plans/`, `AGENTS.md`, or `README.md` (documentation-only) do NOT require `just build-all` or `just test-all`.
 - **NOTE**: Merges are only permitted if ALL tests pass. No exceptions for code changes.
 

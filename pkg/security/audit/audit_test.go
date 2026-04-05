@@ -1,7 +1,12 @@
 package audit
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -51,13 +56,6 @@ func TestSignedAuditLogger(t *testing.T) {
 	}
 
 	// Use a software key for testing
-	import (
-		"crypto/ecdsa"
-		"crypto/elliptic"
-		"crypto/rand"
-		"encoding/json"
-		"strings"
-	)
 
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	l.SetSigner(key)

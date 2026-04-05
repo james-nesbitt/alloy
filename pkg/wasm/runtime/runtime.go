@@ -210,7 +210,7 @@ func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.
 	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterWidget).Export("unregister-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalUpdateWidget).Export("update-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalDispatchIntent).Export("dispatch-intent")
-	builder.NewFunctionBuilder().WithFunc(r.internalVisualIntent).Export("visual-intent")
+	builder.NewFunctionBuilder().WithFunc(r.internalVisualIntent).Export("dispatch-visual-intent")
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
 		mod.Memory().WriteUint32Le(resPtr+4, 0)
@@ -1195,4 +1195,3 @@ func (r *Runtime) internalVisualIntent(ctx context.Context, mod wazeroapi.Module
 		}
 	}
 }
-
