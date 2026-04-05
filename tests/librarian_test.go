@@ -43,7 +43,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 	aiBytes, _ := os.ReadFile(filepath.Join(pluginsDir, "ai.wasm"))
 	err = k.RegisterWASMPluginAtScale("ai", aiBytes, 256, 100, []api.Capability{
 		{Method: "ai:embed", Description: "Embed"},
-	}, false, false)
+	}, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to load ai plugin: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 		{Method: "buffer:create", Description: "Create"},
 		{Method: "buffer:read", Description: "Read"},
 		{Method: "buffer:write", Description: "Write"},
-	}, false, false)
+	}, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to load buffer plugin: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 	err = k.RegisterWASMPluginAtScale("librarian", libBytes, 256, 100, []api.Capability{
 		{Method: "librarian:search", Description: "Search"},
 		{Method: "librarian:index-buffer", Description: "Index"},
-	}, false, true)
+	}, false, true, false)
 	if err != nil {
 		t.Fatalf("failed to load librarian plugin: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestLibrarianSemanticSearch(t *testing.T) {
 	omniBytes, _ := os.ReadFile(filepath.Join(pluginsDir, "omni-palette.wasm"))
 	err = k.RegisterWASMPluginAtScale("omni-palette", omniBytes, 256, 100, []api.Capability{
 		{Method: "omni:search", Description: "Unified Search"},
-	}, false, false)
+	}, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to load omni-palette plugin: %v", err)
 	}

@@ -268,6 +268,7 @@ func (c *CommandManager) HandleMessage(ctx context.Context, msg api.Message) (ap
 		}
 		existing.ID = id
 		existing.Type = reg.Type
+		existing.Headless = reg.Headless
 
 		c.registry[id] = existing
 		c.mu.Unlock()

@@ -183,4 +183,42 @@ func TestIntentBroker_Delegation(t *testing.T) {
 	if !found_resp {
 		t.Error("Status response not found in captured messages")
 	}
+
+	// Test deep status
+	capturedMsgs = nil
+	deepStatusReq, _ := json.Marshal(map[string]any{"id": "task-123", "deep": true})
+	deepStatusIntent := api.Intent{
+		ID:      "intent-deep",
+		Name:    "intent:delegate:status",
+		Sender:  "user",
+		Payload: deepStatusReq,
+	}
+
+	err = broker.Dispatch(context.Background(), deepStatusIntent)
+	if err != nil {
+		t.Fatalf("Deep status intent failed: %v", err)
+	}
+
+	found_deep := false
+	for _, m := range capturedMsgs {
+		if m.Target == "user" && m.Type == api.TypeResponse {
+			found_deep = true
+			var resp api.Delegation
+			json.Unmarshal(m.Payload, &resp)
+			if len(resp.SubTasks) != 1 {
+				t.Errorf("Deep response missing subtasks, got: %d", len(resp.SubTasks))
+			} else {
+				sub := resp.SubTasks[0]
+				if sub.ID != "task-123-sub" {
+					t.Errorf("Subtask ID mismatch: %s", sub.ID)
+				}
+				if len(sub.SubTasks) != 1 || sub.SubTasks[0].ID != "task-review" {
+					t.Errorf("Deep nesting missing third-level: %v", sub.SubTasks)
+				}
+			}
+		}
+	}
+	if !found_deep {
+		t.Error("Deep status response not found")
+	}
 }

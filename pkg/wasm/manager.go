@@ -67,9 +67,10 @@ func (m *Manager) LoadPlugin(
 	msgPerSec int,
 	caps []api.Capability,
 	background bool,
+	headless bool,
 ) error {
 	// Load the plugin in the runtime
-	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background)
+	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless)
 	if err != nil {
 		return err
 	}
@@ -84,6 +85,7 @@ func (m *Manager) LoadPlugin(
 			ID:           id,
 			Capabilities: caps,
 			Background:   background,
+			Headless:     headless,
 		},
 	}
 

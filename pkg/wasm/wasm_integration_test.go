@@ -73,7 +73,7 @@ func TestWITRuntimeIntegration(t *testing.T) {
 		{Method: "test:echo", Description: "Echoes back the input"},
 	}
 
-	instance, err := runtime.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false)
+	instance, err := runtime.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

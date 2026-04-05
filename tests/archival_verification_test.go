@@ -82,7 +82,7 @@ func TestWorkspaceArchivalSerial(t *testing.T) {
 
 	for _, id := range []string{"project", "librarian"} {
 		wasmBytes, _ := os.ReadFile(filepath.Join(distDir, id+".wasm"))
-		manager.LoadPlugin(context.Background(), id, wasmBytes, 128, 100, nil, false)
+		manager.LoadPlugin(context.Background(), id, wasmBytes, 128, 100, nil, false, false)
 	}
 
 	time.Sleep(1 * time.Second)

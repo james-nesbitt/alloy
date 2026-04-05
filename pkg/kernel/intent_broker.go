@@ -150,11 +150,18 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 	// Phase 12: Delegation Status Retrieval
 	if intent.Name == "intent:delegate:status" {
 		var req struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Deep bool   `json:"deep"`
 		}
 		if err := json.Unmarshal(intent.Payload, &req); err == nil {
 			b.delegationsLock.RLock()
 			del, ok := b.delegations[req.ID]
+			if ok && req.Deep {
+				// Create a deep copy for the response to avoid mutating the map under RLock
+				delCopy := *del
+				b.populateDeepDelegation(&delCopy, 0)
+				del = &delCopy
+			}
 			b.delegationsLock.RUnlock()
 
 			if ok {
@@ -239,4 +246,19 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 
 	b.router(ctx, msg)
 	return nil
+}
+
+
+func (b *IntentBroker) populateDeepDelegation(del *api.Delegation, depth int) {
+	if depth > 10 || len(del.Chain) == 0 {
+		return
+	}
+	del.SubTasks = make([]*api.Delegation, 0, len(del.Chain))
+	for _, subID := range del.Chain {
+		if sub, ok := b.delegations[subID]; ok {
+			subCopy := *sub
+			b.populateDeepDelegation(&subCopy, depth+1)
+			del.SubTasks = append(del.SubTasks, &subCopy)
+		}
+	}
 }

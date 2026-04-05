@@ -76,7 +76,7 @@ func TestWITIntegration(t *testing.T) {
 		{Method: "status", Description: "Get the health status of this WASM instance"},
 	}
 
-	err = manager.LoadPlugin(context.Background(), "health-plugin", healthWasm, 128, 100, caps, false)
+	err = manager.LoadPlugin(context.Background(), "health-plugin", healthWasm, 128, 100, caps, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -43,7 +43,7 @@ func TestOmniPaletteSearch(t *testing.T) {
 	err = k.RegisterWASMPluginAtScale("index", indexBytes, 256, 100, []api.Capability{
 		{Method: "knowledge:ingest", Description: "Ingest doc"},
 		{Method: "knowledge:search", Description: "Search doc"},
-	}, false, false)
+	}, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to load index plugin: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestOmniPaletteSearch(t *testing.T) {
 	omniBytes, _ := os.ReadFile(filepath.Join(pluginsDir, "omni-palette.wasm"))
 	err = k.RegisterWASMPluginAtScale("omni-palette", omniBytes, 256, 100, []api.Capability{
 		{Method: "omni:search", Description: "Unified Search"},
-	}, false, false)
+	}, false, false, false)
 
 	if err != nil {
 		t.Fatalf("failed to load omni-palette plugin: %v", err)

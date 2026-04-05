@@ -96,7 +96,7 @@ func TestManagerPluginLifecycle(t *testing.T) {
 		{Method: "test:method", Description: "Test method"},
 	}
 
-	err = manager.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false)
+	err = manager.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestManagerMessageRouting(t *testing.T) {
 		{Method: "test:method", Description: "Test method"},
 	}
 
-	err = manager.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false)
+	err = manager.LoadPlugin(context.Background(), pluginID, wasmBytes, 128, 100, caps, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

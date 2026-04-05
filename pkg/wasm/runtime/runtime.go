@@ -210,6 +210,7 @@ func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.
 	builder.NewFunctionBuilder().WithFunc(r.internalUnregisterWidget).Export("unregister-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalUpdateWidget).Export("update-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalDispatchIntent).Export("dispatch-intent")
+	builder.NewFunctionBuilder().WithFunc(r.internalVisualIntent).Export("visual-intent")
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
 		mod.Memory().WriteUint32Le(resPtr+4, 0)
@@ -550,7 +551,7 @@ func (r *Runtime) internalSendResponse(ctx context.Context, mod wazeroapi.Module
 	}
 }
 
-func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool) (*Instance, error) {
+func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, headless bool) (*Instance, error) {
 	pluginDir := filepath.Join(r.dataDir, id)
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		return nil, err
@@ -559,7 +560,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 	startedCh := make(chan struct{})
 	instance := &Instance{
 		id: id, ctx: instCtx, cancel: instCancel, logger: r.logger, msgChan: make(chan api.Message, 1024),
-		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background},
+		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background, Headless: headless},
 		startedCh: startedCh, pending: make(map[string]chan api.Message),
 		maxMemoryBytes: maxMemoryMB * 1024 * 1024, msgPerSecond: msgPerSec,
 		bytesPerSecond: 10 * 1024 * 1024, fuelLimit: 1000, lastMsgReset: time.Now(),
@@ -1167,3 +1168,31 @@ func (r *Runtime) internalDispatchIntent(ctx context.Context, mod wazeroapi.Modu
 		Payload: payload,
 	})
 }
+func (r *Runtime) internalVisualIntent(ctx context.Context, mod wazeroapi.Module, ptr uint32) {
+	readStr := func(p uint32) string {
+		sPtr, _ := mod.Memory().ReadUint32Le(p)
+		sLen, _ := mod.Memory().ReadUint32Le(p + 4)
+		return r.readString(mod, sPtr, sLen)
+	}
+	bufID := readStr(ptr)
+	intentType := readStr(ptr + 8)
+	offset, _ := mod.Memory().ReadUint32Le(ptr + 16)
+	length, _ := mod.Memory().ReadUint32Le(ptr + 20)
+	color := readStr(ptr + 24)
+	label := readStr(ptr + 32)
+
+	if r.buffers != nil {
+		if b, ok := r.buffers.GetBuffer(bufID); ok {
+			_ = b.VisualIntent(api.VisualIntent{
+				BufferID: bufID,
+				ActorID:  mod.Name(),
+				Type:     intentType,
+				Offset:   int(offset),
+				Length:   int(length),
+				Color:    color,
+				Label:    label,
+			})
+		}
+	}
+}
+

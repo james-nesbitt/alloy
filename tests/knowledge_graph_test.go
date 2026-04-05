@@ -74,7 +74,7 @@ func TestCollaborativeKnowledgeGraph(t *testing.T) {
 	if err != nil {
 		t.Skip("Index plugin not built, skipping")
 	}
-	err = manager.LoadPlugin(context.Background(), "index", indexBytes, 128, 100, nil, false)
+	err = manager.LoadPlugin(context.Background(), "index", indexBytes, 128, 100, nil, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestCollaborativeKnowledgeGraph(t *testing.T) {
 	if err != nil {
 		t.Skip("AI plugin not built, skipping")
 	}
-	err = manager.LoadPlugin(context.Background(), "ai", aiBytes, 128, 100, nil, false)
+	err = manager.LoadPlugin(context.Background(), "ai", aiBytes, 128, 100, nil, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

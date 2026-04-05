@@ -985,6 +985,7 @@ type PluginDef struct {
 	Capabilities []api.Capability   `json:"capabilities,omitempty"`
 	Background   bool               `json:"background,omitempty"` // Phase 10
 	Sidecar      bool               `json:"sidecar,omitempty"`    // Phase 10
+	Headless     bool               `json:"headless,omitempty"`   // Phase 12
 }
 
 func (k *Kernel) Provision(plugins []PluginDef) error {
@@ -997,6 +998,7 @@ func (k *Kernel) Provision(plugins []PluginDef) error {
 					Capabilities: p.Capabilities,
 					Background:   p.Background,
 					Sidecar:      p.Sidecar,
+					Headless:     p.Headless,
 				}, &wasmLoader{
 					k:            k,
 					pluginID:     p.ID,
@@ -1007,6 +1009,7 @@ func (k *Kernel) Provision(plugins []PluginDef) error {
 					capabilities: p.Capabilities,
 					background:   p.Background,
 					sidecar:      p.Sidecar,
+					headless:     p.Headless,
 				})
 			} else {
 				// Immediate load
@@ -1015,7 +1018,7 @@ func (k *Kernel) Provision(plugins []PluginDef) error {
 					k.logger.Error("failed to read plugin WASM for boot-load", "id", p.ID, "path", p.Path, "error", err)
 					continue
 				}
-				if err := k.RegisterWASMPluginAtScale(p.ID, wasmBytes, p.MaxMemoryMB, p.MsgPerSecond, p.Capabilities, p.Background, p.Sidecar); err != nil {
+				if err := k.RegisterWASMPluginAtScale(p.ID, wasmBytes, p.MaxMemoryMB, p.MsgPerSecond, p.Capabilities, p.Background, p.Sidecar, p.Headless); err != nil {
 					k.logger.Error("failed to register boot-loaded plugin", "id", p.ID, "error", err)
 				}
 			}
@@ -1042,6 +1045,7 @@ type wasmLoader struct {
 	capabilities []api.Capability
 	background   bool
 	sidecar      bool
+	headless     bool
 }
 
 func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, error) {
@@ -1060,7 +1064,7 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 		l.msgPerSecond = 1000
 	}
 
-	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities, l.background, l.sidecar); err != nil {
+	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities, l.background, l.sidecar, l.headless); err != nil {
 		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
 	}
 
@@ -1075,22 +1079,23 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 // WIT/WASM helpers
 
 // RegisterWASMPluginAtScale registers a WASM plugin with the kernel. (Phase 10)
-func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, sidecar bool) error {
+func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, sidecar bool, headless bool) error {
 	plugin := &witPluginWrapper{
 		id:         pluginID,
 		manager:    k.wasmManager,
 		caps:       caps,
 		sidecar:    sidecar,
 		background: background,
+		headless:   headless,
 	}
 
 	k.RegisterPlugin(plugin)
-	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps, background)
+	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless)
 }
 
 // RegisterWASMPlugin registers a WASM plugin with default limits. (Phase 10)
 func (k *Kernel) RegisterWASMPlugin(pluginID string, wasmBytes []byte, caps []api.Capability) error {
-	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps, false, false)
+	return k.RegisterWASMPluginAtScale(pluginID, wasmBytes, 128, 1000, caps, false, false, false)
 }
 
 // ResolvePluginPath attempts to find the WASM file relative to several well-known locations.
@@ -1169,6 +1174,7 @@ type witPluginWrapper struct {
 	caps       []api.Capability
 	sidecar    bool
 	background bool
+	headless   bool
 }
 
 func (p *witPluginWrapper) ID() string                     { return p.id }
@@ -1209,6 +1215,7 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 			MaxMemoryMB  uint32           `json:"max_memory_mb"`
 			Capabilities []api.Capability `json:"capabilities"`
 			Background   bool             `json:"background"` // Phase 10
+			Headless     bool             `json:"headless"`   // Phase 12
 		}
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
 			return api.Message{}, err
@@ -1217,7 +1224,7 @@ func (w *wasmManagerPlugin) HandleMessage(ctx context.Context, msg api.Message) 
 		if err != nil {
 			return api.Message{}, err
 		}
-		err = w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, 1000, req.Capabilities, req.Background, false)
+		err = w.kernel.RegisterWASMPluginAtScale(req.ID, wasmBytes, req.MaxMemoryMB, 1000, req.Capabilities, req.Background, false, req.Headless)
 		if err != nil {
 			return api.Message{}, err
 		}
