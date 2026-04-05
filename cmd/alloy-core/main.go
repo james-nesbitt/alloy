@@ -40,7 +40,7 @@ func main() {
 	}))
 
 	// Parse command line flags
-	dataDir := flag.String("data-dir", "./data", "Directory for plugin data")
+	dataDir := flag.String("data-dir", "./build/data", "Directory for plugin data")
 	listenAddr := flag.String("listen", "unix://"+filepath.Join(getAlloyRuntimeDir(), "default.sock"), "Address to listen on (unix:// or tcp://)")
 	metricsAddr := flag.String("metrics-addr", ":9090", "Address for Prometheus metrics")
 	debug := flag.Bool("debug", false, "Enable debug logging")

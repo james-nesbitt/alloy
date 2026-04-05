@@ -1,0 +1,24 @@
+{
+  "id": "task-1",
+  "title": "Actor Foundation & IAM Evolution",
+  "status": "done",
+  "depends_on": [],
+  "created_at": "2026-04-04T17:44:28.450Z",
+  "updated_at": "2026-04-04T17:47:03.009Z",
+  "attempt_count": 1,
+  "skills": [
+    "git-workflow"
+  ],
+  "started_at": "2026-04-04T17:44:28.481Z",
+  "base_commit": "504daab2a7a85ce578894b5ceaeacb188c4a689f",
+  "completed_at": "2026-04-04T17:47:03.009Z",
+  "summary": "Implemented core actor roles (Developer, Auditor, Reviewer) and formalized actor: prefix in pkg/kernel/iam.go. Added PolicyTemplates method and updated AuthorizeWithContext to handle actor denials specifically.",
+  "evidence": {
+    "commits": [
+      "340a82e"
+    ],
+    "tests": [
+      "go test ./tests/... -run IAM"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "models": {
+    "planner": "ollama/gemini-3-flash-preview:cloud",
+    "worker": "ollama/gemini-3-flash-preview:cloud",
+    "reviewer": "ollama/gemini-3-flash-preview:cloud",
+    "analyst": "ollama/gemini-3-flash-preview:cloud"
+  }
+}

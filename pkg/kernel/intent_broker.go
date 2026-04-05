@@ -20,6 +20,10 @@ type IntentBroker struct {
 	providers        map[string][]string
 	router           func(ctx context.Context, msg api.Message)
 	librarianQuerier func(ctx context.Context, query string) (string, error) // For semantic context injection (Phase 11)
+
+	// Phase 12: Intent Delegation & Collaboration
+	delegations     map[string]*api.Delegation
+	delegationsLock sync.RWMutex
 }
 
 // NewIntentBroker creates a new IntentBroker. If querier is non-nil, it will be used for automated context injection.
@@ -29,6 +33,7 @@ func NewIntentBroker(logger *slog.Logger, router func(ctx context.Context, msg a
 		providers:        make(map[string][]string),
 		router:           router,
 		librarianQuerier: querier,
+		delegations:      make(map[string]*api.Delegation),
 	}
 }
 
@@ -72,18 +77,120 @@ func (b *IntentBroker) Unregister(pluginID string) {
 
 // Dispatch routes an intent to a provider
 func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
-	b.mu.RLock()
-	plugins, ok := b.providers[intent.Name]
-	b.mu.RUnlock()
+	var target string
 
-	if !ok || len(plugins) == 0 {
-		b.logger.Warn("no provider for intent", "intent", intent.Name)
-		return fmt.Errorf("no provider for intent: %s", intent.Name)
+	// Phase 12: Intent Targeting logic
+	if intent.Target != "" && intent.Target != "*" {
+		target = intent.Target
 	}
 
-	// For Phase 10, picked the first available provider.
-	// Optimization: This could use priority, load-balancing, or active context in the future.
-	target := plugins[0]
+	// Phase 12: Intent Delegation Logic - track multi-step task assignments
+	if intent.Name == "intent:delegate" {
+		var del api.Delegation
+		if err := json.Unmarshal(intent.Payload, &del); err == nil {
+			if del.ID == "" {
+				del.ID = intent.ID
+			}
+			if del.Owner == "" {
+				del.Owner = intent.Sender
+			}
+			if del.Status == "" {
+				del.Status = "in_progress"
+			}
+
+			b.delegationsLock.Lock()
+			// Track in parent if applicable (Verification chain tracking)
+			if del.ParentID != "" {
+				if parent, ok := b.delegations[del.ParentID]; ok {
+					parent.Chain = append(parent.Chain, del.ID)
+					b.logger.Debug("added sub-task to delegation chain", "parent", del.ParentID, "child", del.ID)
+				}
+			}
+			
+			// If target was found via providers but assignee is empty, use it.
+			if del.Assignee == "" && target != "" {
+				del.Assignee = target
+			}
+			
+			b.delegations[del.ID] = &del
+			b.delegationsLock.Unlock()
+
+			b.logger.Info("tracking intent delegation", "id", del.ID, "owner", del.Owner, "assignee", del.Assignee)
+			
+			// Override target to assignee for delegation delivery
+			if del.Assignee != "" {
+				target = del.Assignee
+			}
+		}
+	}
+
+	// Phase 12: Delegation Updates
+	if intent.Name == "intent:delegate:update" || intent.Name == "intent:delegate:complete" {
+		var update struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Result string `json:"result,omitempty"`
+		}
+		if err := json.Unmarshal(intent.Payload, &update); err == nil && update.ID != "" {
+			b.delegationsLock.Lock()
+			if del, ok := b.delegations[update.ID]; ok {
+				if intent.Name == "intent:delegate:complete" {
+					del.Status = "complete"
+				} else {
+					del.Status = update.Status
+				}
+				b.logger.Info("delegation updated", "id", update.ID, "status", del.Status)
+			}
+			b.delegationsLock.Unlock()
+		}
+		// Treat update/complete as events to broadcast 
+		target = "*"
+	}
+
+	// Phase 12: Delegation Status Retrieval
+	if intent.Name == "intent:delegate:status" {
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(intent.Payload, &req); err == nil {
+			b.delegationsLock.RLock()
+			del, ok := b.delegations[req.ID]
+			b.delegationsLock.RUnlock()
+
+			if ok {
+				delData, _ := json.Marshal(del)
+				b.router(ctx, api.Message{
+					ID:        intent.ID + "-resp",
+					Type:      api.TypeResponse,
+					Sender:    "intent-broker",
+					Target:    intent.Sender,
+					Payload:   delData,
+					Timestamp: time.Now().Unix(),
+				})
+				return nil
+			}
+		}
+	}
+
+	// Routine intent delivery if no explicit target was set/found
+	if target == "" {
+		b.mu.RLock()
+		plugins, ok := b.providers[intent.Name]
+		b.mu.RUnlock()
+
+		if !ok || len(plugins) == 0 {
+			// Phase 12: Broaden proactive interventions
+			if intent.Name == "intent:propose" || intent.Name == "intent:suggest" {
+				b.logger.Debug("routing proactive intent to broadcast", "intent", intent.Name)
+				target = "*"
+			} else {
+				b.logger.Warn("no provider for intent", "intent", intent.Name)
+				return fmt.Errorf("no provider for intent: %s", intent.Name)
+			}
+		} else {
+			target = plugins[0]
+		}
+	}
 
 	msg := api.Message{
 		ID:        intent.ID,
@@ -104,9 +211,8 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 
 	b.logger.Info("dispatching intent", "intent", intent.Name, "target", target)
 
-	// Phase 11: Semantic Context Injection - for AI-bound intents
+	// Phase 11: Semantic Context Injection
 	if b.librarianQuerier != nil && (strings.HasPrefix(intent.Name, "ai:") || strings.HasPrefix(intent.Name, "intent:summarize") || intent.Name == "ai:query") {
-		// Try to extract a query from the payload to use for semantic search
 		var query string
 		var payloadData map[string]any
 		if err := json.Unmarshal(intent.Payload, &payloadData); err == nil {
@@ -127,9 +233,6 @@ func (b *IntentBroker) Dispatch(ctx context.Context, intent api.Intent) error {
 					msg.Metadata = make(map[string]any)
 				}
 				msg.Metadata["semantic_context"] = contextContent
-				b.logger.Debug("injected semantic context into intent", "intent", intent.Name, "size", len(contextContent))
-			} else if err != nil {
-				b.logger.Warn("librarian query failed in intent broker", "error", err)
 			}
 		}
 	}

@@ -9,30 +9,26 @@
 | **PHASE 8: IAM & IDENTITY** | **DONE** | Hierarchy-Aware RBAC, Role Attestation, Scoped Discovery. |
 | **PHASE 9: SYNTHESIS** | **DONE** | Multi-Project Switcher, Side-car plugins. |
 | **PHASE 10: DYNAMICS** | **ARCHIVED** | Layout recursion, Intent routing, Headless actors. |
-| **PHASE 11: LIFECYCLE** | **ACTIVE** | Semantic indexing (Librarian), temporal playback. |
+| **PHASE 11: LIFECYCLE** | **DONE** | Semantic indexing (Librarian), temporal playback. |
+| **PHASE 12: SUBSTRATE** | **ACTIVE** | Agentic Actor Framework, Headless Coordination. |
 
 ---
 
-## Current Active: PHASE 11: LIFECYCLE & AUDIT [IN PROGRESS]
+## Current Active: PHASE 12: AUTONOMOUS SUBSTRATE [IN PROGRESS]
 
-**Goal**: Move from real-time coordination to semantic knowledge management and historical integrity.
+**Goal**: Transition from semantic memory to active agentic participation. AI actors becomes first-class members of the coordination substrate.
 
-### Workstream 0: Finishing Phase 10 (Dynamics)
-- [x] **Real-time cursor synchronization (TUI)**: Remote cursors now render in the status line with position and name.
-- [x] **Real-time cursor synchronization (Web/GUI)**: Update bridge and hardware-accelerated views.
-- [x] **Presence activity integration**: Activity stream integration for "Team Presence" search results.
-
-### Phase 11 Milestones
-- [x] **The Librarian Service (Semantic Indexing)**
-    - Long-term memory for the workspace using vector storage.
-    - Cross-project semantic search.
-    - [x] **Automated Context Injection**: RAG-enhanced AI intents. (Phase 11)
-- [x] **Temporal Playback (Event History)**
-    - The "Time Machine" for the workspace.
-    - Replay event streams to reconstruct previous states.
-- [x] **Workspace Archival (`.ark`)**
-    - Package a project, its state, and its history into a single portable archive.
-    - Support for "Cold Storage" and project handovers.
+### Phase 12 Milestones
+- [ ] **Agentic Actor Framework**
+    - Actor Identity: Assign per-actor IAM identities and standard Alloy roles.
+    - Proactive Interventions: Actors monitor event streams and suggest intents.
+    - Intent Delegation: Humans delegating complex sub-tasks to actors with verified execution.
+- [ ] **Headless Coordination**
+    - Zero-Frontend Clients: Backend-only clients for purely automated workflow steps.
+    - State Reconciliation: Ensuring headless actors stay in sync with GUI/TUI users.
+- [ ] **Hardware-Verified Identity (Security)**
+    - mTLS Enhancements: Moving towards hardware-backed keys.
+    - Role Attestation: Cryptographic proofs for role assignments.
 
 ---
 

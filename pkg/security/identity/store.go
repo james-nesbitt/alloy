@@ -106,7 +106,7 @@ func (s *Store) GetClientTLSConfig(ca *pki.KeyPair, clientName string) (*tls.Con
 		return nil, err
 	}
 
-	tlsCert, err := tls.X509KeyPair(pair.CertPEM, pair.KeyPEM)
+	tlsCert, err := pki.LoadTLSCertificate(pair.CertPEM, pair.KeyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (s *Store) GetClientTLSConfig(ca *pki.KeyPair, clientName string) (*tls.Con
 
 // GetServerTLSConfig returns a config for a core instance
 func (s *Store) GetServerTLSConfig(ca *pki.KeyPair, pair *pki.KeyPair) (*tls.Config, error) {
-	tlsCert, err := tls.X509KeyPair(pair.CertPEM, pair.KeyPEM)
+	tlsCert, err := pki.LoadTLSCertificate(pair.CertPEM, pair.KeyPEM)
 	if err != nil {
 		return nil, err
 	}

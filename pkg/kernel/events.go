@@ -3,7 +3,9 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"regexp"
 	"sync"
 	"time"
 
@@ -15,20 +17,28 @@ type subscriber struct {
 	Actor string
 }
 
+type patternSubscriber struct {
+	Pattern *regexp.Regexp
+	ID      string
+	Actor   string
+}
+
 // EventManager handles pub/sub for the Alloy ecosystem.
 type EventManager struct {
-	mu          sync.RWMutex
-	subscribers map[string][]subscriber // topic -> subscribers
-	logger      *slog.Logger
-	route       func(context.Context, api.Message)
-	iam         *IdentityManager
+	mu                 sync.RWMutex
+	subscribers        map[string][]subscriber // topic -> subscribers
+	patternSubscribers []patternSubscriber     // Registered patterns
+	logger             *slog.Logger
+	route              func(context.Context, api.Message)
+	iam                *IdentityManager
 }
 
 func NewEventManager(logger *slog.Logger, iam *IdentityManager) *EventManager {
 	return &EventManager{
-		subscribers: make(map[string][]subscriber),
-		logger:      logger,
-		iam:         iam,
+		subscribers:        make(map[string][]subscriber),
+		patternSubscribers: make([]patternSubscriber, 0),
+		logger:             logger,
+		iam:                iam,
 	}
 }
 
@@ -51,7 +61,8 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 	switch msg.Method {
 	case "subscribe", "events:subscribe":
 		var req struct {
-			Topic string `json:"topic"`
+			Topic   string `json:"topic"`
+			Pattern string `json:"pattern"`
 		}
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
 			return api.Message{}, err
@@ -63,12 +74,29 @@ func (e *EventManager) HandleMessage(ctx context.Context, msg api.Message) (api.
 		}
 
 		e.mu.Lock()
-		e.subscribers[req.Topic] = append(e.subscribers[req.Topic], subscriber{
-			ID:    msg.Sender,
-			Actor: actor,
-		})
+		if req.Pattern != "" {
+			re, err := regexp.Compile(req.Pattern)
+			if err != nil {
+				e.mu.Unlock()
+				return api.Message{}, fmt.Errorf("invalid pattern: %w", err)
+			}
+			e.patternSubscribers = append(e.patternSubscribers, patternSubscriber{
+				Pattern: re,
+				ID:      msg.Sender,
+				Actor:   actor,
+			})
+			e.logger.Debug("plugin subscribed to pattern", "plugin", msg.Sender, "pattern", req.Pattern)
+		}
+
+		if req.Topic != "" {
+			e.subscribers[req.Topic] = append(e.subscribers[req.Topic], subscriber{
+				ID:    msg.Sender,
+				Actor: actor,
+			})
+			e.logger.Debug("plugin subscribed to topic", "plugin", msg.Sender, "topic", req.Topic)
+		}
 		e.mu.Unlock()
-		e.logger.Debug("plugin subscribed to topic", "plugin", msg.Sender, "topic", req.Topic)
+
 		return api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,
@@ -110,13 +138,32 @@ func (e *EventManager) Publish(ctx context.Context, topic string, sender string,
 // PublishScoped distributes an event with a namespace scope (context).
 func (e *EventManager) PublishScoped(ctx context.Context, topic string, sender string, data json.RawMessage, scope string) {
 	e.mu.RLock()
-	subs := e.subscribers[topic]
+	var subs []subscriber
+	if s, ok := e.subscribers[topic]; ok {
+		subs = append(subs, s...)
+	}
+
+	for _, ps := range e.patternSubscribers {
+		if ps.Pattern.MatchString(topic) {
+			subs = append(subs, subscriber{ID: ps.ID, Actor: ps.Actor})
+		}
+	}
 	e.mu.RUnlock()
 
-	e.logger.Info("publishing event", "topic", topic, "subscribers", len(subs), "sender", sender, "scope", scope)
+	// Deduplicate subscribers
+	seen := make(map[string]bool)
+	var finalSubs []subscriber
+	for _, sub := range subs {
+		if !seen[sub.ID] {
+			finalSubs = append(finalSubs, sub)
+			seen[sub.ID] = true
+		}
+	}
+
+	e.logger.Info("publishing event", "topic", topic, "subscribers", len(finalSubs), "sender", sender, "scope", scope)
 
 	if e.route != nil {
-		for _, sub := range subs {
+		for _, sub := range finalSubs {
 			// Pre-flight Redaction Logic
 			if scope != "" && e.iam != nil {
 				// Check if this subscriber actor can receive this topic in this scope

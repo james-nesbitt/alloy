@@ -1,6 +1,8 @@
 package kernel
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,6 +26,7 @@ type SharedBuffer struct {
 	History      []api.BufferChange
 	mu           sync.RWMutex
 	onUpdate     []func(id string, offset int, length int)
+	manager      *BufferManager // Reference to parent for event broadcasting
 }
 
 // Satisfy SharedBuffer interface for api.SharedBuffer
@@ -100,27 +103,24 @@ func (b *SharedBuffer) ApplyChange(change api.BufferChange) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Conflict Resolution Lite: LWW (Last Write Wins) with Overlap Check
+	// Conflict Resolution Phase 12:
+	// A change is "valid" even if stale if it doesn't overlap with any intermediate changes.
 	if change.Version < b.Version {
-		// The change is based on an older version. Check if it overlaps with recent history.
-		overlap := false
 		for i := len(b.History) - 1; i >= 0; i-- {
 			hist := b.History[i]
 			if hist.Version < change.Version {
+				// History is sorted by version, we can stop once we're behind the incoming change.
 				break
 			}
+
 			// Intersection check
 			if (change.Offset < hist.Offset+len(hist.Data)) && (change.Offset+len(change.Data) > hist.Offset) {
-				// We have an overlap. If the incoming change is physically older, we reject it.
-				if change.Timestamp < hist.Timestamp {
-					overlap = true
-					break
+				// We have a direct overlap. Use LWW (Last Write Wins) based on timestamp.
+				// If the incoming change is physically older than a change we already applied to this region, we reject it.
+				if change.Timestamp <= hist.Timestamp {
+					return fmt.Errorf("buffer conflict: stale change (v%d) at offset %d overlaps with newer version (v%d)", change.Version, change.Offset, hist.Version)
 				}
 			}
-		}
-
-		if overlap {
-			return fmt.Errorf("buffer conflict: stale change at offset %d overlaps with newer version", change.Offset)
 		}
 	}
 
@@ -141,7 +141,30 @@ func (b *SharedBuffer) ApplyChange(change api.BufferChange) error {
 		b.History = b.History[1:]
 	}
 
+	// Trigger callbacks and broadcast event for headless sync (Phase 12)
 	b.triggerUpdate(change.Offset, len(change.Data))
+
+	if b.manager != nil && b.manager.events != nil {
+		eventData, _ := json.Marshal(map[string]any{
+			"id":      b.ID,
+			"offset":  change.Offset,
+			"length":  len(change.Data),
+			"version": b.Version,
+			"actor":   change.Actor,
+		})
+		b.manager.events.Publish(context.Background(), "buffer:updated", "kernel", eventData)
+	}
+
+	return nil
+}
+
+// VisualIntent broadcasts a virtual cursor or highlight for this buffer (Phase 12)
+func (b *SharedBuffer) VisualIntent(intent api.VisualIntent) error {
+	if b.manager != nil && b.manager.events != nil {
+		intent.BufferID = b.ID
+		eventData, _ := json.Marshal(intent)
+		b.manager.events.Publish(context.Background(), "visual:intent", "kernel", eventData)
+	}
 	return nil
 }
 
@@ -151,6 +174,7 @@ type BufferManager struct {
 	dataDir string
 	buffers map[string]*SharedBuffer
 	mu      sync.RWMutex
+	events  *EventManager
 }
 
 // NewBufferManager creates a new BufferManager.
@@ -160,6 +184,13 @@ func NewBufferManager(logger *slog.Logger, dataDir string) *BufferManager {
 		dataDir: dataDir,
 		buffers: make(map[string]*SharedBuffer),
 	}
+}
+
+// SetEventManager attaches an EventManager for broadcasting (Phase 12)
+func (bm *BufferManager) SetEventManager(e *EventManager) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.events = e
 }
 
 // CreateBuffer creates or opens a memory-mapped buffer.
@@ -207,12 +238,13 @@ func (bm *BufferManager) CreateBuffer(id, name string, initialSize int) (api.Sha
 	}
 
 	b := &SharedBuffer{
-		ID:   id,
-		Name: name,
-		Path: path,
-		Size: initialSize,
-		Data: data,
-		File: file,
+		ID:      id,
+		Name:    name,
+		Path:    path,
+		Size:    initialSize,
+		Data:    data,
+		File:    file,
+		manager: bm,
 	}
 
 	bm.buffers[id] = b

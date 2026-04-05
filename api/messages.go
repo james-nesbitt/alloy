@@ -246,11 +246,11 @@ type Attestation struct {
 type Delegation struct {
 	ID          string          `json:"id"`
 	ParentID    string          `json:"parent_id,omitempty"`
-	Owner       string          `json:"owner"`    // Assigner
-	Assignee    string          `json:"assignee"` // Agent
-	Status      string          `json:"status"`   // "pending", "in_progress", "complete", "failed"
-	Task        string          `json:"task"`     // Goal description
+	Owner       string          `json:"owner"`                // Assigner
+	Assignee    string          `json:"assignee"`             // Agent
+	Status      string          `json:"status"`               // "pending", "in_progress", "complete", "failed"
+	Task        string          `json:"task"`                 // Goal description
 	Payload     json.RawMessage `json:"payload,omitempty"`
 	Attestation *Attestation    `json:"attestation,omitempty"`
-	Chain       []string        `json:"chain,omitempty"` // IDs of sub-task delegations
+	Chain       []string        `json:"chain,omitempty"`      // IDs of sub-task delegations
 }

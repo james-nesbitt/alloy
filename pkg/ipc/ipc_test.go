@@ -20,6 +20,8 @@ func (m *mockRouter) RouteMessage(ctx context.Context, msg api.Message) {
 
 func (m *mockRouter) RegisterFrontend(id string, ch chan<- api.Message) {}
 
+func (m *mockRouter) RegisterFrontendExt(id string, ch chan<- api.Message, headless bool) {}
+
 func TestServerClient(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	router := &mockRouter{msgCh: make(chan api.Message, 10)}

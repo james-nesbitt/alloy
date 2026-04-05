@@ -65,7 +65,7 @@ func usage() {
 	fmt.Println("  alloy web [options]           Launch Web frontend (optionally with dedicated core)")
 	fmt.Println("  alloy version                 Show version info")
 	fmt.Println("\nCommon Options:")
-	fmt.Println("  --data-dir DIR                Plugin data directory (default: ./data)")
+	fmt.Println("  --data-dir DIR                Plugin data directory (default: ./build/data)")
 	fmt.Println("  --provision FILE              Initial provisioning manifest")
 	fmt.Println("\nCore Options:")
 	fmt.Println("  --listen ADDR                 Listen address (default: unix://./alloy.sock)")
@@ -129,7 +129,7 @@ func findBinary(name string) (string, error) {
 func launchCore(args []string) {
 	fs := flag.NewFlagSet("core", flag.ExitOnError)
 	listen := fs.String("listen", "unix://./alloy.sock", "Listen address")
-	dataDir := fs.String("data-dir", "./data", "Data directory")
+	dataDir := fs.String("data-dir", "./build/data", "Data directory")
 	provision := fs.String("provision", "", "Provisioning file")
 	debug := fs.Bool("debug", false, "Enable debug logging")
 	sf := cmdutil.RegisterSecurityFlags(fs)
@@ -187,7 +187,7 @@ func launchFrontend(name string, args []string) {
 	network := fs.Bool("network", false, "Use network socket for dedicated core")
 	debug := fs.Bool("debug", false, "Enable debug logging")
 	provision := fs.String("provision", "", "Initial provisioning manifest for dedicated core")
-	dataDir := fs.String("data-dir", "./data", "Data directory for dedicated core")
+	dataDir := fs.String("data-dir", "./build/data", "Data directory for dedicated core")
 	sf := cmdutil.RegisterSecurityFlags(fs)
 	fs.Parse(args)
 

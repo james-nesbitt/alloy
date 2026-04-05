@@ -1,15 +1,24 @@
 # AGENT MANDATORY RULES & ROLES
 
-This file defines the **absolute rules** and **operational roles** for all AI agents working on Alloy. 
-Failure to follow these rules will result in task rejection.
+## 🚨 !! DO NOT WORK IN MAIN !! 🚨
+
+Any agent (Developer, Architect, etc.) found working directly in the `main` branch has failed their task.
+- **NEVER** write, edit, or delete files while checked out on `main`.
+- **NEVER** commit directly to `main`.
+- All work, including documentation and plans, **MUST** occur in a feature (`feat/`), fix (`fix/`), or documentation (`docs/`) branch.
+- If you find yourself in `main`, you must stop immediately, create a branch, and move your changes there.
+
+---
+
 
 ## 🛑 MANDATORY WORKFLOW (READ FIRST)
 
 ### 1. BRANCHING & MERGING
 - **NEW DEVELOPMENT**: Must ALWAYS start in a new branch (`feat/`, `fix/`, or `docs/`).
-- **NEVER** work on or commit directly to `main`.
+- **NEVER** work on or commit directly to `main`. **NO EXCEPTIONS.**
 - **NO DEVELOPER MERGES**: Developers are strictly forbidden from merging into `main`.
 - **REVIEWER AUTHORITY**: Only the REVIEWER (or User) is allowed to merge a branch.
+
 
 ### 2. VERIFICATION (REVIEWER ONLY)
 Before any merge, the REVIEWER **MUST** run and pass:

@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"log/slog"
 
@@ -29,6 +30,11 @@ func NewLoggerManager(logger *slog.Logger, dataDir string) (*LoggerManager, erro
 
 func (l *LoggerManager) SetRouter(r func(context.Context, api.Message)) {
 	l.route = r
+}
+
+// SetSigner attaches a cryptographic signer to the audit logger.
+func (l *LoggerManager) SetSigner(s crypto.Signer) {
+	l.audit.SetSigner(s)
 }
 
 func (l *LoggerManager) ID() string { return "logger" }
