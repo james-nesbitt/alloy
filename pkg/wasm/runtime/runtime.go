@@ -1225,14 +1225,14 @@ func (r *Runtime) internalProposeIntent(ctx context.Context, mod wazeroapi.Modul
 		Name:   "intent:propose",
 		Sender: mod.Name(),
 	}
-	
+
 	pData := map[string]interface{}{
 		"intent":      name,
 		"description": desc,
 		"payload":     json.RawMessage(payload),
 	}
 	proposal.Payload, _ = json.Marshal(pData)
-	
+
 	if contextID != "" {
 		proposal.ContextID = contextID
 	}
@@ -1247,4 +1247,3 @@ func (r *Runtime) internalProposeIntent(ctx context.Context, mod wazeroapi.Modul
 		Payload: msgPayload,
 	})
 }
-

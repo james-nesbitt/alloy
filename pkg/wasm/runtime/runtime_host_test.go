@@ -31,7 +31,7 @@ type mockModule struct {
 	mem  *mockMemory
 }
 
-func (m *mockModule) Name() string { return m.name }
+func (m *mockModule) Name() string             { return m.name }
 func (m *mockModule) Memory() wazeroapi.Memory { return m.mem }
 
 func TestRuntime_HostExports_Propose(t *testing.T) {
@@ -50,32 +50,32 @@ func TestRuntime_HostExports_Propose(t *testing.T) {
 	// id (8), name (8), desc (8), payload (8), context_id (option: 4 discriminant + 8 string)
 	memData := make([]byte, 100)
 	le := binary.LittleEndian
-	
+
 	// id: ptr=0, len=4 ("test")
 	le.PutUint32(memData[0:], 50)
 	le.PutUint32(memData[4:], 4)
 	copy(memData[50:], "test")
-	
+
 	// name: ptr=8, len=4 ("goal")
 	le.PutUint32(memData[8:], 55)
 	le.PutUint32(memData[12:], 4)
 	copy(memData[55:], "goal")
-	
+
 	// desc: ptr=16, len=4 ("desc")
 	le.PutUint32(memData[16:], 60)
 	le.PutUint32(memData[20:], 4)
 	copy(memData[60:], "desc")
-	
+
 	// payload: ptr=24, len=2 ("{}")
 	le.PutUint32(memData[24:], 65)
 	le.PutUint32(memData[28:], 2)
 	copy(memData[65:], "{}")
-	
+
 	// context_id: discriminant=0 (None)
 	le.PutUint32(memData[32:], 0)
 
 	mod := &mockModule{name: "test-plugin", mem: &mockMemory{data: memData}}
-	
+
 	rt.internalProposeIntent(context.Background(), mod, 0)
 
 	if routedMsg.Method != "intent:dispatch" {
@@ -84,14 +84,14 @@ func TestRuntime_HostExports_Propose(t *testing.T) {
 
 	var intent api.Intent
 	json.Unmarshal(routedMsg.Payload, &intent)
-	
+
 	if intent.Name != "intent:propose" {
 		t.Errorf("expected intent name intent:propose, got %s", intent.Name)
 	}
-	
+
 	var pData map[string]interface{}
 	json.Unmarshal(intent.Payload, &pData)
-	
+
 	if pData["intent"] != "goal" {
 		t.Errorf("expected goal, got %v", pData["intent"])
 	}

@@ -281,3 +281,27 @@ func (w *wasmHost) fromWitMetadata(meta []alloy.AlloyTuple2StringStringT) []Allo
 	}
 	return res
 }
+
+func (w *wasmHost) toWitVisualIntent(intent AlloyVisualIntent) alloy.AlloyVisualIntent {
+	return alloy.AlloyVisualIntent{
+		BufferId:   intent.BufferID,
+		IntentType: intent.IntentType,
+		Offset:     intent.Offset,
+		Length:     intent.Length,
+		Color:      intent.Color,
+		Label:      intent.Label,
+	}
+}
+
+func (w *wasmHost) toWitProposeIntent(intent AlloyProposeIntent) alloy.AlloyProposeIntent {
+	return alloy.AlloyProposeIntent{
+		Id:          intent.Id,
+		Name:        intent.Name,
+		Description: intent.Description,
+		Payload:     intent.Payload,
+		ContextId:   w.toWitOptionString(intent.ContextID),
+	}
+}
+
+
+
