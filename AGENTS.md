@@ -1,103 +1,74 @@
-# AGENT MANDATORY RULES & ROLES
+# AGENT MANDATORY OPERATING PROCEDURES (AMOP)
 
-## 🚨 !! DO NOT WORK IN MAIN !! 🚨
+## 🚨 THE SUPREME DIRECTIVE: ISOLATION 🚨
 
-Any agent (Developer, Architect, etc.) found working directly in the `main` branch has failed their task.
-- **NEVER** write, edit, or delete files while checked out on `main`.
-- **NEVER** commit directly to `main`.
-- All work, including documentation and plans, **MUST** occur in a feature (`feat/`), fix (`fix/`), or documentation (`docs/`) branch.
-- If you find yourself in `main`, you must stop immediately, create a branch, and move your changes there.
+To prevent data loss, branch contamination, and build instability, all agents **MUST** follow this isolation protocol. Failure to follow this protocol is a critical system failure.
 
----
+### 1. STARTING AN EFFORT
+Every time a new plan or task is initiated:
+- **NEW BRANCH**: You **MUST** create a new feature (`feat/`), fix (`fix/`), or documentation (`docs/`) branch.
+- **NEW WORKTREE**: You **MUST** create a new git worktree for this branch. 
+  - `git worktree add ../alloy-<branch-name> <branch-name>`
+- **NEVER** work directly in `main`.
+- **NEVER** work in an existing worktree used by another task.
 
+### 2. EXECUTION PHASE
+- All development, documentation, and experimentation **MUST** happen within the isolated worktree.
+- If you find yourself in `main`, **STOP IMMEDIATELY**. Do not edit. Do not commit. Move to a branch and worktree.
 
-## 🛑 MANDATORY WORKFLOW (READ FIRST)
+### 3. VERIFICATION (MANDATORY)
+When the effort is considered "complete," you **MUST** run the full verification suite within the worktree before proposing a merge:
+1. **LINTING**: `just fmt` (Must pass without manual intervention).
+2. **FULL BUILD**: `just build-all` (All 14+ plugins and all frontends must compile).
+3. **FULL TEST**: `go test ./pkg/...` and any relevant plugin tests.
+4. **NO SUPPRESSION**: You **MUST NOT** ignore failures or suppress tests to "finish" a task.
 
-### 1. BRANCHING & MERGING
-- **NEW DEVELOPMENT**: Must ALWAYS start in a new branch (`feat/`, `fix/`, or `docs/`).
-- **NEVER** work on or commit directly to `main`. **NO EXCEPTIONS.**
-- **NO DEVELOPER MERGES**: Developers are strictly forbidden from merging into `main`.
-- **REVIEWER AUTHORITY**: Only the REVIEWER (or User) is allowed to merge a branch.
-
-
-### 2. VERIFICATION (REVIEWER ONLY)
-Before any merge, the REVIEWER **MUST** run and pass:
-1. `just fmt`
-2. `just build-all`
-3. `just test-all`
-- **FINAL CHECK**: At the end of every effort, before changes are merged, these full verification steps **MUST** be performed to confirm system integrity.
-
-- **EXCEPTION**: Changes restricted to `docs/`, `plans/`, `AGENTS.md`, or `README.md` (documentation-only) do NOT require `just build-all` or `just test-all`.
-- **NOTE**: Merges are only permitted if ALL tests pass. No exceptions for code changes.
-
-### 3. ROLE-BASED ACCESS CONTROL
-- **Documentation Only**: 
-  - **PLANNER and ARCHITECT**: Restricted to `docs/` and `plans/`. PLANNER may also update `README.md`.
-  - **AUDITOR**: Reporting only. No implementation.
-- **Code Modification**: 
-  - Only **DEVELOPER** and **REVIEWER** may modify the codebase (`.go`, `.wit`, `.js`).
-
-### 4. TESTING PROTOCOL
-- **DEVELOPER**: Must write unit tests alongside new code and verify them locally.
-- **REVIEWER**: Responsible for the full integration verification via `just test-all`.
+### 4. FINALIZATION & CLEANUP
+Closing an effort involves strict surgical cleanup:
+- **MERGE**: Merge the verified branch into `main`.
+- **SURGICAL REMOVAL**: Remove the git worktree and the local branch associated with the COMPLETED effort.
+- **🚨 STOP 🚨**: 
+  - **DO NOT** merge other pending branches.
+  - **DO NOT** remove other active worktrees.
+  - **DO NOT** perform "bulk" cleanup of the `../` directory.
 
 ---
 
-## 🛠 AGENT ROLES (INVOKE VIA SUBAGENT)
+## 🛠 AGENT ROLES & CONSTRAINTS
 
-```json
-subagent({ agent: "[role]", task: "[your instruction]" })
-```
+### PLANNER / ARCHITECT
+- **Permission**: READ codebase. WRITE to `docs/` and `plans/`.
+- **Mandate**: Define high-level requirements and structural changes.
 
-### PLANNER (Feature Planner)
-- **Rules**: READ ONLY on codebase. WRITE ONLY to `docs/`, `plans/`, or `README.md`.
-- **Task**: Define feature requirements, WIT interfaces, and project manifest impact. Describe deliverables and testing boundaries for the DEVELOPER.
-- **Context**: `README.md`, `docs/planning/ROADMAP.md`, `wit/alloy.wit`.
-- **Output**: `# Implementation Plan: [Feature Name]` (Markdown).
+### DEVELOPER
+- **Permission**: WRITE to specific subsystem files as defined in the plan.
+- **Mandate**: Execute the plan with 100% fidelity. Write unit tests for all new logic.
+- **Constraint**: Prohibited from merging to `main`.
 
-### ARCHITECT (Refactor Planner)
-- **Rules**: READ ONLY on codebase. WRITE ONLY to `docs/` or `plans/`.
-- **Task**: Analyze code debt and propose structural changes for decoupling and interface stability.
-- **Context**: `README.md`, `docs/core/ARCHITECTURE.md`, `docs/planning/ROADMAP.md`, `wit/alloy.wit`.
-- **Output**: `# Architectural Design: [Topic]` (Markdown).
-
-### DEVELOPER (Implementer)
-- **Rules**: MUST work in a `feat/`, `fix/`, or `docs/` branch. NEVER work on `main`. NO MERGING.
-- **Task**: Execute a confirmed PLANNER/ARCHITECT plan with precision. Follow `docs/core/CODING_GUIDELINES.md`.
-- **Task**: Write tests for new logic. Spot test as needed.
-
-### REVIEWER (Quality/Merge Guard)
-- **Rules**: SOLE ROLE authorized to merge into `main`.
-- **Task**: Critique code quality, test coverage, and documentation updates.
-- **Verification**: Perform FULL VERIFICATION (`just test-all`).
-
-### AUDITOR (Security/Fundamentals)
-- **Rules**: Focus on security holes, performance leaks, or bad Go patterns. Reporting only. No implementation.
-- **Task**: Evaluate current state for IAM bypasses, memory safety, and concurrency bugs.
-- **Context**: `pkg/kernel/iam.go`, `docs/core/SECURITY.md`, `pkg/wasm/runtime/runtime.go`.
-- **Output**: `# Security/Fundamentals Audit: [Topic]` (Markdown).
+### REVIEWER
+- **Permission**: SOLE authority to merge to `main`.
+- **Mandate**: Final gatekeeper for quality and the **AMOP Verification Suite**.
 
 ---
 
-## 🧬 SKILLS
-Skills provide specialized logic or instructions for specific domains.
+## ⚠️ LESSONS LEARNED (DO NOT REPEAT)
 
-### alloy-dev ([Details](.omp/skills/alloy-dev/SKILL.md))
-- **Domain**: WIT evolution, WASM plugin development, and standard verification.
-- **Workflow**:
-  1. `wit/alloy.wit` updates.
-  2. `just build-all` for binding regeneration.
-  3. `plugins/wasm/` implementation.
+### ❌ The "Lost Worktree" Incident
+- **Failure**: An agent performed a bulk cleanup or failed to track which worktree belonged to which effort, leading to the loss of the `allow-simple-editing` logic.
+- **Correction**: Worktrees must be named descriptively and removed **ONLY** after their specific branch is merged and verified.
+
+### ❌ The "Main Branch Contamination"
+- **Failure**: Agents editing directly in `main` leading to broken builds for other agents.
+- **Correction**: The `main` branch is a read-only source of truth for agents. Implementation happens elsewhere.
+
+### ❌ API Signature Mismatches
+- **Failure**: Changing a core interface (e.g., `frontend.Client.RouteMessage`) without updating all callers.
+- **Correction**: `just build-all` is non-negotiable. If it doesn't build, it doesn't exist.
 
 ---
 
-## ⚠️ COMMON PITFALLS & LESSONS LEARNED
+## 🧬 SKILLS & TOOLS
 
-### WASM `cabi_realloc` Memory Allocation Mismatches
-- **Symptom**: Panics in tests (e.g., `TestOmniPaletteSearch`) or at runtime.
-- **Cause**: Fields added to WIT but not accounted for in the host runtime's allocation calculation.
-- **Fix**: Verify `pkg/wasm/runtime/runtime.go` accounts for new struct sizes.
-
-### Git Hygiene
-- **Rule**: If you find yourself in `main`, STOP. `git stash`, switch branch, `git stash pop`.
-- **Rule**: Never squash or change history of `main`.
+- **alloy-dev**: Specialized skill for WIT evolution and plugin development.
+- **lsp**: Use `lsp references` before changing any exported symbol.
+- **ast_grep/ast_edit**: Use for structural changes instead of regex hacks.

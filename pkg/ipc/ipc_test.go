@@ -18,11 +18,9 @@ func (m *mockRouter) RouteMessage(ctx context.Context, msg api.Message) {
 	m.msgCh <- msg
 }
 
-func (m *mockRouter) RegisterFrontend(id string, ch chan<- api.Message) {}
+func (m *mockRouter) RegisterFrontend(id string, ch chan<- api.Message)                   {}
 func (m *mockRouter) RegisterFrontendExt(id string, ch chan<- api.Message, headless bool) {}
-func (m *mockRouter) UnregisterFrontend(id string) {}
-
-func (m *mockRouter) RegisterFrontendExt(id string, ch chan<- api.Message, headless bool) {}
+func (m *mockRouter) UnregisterFrontend(id string)                                        {}
 
 func TestServerClient(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
