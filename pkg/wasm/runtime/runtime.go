@@ -211,6 +211,8 @@ func (r *Runtime) instantiateHostModuleInRuntime(ctx context.Context, rt wazero.
 	builder.NewFunctionBuilder().WithFunc(r.internalUpdateWidget).Export("update-widget")
 	builder.NewFunctionBuilder().WithFunc(r.internalDispatchIntent).Export("dispatch-intent")
 	builder.NewFunctionBuilder().WithFunc(r.internalVisualIntent).Export("dispatch-visual-intent")
+	builder.NewFunctionBuilder().WithFunc(r.internalProposeIntent).Export("dispatch-propose-intent")
+
 	builder.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod wazeroapi.Module, resPtr uint32) {
 		mod.Memory().WriteUint32Le(resPtr, 0)
 		mod.Memory().WriteUint32Le(resPtr+4, 0)
@@ -1195,3 +1197,54 @@ func (r *Runtime) internalVisualIntent(ctx context.Context, mod wazeroapi.Module
 		}
 	}
 }
+func (r *Runtime) internalProposeIntent(ctx context.Context, mod wazeroapi.Module, ptr uint32) {
+	readStr := func(p uint32) string {
+		sPtr, _ := mod.Memory().ReadUint32Le(p)
+		sLen, _ := mod.Memory().ReadUint32Le(p + 4)
+		return r.readString(mod, sPtr, sLen)
+	}
+	id := readStr(ptr)
+	name := readStr(ptr + 8)
+	desc := readStr(ptr + 16)
+	pPtr, _ := mod.Memory().ReadUint32Le(ptr + 24)
+	pLen, _ := mod.Memory().ReadUint32Le(ptr + 28)
+	var payload []byte
+	if pLen > 0 {
+		payload, _ = mod.Memory().Read(pPtr, pLen)
+	} else {
+		payload = []byte("{}")
+	}
+	isSome, _ := mod.Memory().ReadUint32Le(ptr + 32)
+	contextID := ""
+	if isSome != 0 {
+		contextID = readStr(ptr + 36)
+	}
+
+	proposal := api.Intent{
+		ID:     id,
+		Name:   "intent:propose",
+		Sender: mod.Name(),
+	}
+	
+	pData := map[string]interface{}{
+		"intent":      name,
+		"description": desc,
+		"payload":     json.RawMessage(payload),
+	}
+	proposal.Payload, _ = json.Marshal(pData)
+	
+	if contextID != "" {
+		proposal.ContextID = contextID
+	}
+
+	msgPayload, _ := json.Marshal(proposal)
+	r.routerFn(ctx, api.Message{
+		ID:      proposal.ID,
+		Type:    api.TypeEvent,
+		Sender:  proposal.Sender,
+		Target:  "kernel",
+		Method:  "intent:dispatch",
+		Payload: msgPayload,
+	})
+}
+

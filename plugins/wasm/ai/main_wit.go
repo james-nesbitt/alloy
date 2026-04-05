@@ -752,6 +752,10 @@ func handleSummarizeBuffer(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "buffer_not_found")
 	}
 
+	// Phase 12: Visual Intent (Virtual Cursor/Scan)
+	// Show where we are scanning
+	plugin.DispatchVisualIntent(buf.Id, "highlight", 0, uint32(len(buf.Content)), "#4a9eff", "AI Scanning...")
+
 	plugin.Log("info", fmt.Sprintf("Summarizing buffer: %s (%d bytes)", buf.Id, len(buf.Content)))
 
 	// Create summary prompt
@@ -764,8 +768,19 @@ func handleSummarizeBuffer(msg AlloyMessage) AlloyMessage {
 		return plugin.ErrorReply(msg, "summarization_failed: "+err.Error())
 	}
 
+	// Phase 12: Proactive Proposal
+	// If the content contains "TODO" or "error", propose a follow-up action
+	contentStr := strings.ToUpper(string(buf.Content))
+	if strings.Contains(contentStr, "TODO") {
+		plugin.ProposeIntent("tasks:create", "Create a task for the discovered TODO", map[string]string{
+			"title":       "Address TODO in " + buf.Name,
+			"description": "Found a TODO during summarization of " + buf.Id,
+		}, "")
+	}
+
 	return plugin.Reply(msg, AIResponse{Response: response})
 }
+
 
 // getKnowledgeContext gets relevant context from the index/knowledge-graph.
 // getKnowledgeContext gets relevant context from the index/knowledge-graph.

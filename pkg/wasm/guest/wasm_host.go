@@ -66,6 +66,15 @@ func (w *wasmHost) DispatchIntent(intent AlloyIntent) {
 	alloy.AlloyDispatchIntent(w.toWitIntent(intent))
 }
 
+func (w *wasmHost) DispatchVisualIntent(intent AlloyVisualIntent) {
+	alloy.AlloyDispatchVisualIntent(w.toWitVisualIntent(intent))
+}
+
+func (w *wasmHost) ProposeIntent(intent AlloyProposeIntent) {
+	alloy.AlloyDispatchProposeIntent(w.toWitProposeIntent(intent))
+}
+
+
 func (w *wasmHost) Call(msg AlloyMessage) AlloyMessage {
 	res := alloy.AlloyCall(w.toWitMsg(msg))
 	return w.fromWitMsg(res)

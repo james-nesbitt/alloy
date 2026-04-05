@@ -161,7 +161,27 @@ type CommandResult struct {
 	Error   string          `json:"error,omitempty"`
 }
 
+// AlloyVisualIntent represents a visual overlay on a shared buffer (Phase 12)
+type AlloyVisualIntent struct {
+	BufferID   string
+	IntentType string // "cursor", "selection", "highlight", "comment"
+	Offset     uint32
+	Length     uint32
+	Color      string // CSS color string or ANSI code hint
+	Label      string // Optional label/short text
+}
+
+// AlloyProposeIntent represents a suggestion for a future action (Phase 12)
+type AlloyProposeIntent struct {
+	Id         string
+	Name       string // The intent name being proposed
+	Description string // Human-readable explanation of why
+	Payload    []byte // The recommended payload for the intent
+	ContextID  Option[string]
+}
+
 // HostInterface defines all interactions with the Alloy host.
+
 type HostInterface interface {
 	Init(id string, caps []AlloyCapability, background bool) // Phase 10
 	Started()
@@ -171,6 +191,9 @@ type HostInterface interface {
 	Call(msg AlloyMessage) AlloyMessage
 	RouteMessage(msg AlloyMessage)
 	DispatchIntent(intent AlloyIntent) // Phase 10
+	DispatchVisualIntent(intent AlloyVisualIntent) // Phase 12
+	ProposeIntent(intent AlloyProposeIntent) // Phase 12
+
 
 	// KV
 	KvSet(key string, val []byte) bool

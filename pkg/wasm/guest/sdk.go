@@ -308,7 +308,36 @@ func (p *Plugin) DispatchIntent(name string, payload any, contextID string) {
 	p.host.DispatchIntent(intent)
 }
 
+// DispatchVisualIntent sends a visual intent overlay for a shared buffer (Phase 12).
+func (p *Plugin) DispatchVisualIntent(bufferID string, intentType string, offset, length uint32, color, label string) {
+	p.host.DispatchVisualIntent(AlloyVisualIntent{
+		BufferID:   bufferID,
+		IntentType: intentType,
+		Offset:     offset,
+		Length:     length,
+		Color:      color,
+		Label:      label,
+	})
+}
+
+// ProposeIntent suggests an intent to the user or kernel (Phase 12).
+func (p *Plugin) ProposeIntent(name string, description string, payload any, contextID string) {
+	data, _ := json.Marshal(payload)
+	ctxID := None[string]()
+	if contextID != "" {
+		ctxID = Some(contextID)
+	}
+	p.host.ProposeIntent(AlloyProposeIntent{
+		Id:          fmt.Sprintf("propose-%s-%d", name, p.Timestamp()),
+		Name:        name,
+		Description: description,
+		Payload:     data,
+		ContextID:   ctxID,
+	})
+}
+
 // Timestamp returns a current timestamp in milliseconds.
+
 func (p *Plugin) Timestamp() uint64 {
 	// Best-effort timestamp from host or local (if available)
 	return 0 // TODO: Implement robust timestamp in SDK
