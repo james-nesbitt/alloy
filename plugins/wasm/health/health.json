@@ -1,0 +1,5 @@
+{
+  "id": "health",
+  "load_time": "lazy",
+  "instance_pattern": "mono"
+}

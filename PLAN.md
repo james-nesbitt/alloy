@@ -1,86 +1,66 @@
-# Phase 13: Capability-Led Base Refactor
+# Phase 14: Alloy as a Project Editor
 
-**Status**: PLANNING (REFINED)
+**Status**: PLANNING
 **Date**: 2026-04-06  
-**Goal**: Transform the Kernel into an environment-agnostic "Base Host" that delegates discovery and initialization to plugins via **structured capabilities**.
+**Goal**: Transform Alloy from a general-purpose plugin host into a high-fidelity, autonomous-first code editor. This phase focuses on the "Edit-Test-Commit" cycle and deep integration with language servers and existing SCM tools.
 
 ---
 
-## 1. Core Principles (Refined)
+## 1. Core Principles (Phase 14)
 
-### 1.1 Capability-Led Bootstrap (Principle #1)
-The Kernel must not contain any hardcoded logic for discovering a "Base" (project/workspace). It only knows how to:
-1.  **Register** available plugins (reading metadata without instantiating WASM).
-2.  **Match** a requested "Discovery Capability" to a registered plugin.
-3.  **Delegate** the discovery process to that plugin.
+### 1.1 High-Fidelity Context Engine (Principle #1)
+The editor must be aware of the codebase's semantics, not just its text. This requires deep LSP integration and semantic indexing.
 
-### 1.2 FS-Independence (Principle #2)
-The Kernel's only native filesystem operations are:
-1.  Scanning a **Global Plugin Directory** for WASM binaries + manifests.
-2.  Providing a **WASI-mapped mount** to plugins that require disk access (optional).
-*Config discovery, project scanning, and manifest generation must happen inside WASM plugins.*
+### 1.2 Multi-Buffer Coordination (Principle #2)
+Complex refactoring and broad-scale edits must have transactional safety across multiple buffers.
 
-### 1.3 Advocacy & Suggestions (Principle #3)
-The CLI or Frontend (the "Advocate") suggests which plugins to use for discovery based on its environment:
--   **CLI**: Suggests `filesystem-provider` when running `alloy .`.
--   **Web Frontend**: Suggests `remote-provider` or `indexed-db-provider`.
+### 1.3 SCM-First Workflow (Principle #3)
+Git/Mercurial integration must be a first-class citizen of the interaction loop, not an external afterthought.
 
 ---
 
-## 2. Technical Milestones (Revised)
+## 2. Technical Milestones (Phase 14)
 
-### Milestone 1: Metadata-Only Registry & Structured Capabilities
-- [ ] **Plugin Metadata**: Update `api/messages.go` and the Plugin Manifest format to include `Advertisements` (e.g., `{ "type": "base:provider", "variant": "path" }`).
-- [ ] **Lazy Registration**: Refactor `pkg/kernel/registry.go` to register plugins by reading their `.json` or `.wit` headers *without* starting the WASM guest.
-- [ ] **Capability Matching**: Implement a lookup engine in the Kernel to find plugins by advertised capability.
-
-### Milestone 2: The "Filesystem" Discovery Plugin (WASM)
-- [ ] Create a minimalist `filesystem` WASM plugin (independent of the `project` plugin).
-- [ ] **Capability**: Advertise `base:provider:path`.
-- [ ] **Logic**: Implements `base:discover(context) -> BaseManifest`.
-- [ ] **WASI Usage**: Reads `.alloy/plugins/` using the standard WASI filesystem API (mapped by the Kernel).
-
-### Milestone 3: Discovery Delegation (Base Manager)
-- [ ] **Refactor BaseManager**: Remove all `os` and `filepath` references.
+### Milestone 1: LSP Integration (gopls/rust-analyzer)
+- [ ] **LSP Adapter Plugin**: Create a WASM plugin that bridges to a host-side LSP server (e.g. `gopls`).
+- [ ] **Capability**: Advertise `editor:symbols` and `editor:references`.
 - [ ] **Implementation**:
-    1.  `BaseManager:activate(context, req_capability)`
-    2.  Find plugin matching `req_capability`.
-    3.  Instantiate and send `base:discover(context)`.
-    4.  Receive `BaseManifest` and realize the described ecosystem.
+    1.  `lsp:request_definition(context, buffer_id, offset)`
+    2.  `lsp:request_references(context, buffer_id, offset)`
+    3.  `lsp:get_diagnostics(context, buffer_id)`
 
-### Milestone 4: Multi-Base Isolation (IAM)
-- [x] **Mandatory Base-Scoping**: Ensure the `IdentityManager` isolates messages by `BaseID`. (Completed in Prelim M1).
-- [ ] **Instance Multiplexing**: Support multiple WASM guest instances for the same plugin binary, keyed by `BaseID`.
+### Milestone 2: Native Git Integration
+- [ ] **Git Plugin**: Wrap `go-git` or similar in a WASM plugin.
+- [ ] **Capability**: Advertise `scm:git`.
+- [ ] **Implementation**:
+    1.  `git:diff(context, path)`
+    2.  `git:stage(context, path)`
+    3.  `git:commit(context, message)`
 
----
-
-## 3. Workflow Example: `alloy .`
-
-1.  **CLI** starts and connects to the Kernel.
-2.  **CLI** sends: `kernel:activate(context={"path": "."}, capability="base:provider:path")`.
-3.  **Kernel** checks its registry for a plugin advertising `base:provider:path`.
-4.  **Kernel** finds `plugins/filesystem.wasm`.
-5.  **Kernel** instantiates `filesystem` and maps the current directory to the guest's `/work` mount.
-6.  **Kernel** sends `base:discover(context={"root": "/work"})` to the `filesystem` guest.
-7.  **Guest** returns a manifest: `{"plugins": {"chat": {...}, "ai": {...}}}`.
-8.  **Kernel** loads `chat` and `ai` plugins, injecting their base-specific configs.
+### Milestone 3: Integrated Build & Test Pipeline
+- [ ] **Pipeline Plugin**: Listens for buffer updates and triggers background builds.
+- [ ] **Implementation**:
+    1.  `pipeline:run_task(context, task_id)`
+    2.  Stream output to virtual buffer (e.g., `buffer:output-build`).
 
 ---
 
-## 4. Progress Tracking
+## 3. Phase 13 Summary (DONE 🚀)
 
-### Milestone 1: In Progress
-- [x] API Definitions (`BaseID`, `InstancePattern`)
-- [x] IAM Isolation (Base-Scoping)
-- [ ] Structured Capability Advertisements
-- [ ] Metadata-Only Registration Loop
+### Completed Milestones
+- [x] **Metadata-Only Registry**: The Kernel now registers plugins without instantiating them, checking manifests for capabilities.
+- [x] **Filesystem Discovery Plugin**: Implemented a WASM plugin that discovers Bases at a given path.
+- [x] **Discovery Delegation**: `BaseManager` successfully delegates base discovery to the `filesystem` plugin.
+- [x] **Base-Scoping Isolation**: IAM now enforces isolation between different project Bases.
+- [x] **Just develop**: Automated project-centric launch and TUI activation.
 
-### Milestone 2: Pending
-- [ ] `filesystem` plugin implementation
+### Key Decisions
+- **Capability-Led Bootstrap**: The system is now truly agnostic to the filesystem; it just triggers capabilities.
+- **WASM Guest Mounts**: Settled on using directory-based mounts via wazero for plugin isolation.
 
 ---
 
-## 5. AMOP Compliance
-- **Worktree**: `/var/home/jnesbitt/Documents/Personal/alloy/.worktrees/phase-13-path-init`
-- **Branch**: `phase-13-path-init`
-- **Verification**: `just build-all` + unit tests for each milestone.
+## 4. AMOP Compliance
+- **Worktree**: `/var/home/jnesbitt/Documents/Personal/alloy/.worktrees/phase-14-project-editor`
+- **Branch**: `feat/phase-14-project-editor`
+- **Verification**: `just build-all` + `just develop`.

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/james-nesbitt/alloy/api"
 	"github.com/james-nesbitt/alloy/pkg/cmdutil"
 	"github.com/james-nesbitt/alloy/pkg/ipc"
 	"github.com/james-nesbitt/alloy/pkg/security/identity"

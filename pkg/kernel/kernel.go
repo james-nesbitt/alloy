@@ -271,7 +271,7 @@ func (k *Kernel) ScanPlugins(ctx context.Context, pluginDir string) error {
 		}
 
 		// No manifest found, register basic metadata with lazy loader
-		// We could potentially extract metadata from the WASM binary itself using custom sections (Phase 14?)
+		// We could potentially extract metadata from the WASM binary itself using custom sections (Phase 15?)
 		k.RegisterMetadata(api.PluginMetadata{
 			ID:       pluginID,
 			LoadTime: api.LoadTimeLazy,

@@ -174,3 +174,22 @@ test-web: install-web-deps
 install-web-deps:
     @echo ">> Installing web dependencies..."
     cd cmd/alloy-web && npm install
+
+# --- PHASE 13 DEVELOPMENT ---
+
+# Start a dedicated core and open the current folder as an Alloy Base
+develop: build-all
+	@echo ">> Launching Alloy Development Environment..."
+	@rm -f {{BUILD_DIR}}/alloy-dev.sock
+	@mkdir -p {{BUILD_DIR}}/data-dev
+	# Start core in background
+	@{{LIBEXEC_DIR}}/alloy-core --insecure --listen unix://{{BUILD_DIR}}/alloy-dev.sock --data-dir {{BUILD_DIR}}/data-dev --debug & \
+	echo $$! > {{BUILD_DIR}}/core.pid; \
+	# Wait for core socket to be ready
+	@sleep 2; \
+	# Open current project as base
+	@{{BIN_DIR}}/alloy open --socket unix://{{BUILD_DIR}}/alloy-dev.sock .; \
+	# Start TUI
+	@{{BIN_DIR}}/alloy tui --socket unix://{{BUILD_DIR}}/alloy-dev.sock; \
+	# Cleanup after TUI exit
+	@if [ -f {{BUILD_DIR}}/core.pid ]; then kill $$(cat {{BUILD_DIR}}/core.pid) || true; rm {{BUILD_DIR}}/core.pid; fi

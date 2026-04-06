@@ -1,0 +1,5 @@
+{
+  "id": "chat",
+  "load_time": "lazy",
+  "instance_pattern": "multi"
+}

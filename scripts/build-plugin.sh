@@ -36,3 +36,9 @@ echo ">> Compiling $PLUGIN_NAME into $BUILD_DIR..."
 tinygo build -target=wasip1 -o "$BUILD_DIR/$PLUGIN_NAME.wasm" -no-debug $OPT_FLAG .
 
 echo ">> Successfully built $PLUGIN_NAME.wasm"
+
+# Copy optional manifest file
+if [ -f "$PLUGIN_NAME.json" ]; then
+    cp "$PLUGIN_NAME.json" "$BUILD_DIR/"
+    echo ">> Copied manifest: $PLUGIN_NAME.json"
+fi

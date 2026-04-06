@@ -1,0 +1,5 @@
+{
+  "id": "documentation",
+  "load_time": "lazy",
+  "instance_pattern": "multi"
+}
