@@ -68,7 +68,7 @@ func (w *WidgetManager) HandleMessage(ctx context.Context, msg api.Message) (api
 
 			w.router(ctx, api.Message{
 				ID:      "evt-widget-reg-" + widget.ID,
-				Type:    api.TypeEvent,
+				Type:    api.TypeRequest,
 				Sender:  w.ID(),
 				Target:  "events",
 				Method:  "publish",
@@ -81,7 +81,10 @@ func (w *WidgetManager) HandleMessage(ctx context.Context, msg api.Message) (api
 			Sender:  w.ID(),
 			Target:  msg.Sender,
 			Payload: []byte(`{"status":"ok"}`),
+			Timestamp: time.Now().Unix(),
 		}, nil
+
+
 
 	case "unregister":
 		var req struct{ ID string }

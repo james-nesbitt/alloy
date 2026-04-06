@@ -179,17 +179,20 @@ install-web-deps:
 
 # Start a dedicated core and open the current folder as an Alloy Base
 develop: build-all
-	@echo ">> Launching Alloy Development Environment..."
-	@rm -f {{BUILD_DIR}}/alloy-dev.sock
-	@mkdir -p {{BUILD_DIR}}/data-dev
-	# Start core in background
-	@{{LIBEXEC_DIR}}/alloy-core --insecure --listen unix://{{BUILD_DIR}}/alloy-dev.sock --data-dir {{BUILD_DIR}}/data-dev --debug & \
-	echo $$! > {{BUILD_DIR}}/core.pid; \
-	# Wait for core socket to be ready
-	@sleep 2; \
-	# Open current project as base
-	@{{BIN_DIR}}/alloy open --socket unix://{{BUILD_DIR}}/alloy-dev.sock .; \
-	# Start TUI
-	@{{BIN_DIR}}/alloy tui --socket unix://{{BUILD_DIR}}/alloy-dev.sock; \
-	# Cleanup after TUI exit
-	@if [ -f {{BUILD_DIR}}/core.pid ]; then kill $$(cat {{BUILD_DIR}}/core.pid) || true; rm {{BUILD_DIR}}/core.pid; fi
+	#!/usr/bin/env bash
+	echo ">> Launching Alloy Development Environment..."
+	rm -f {{BUILD_DIR}}/alloy-dev.sock
+	mkdir -p {{BUILD_DIR}}/data-dev
+	{{LIBEXEC_DIR}}/alloy-core --insecure --listen unix://{{BUILD_DIR}}/alloy-dev.sock --data-dir {{BUILD_DIR}}/data-dev --debug > {{BUILD_DIR}}/core.log 2>&1 &
+	CORE_PID=$!
+	echo $CORE_PID > {{BUILD_DIR}}/core.pid
+	sleep 2
+	if ! {{BIN_DIR}}/alloy open --insecure --socket unix://{{BUILD_DIR}}/alloy-dev.sock .; then
+		echo "Failed to open project. Check {{BUILD_DIR}}/core.log for details."
+		kill $CORE_PID
+		exit 1
+	fi
+	{{BIN_DIR}}/alloy tui --insecure --socket unix://{{BUILD_DIR}}/alloy-dev.sock
+
+	kill $CORE_PID
+	rm {{BUILD_DIR}}/core.pid

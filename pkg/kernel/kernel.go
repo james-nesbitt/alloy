@@ -757,6 +757,7 @@ func (k *Kernel) RegisterPlugin(p api.Plugin) {
 	}
 
 	k.plugins[id] = p
+
 	caps := p.Capabilities()
 	var intents []string
 	for _, cap := range caps {
