@@ -290,10 +290,14 @@ func (i *IdentityManager) reply(msg api.Message, payload any) api.Message {
 }
 
 func (i *IdentityManager) Authorize(actor, target, method string) bool {
-	return i.AuthorizeWithContext(actor, target, method, "")
+	return i.AuthorizeWithBase(actor, target, method, "", "")
 }
 
 func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID string) bool {
+	return i.AuthorizeWithBase(actor, target, method, contextID, "")
+}
+
+func (i *IdentityManager) AuthorizeWithBase(actor, target, method, contextID, baseID string) bool {
 	i.mu.RLock()
 	insecure := i.insecure
 	i.mu.RUnlock()
@@ -302,11 +306,41 @@ func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID 
 	}
 
 	i.mu.RLock()
-
 	defer i.mu.RUnlock()
 
-	// Formalize Actor status
-	isAgent := i.IsActor(actor)
+	// Challenge #4: Mandatory Base-Scoping (Phase 13)
+	// Default Isolation: A message originating from a Base can only target
+	// components within the same Base OR global/public components.
+	// We use the actor and target identifiers to infer their base membership.
+
+	// System services are usually global
+	isGlobalTarget := target == "kernel" || target == "system" ||
+		target == "iam" || target == "events" ||
+		target == "widget-manager" || target == "command-manager" ||
+		target == "history" || target == "wasm-manager"
+
+	// If the actor is part of a base (indicated by baseID being non-empty)
+	// and the target is not global, we check if they share the same base.
+	// This is a simplified check; in a full implementation, we'd verify
+	// the target plugin's registration to see which Base it belongs to.
+	if baseID != "" && !isGlobalTarget {
+		// If both have baseIDs, they must match.
+		// If target's base is unknown, we assume it's isolated unless specifically marked public.
+		// For Milestone 1, we enforce that if a BaseID is provided, the target must match
+		// or be a global service.
+		targetParts := strings.SplitN(target, ":", 2)
+		if len(targetParts) == 2 {
+			targetBase := targetParts[0]
+			if targetBase != baseID && !isGlobalTarget {
+				i.logger.Warn("IAM Base-Scoping isolation violation", "actor", actor, "base", baseID, "target", target, "targetBase", targetBase)
+				return false
+			}
+		} else if !isGlobalTarget {
+			// Target has no base prefix but is not a global service.
+			// This might be a "Mono-Instance" plugin that is shared but base-aware.
+			// For now, we allow it if it declares itself as Public (to be implemented).
+		}
+	}
 
 	// 1. Get role (Global)
 	role, ok := i.identities[actor]
@@ -318,6 +352,7 @@ func (i *IdentityManager) AuthorizeWithContext(actor, target, method, contextID 
 		}
 	}
 
+	isAgent := i.IsActor(actor)
 	action := target + ":" + method
 
 	// 2. Check Namespace Permissions first (Ephemeral grants)

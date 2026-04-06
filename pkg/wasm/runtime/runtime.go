@@ -225,9 +225,9 @@ func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr,
 	id := r.readString(mod, idPtr, idLen)
 	isBackground := background != 0
 	if capsLen > 0 {
-		data, _ := mod.Memory().Read(capsPtr, capsLen*52) // Capability size is now 52 (Phase 10)
+		data, _ := mod.Memory().Read(capsPtr, capsLen*56) // Capability size is now 56 (Phase 13)
 		for i := uint32(0); i < capsLen; i++ {
-			p := i * 52
+			p := i * 56
 			cap := api.Capability{
 				Method:      r.readString(mod, i32le.Uint32(data[p:]), i32le.Uint32(data[p+4:])),
 				Description: r.readString(mod, i32le.Uint32(data[p+8:]), i32le.Uint32(data[p+12:])),
@@ -254,15 +254,20 @@ func (r *Runtime) internalInit(ctx context.Context, mod wazeroapi.Module, idPtr,
 				intentsPtr := i32le.Uint32(data[p+44:])
 				intentsLen := i32le.Uint32(data[p+48:])
 				if intentsLen > 0 {
-					id, _ := mod.Memory().Read(intentsPtr, intentsLen*8) // Each string is 8 bytes (ptr+len)
+					idv, _ := mod.Memory().Read(intentsPtr, intentsLen*8) // Each string is 8 bytes (ptr+len)
 					for j := uint32(0); j < intentsLen; j++ {
 						o := j * 8
-						sPtr := i32le.Uint32(id[o:])
-						sLen := i32le.Uint32(id[o+4:])
+						sPtr := i32le.Uint32(idv[o:])
+						sLen := i32le.Uint32(idv[o+4:])
 						cap.Intents = append(cap.Intents, r.readString(mod, sPtr, sLen))
 					}
 				}
 			}
+			// Phase 13: Advertised flag
+			if data[p+52] != 0 {
+				cap.Advertised = true
+			}
+
 			payload, _ := json.Marshal(cap)
 			r.routerFn(ctx, api.Message{
 				ID:     fmt.Sprintf("init-cap-%d-%d", time.Now().UnixNano(), i),
@@ -554,6 +559,10 @@ func (r *Runtime) internalSendResponse(ctx context.Context, mod wazeroapi.Module
 }
 
 func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, headless bool) (*Instance, error) {
+	return r.LoadPluginEx(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless, nil)
+}
+
+func (r *Runtime) LoadPluginEx(ctx context.Context, id string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, headless bool, mounts map[string]string) (*Instance, error) {
 	pluginDir := filepath.Join(r.dataDir, id)
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		return nil, err
@@ -562,7 +571,7 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 	startedCh := make(chan struct{})
 	instance := &Instance{
 		id: id, ctx: instCtx, cancel: instCancel, logger: r.logger, msgChan: make(chan api.Message, 1024),
-		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background, Headless: headless},
+		capabilities: caps, status: StatusRunning, metadata: api.PluginMetadata{ID: id, Capabilities: caps, Background: background, Headless: headless, Mounts: mounts},
 		startedCh: startedCh, pending: make(map[string]chan api.Message),
 		maxMemoryBytes: maxMemoryMB * 1024 * 1024, msgPerSecond: msgPerSec,
 		bytesPerSecond: 10 * 1024 * 1024, fuelLimit: 1000, lastMsgReset: time.Now(),
@@ -602,6 +611,11 @@ func (r *Runtime) LoadPlugin(ctx context.Context, id string, wasmBytes []byte, m
 
 		var fs wazero.FSConfig
 		fs = wazero.NewFSConfig().WithDirMount(pluginDir, "/")
+		for hostPath, guestPath := range mounts {
+			if _, err := os.Stat(hostPath); err == nil {
+				fs = fs.WithDirMount(hostPath, guestPath)
+			}
+		}
 		config := wazero.NewModuleConfig().WithName(id).WithStdout(newLoggerWriter(r.logger, id, "stdout")).WithStderr(newLoggerWriter(r.logger, id, "stderr")).WithFSConfig(fs)
 		mod, err := pluginRuntime.InstantiateModule(instCtx, compiled, config)
 		if err != nil {
@@ -712,7 +726,7 @@ func (r *Runtime) GetResponse(ctx context.Context, pluginID string, requestID st
 	}
 }
 
-func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen, intentsSet, intentsPtr, intentsLen uint32) {
+func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.Module, methodPtr, methodLen, descPtr, descLen, shortcutSet, shortcutPtr, shortcutLen, annoSet, annoPtr, annoLen, intentsSet, intentsPtr, intentsLen, advertised uint32) {
 	cap := api.Capability{Method: r.readString(mod, methodPtr, methodLen), Description: r.readString(mod, descPtr, descLen)}
 	if shortcutSet != 0 {
 		cap.Shortcut = r.readString(mod, shortcutPtr, shortcutLen)
@@ -729,13 +743,17 @@ func (r *Runtime) internalRegisterCapability(ctx context.Context, mod wazeroapi.
 	}
 	// Phase 10: Intents support in register-capability
 	if intentsSet != 0 && intentsLen > 0 {
-		id, _ := mod.Memory().Read(intentsPtr, intentsLen*8)
+		idd, _ := mod.Memory().Read(intentsPtr, intentsLen*8)
 		for i := uint32(0); i < intentsLen; i++ {
 			o := i * 8
-			sPtr := i32le.Uint32(id[o:])
-			sLen := i32le.Uint32(id[o+4:])
+			sPtr := i32le.Uint32(idd[o:])
+			sLen := i32le.Uint32(idd[o+4:])
 			cap.Intents = append(cap.Intents, r.readString(mod, sPtr, sLen))
 		}
+	}
+	// Phase 13: Advertised flag
+	if advertised != 0 {
+		cap.Advertised = true
 	}
 	payload, _ := json.Marshal(cap)
 	r.routerFn(ctx, api.Message{ID: fmt.Sprintf("reg-cap-%d", time.Now().UnixNano()), Sender: mod.Name(), Target: "command-manager", Method: "register-capability", Payload: payload})
@@ -853,10 +871,10 @@ func (r *Runtime) internalGetAllCapabilities(ctx context.Context, mod wazeroapi.
 	totalCaps := len(allCaps)
 	alloc := mod.ExportedFunction("cabi_realloc")
 
-	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(totalCaps*52))
+	res, _ := alloc.Call(ctx, 0, 0, 1, uint64(totalCaps*56))
 	basePtr := uint32(res[0])
 	for i, c := range allCaps {
-		r.writeCapability(ctx, mod, basePtr+uint32(i*52), c)
+		r.writeCapability(ctx, mod, basePtr+uint32(i*56), c)
 	}
 
 	mod.Memory().WriteUint32Le(resultPtr, basePtr)
@@ -922,6 +940,13 @@ func (r *Runtime) writeCapability(ctx context.Context, mod wazeroapi.Module, ptr
 		mod.Memory().WriteUint32Le(ptr+48, uint32(len(cap.Intents)))
 	} else {
 		mod.Memory().WriteUint32Le(ptr+40, 0)
+	}
+
+	// Phase 13: Advertised flag
+	if cap.Advertised {
+		mod.Memory().Write(ptr+52, []byte{1})
+	} else {
+		mod.Memory().Write(ptr+52, []byte{0})
 	}
 }
 

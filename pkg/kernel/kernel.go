@@ -73,6 +73,7 @@ type Kernel struct {
 	doc        *DocStore
 	buffers    *BufferManager
 	widgets    *WidgetManager
+	bases      *BaseManager
 
 	// security configuration
 	insecure bool
@@ -160,6 +161,9 @@ func New(logger *slog.Logger, storage storage.StateStore, dataDir string, metric
 	k.widgets = NewWidgetManager(logger, storage)
 	k.RegisterPlugin(k.widgets)
 
+	k.bases = NewBaseManager(logger, k)
+	k.RegisterPlugin(k.bases)
+
 	// Integrated Logger (Auditing)
 	auditDir := storage.BaseDir()
 	if auditDir != "" {
@@ -228,6 +232,58 @@ func (k *Kernel) processEventLog() {
 			return
 		}
 	}
+}
+
+func (k *Kernel) ScanPlugins(ctx context.Context, pluginDir string) error {
+	k.logger.Info("scanning for plugins", "dir", pluginDir)
+
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".wasm") {
+			continue
+		}
+
+		pluginID := strings.TrimSuffix(entry.Name(), ".wasm")
+		pluginPath := filepath.Join(pluginDir, entry.Name())
+
+		// Attempt to read companion manifest if it exists
+		manifestPath := filepath.Join(pluginDir, pluginID+".json")
+		var metadata api.PluginMetadata
+		if data, err := os.ReadFile(manifestPath); err == nil {
+			if err := json.Unmarshal(data, &metadata); err == nil {
+				metadata.ID = pluginID // Ensure ID matches filename
+				k.RegisterMetadata(metadata, &wasmLoader{
+					k:            k,
+					pluginID:     pluginID,
+					path:         pluginPath,
+					logger:       k.logger,
+					capabilities: metadata.Capabilities,
+				})
+				continue
+			}
+		}
+
+		// No manifest found, register basic metadata with lazy loader
+		// We could potentially extract metadata from the WASM binary itself using custom sections (Phase 14?)
+		k.RegisterMetadata(api.PluginMetadata{
+			ID:       pluginID,
+			LoadTime: api.LoadTimeLazy,
+		}, &wasmLoader{
+			k:        k,
+			pluginID: pluginID,
+			path:     pluginPath,
+			logger:   k.logger,
+		})
+	}
+
+	return nil
 }
 
 // SetInsecure disables security enforcement (RBAC, mTLS, etc.) in the kernel.
@@ -368,8 +424,8 @@ func (k *Kernel) RouteMessage(ctx context.Context, msg api.Message) {
 			if !isSystemService && msg.Type != api.TypeResponse {
 				contextID, _ := msg.Metadata["context"].(string)
 
-				if !k.iam.AuthorizeWithContext(actor, msg.Target, msg.Method, contextID) {
-					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target, "method", msg.Method, "ctx", contextID)
+				if !k.iam.AuthorizeWithBase(actor, msg.Target, msg.Method, contextID, msg.BaseID) {
+					k.logger.Warn("IAM denied routing", "actor", actor, "target", msg.Target, "method", msg.Method, "ctx", contextID, "base", msg.BaseID)
 					k.telemetry.RecordError(ctx, msg.Target, "auth_denied")
 					span.SetAttributes(attribute.Bool("alloy.msg.allowed", false))
 
@@ -935,6 +991,20 @@ func (k *Kernel) handleInternalMessage(ctx context.Context, msg api.Message) {
 	}
 
 	switch msg.Method {
+	case "base:activate":
+		k.mu.RLock()
+		bases := k.bases
+		k.mu.RUnlock()
+		if bases != nil {
+			resp, err := bases.HandleMessage(ctx, msg)
+			if err != nil {
+				k.logger.Error("failed to activate base", "error", err)
+				return
+			}
+			k.RouteMessage(ctx, resp)
+		}
+		return
+
 	case "bootstrap-path":
 		k.handleKernelMessage(ctx, msg)
 		return
@@ -1094,7 +1164,11 @@ type wasmLoader struct {
 }
 
 func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, error) {
-	l.logger.Info("lazy-loading plugin", "id", id, "path", l.path)
+	return l.LoadPluginWithMounts(ctx, id, nil)
+}
+
+func (l *wasmLoader) LoadPluginWithMounts(ctx context.Context, id string, mounts map[string]string) (api.Plugin, error) {
+	l.logger.Info("lazy-loading plugin", "id", id, "path", l.path, "mounts", len(mounts))
 
 	wasmBytes, err := os.ReadFile(l.path)
 	if err != nil {
@@ -1109,7 +1183,7 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 		l.msgPerSecond = 1000
 	}
 
-	if err := l.k.RegisterWASMPluginAtScale(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities, l.background, l.sidecar, l.headless); err != nil {
+	if err := l.k.RegisterWASMPluginEx(id, wasmBytes, l.maxMemoryMB, l.msgPerSecond, l.capabilities, l.background, l.sidecar, l.headless, mounts); err != nil {
 		return nil, fmt.Errorf("failed to register lazy-loaded WASM: %w", err)
 	}
 
@@ -1125,6 +1199,10 @@ func (l *wasmLoader) LoadPlugin(ctx context.Context, id string) (api.Plugin, err
 
 // RegisterWASMPluginAtScale registers a WASM plugin with the kernel. (Phase 10)
 func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, sidecar bool, headless bool) error {
+	return k.RegisterWASMPluginEx(pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps, background, sidecar, headless, nil)
+}
+
+func (k *Kernel) RegisterWASMPluginEx(pluginID string, wasmBytes []byte, maxMemoryMB uint32, msgPerSec int, caps []api.Capability, background bool, sidecar bool, headless bool, mounts map[string]string) error {
 	plugin := &witPluginWrapper{
 		id:         pluginID,
 		manager:    k.wasmManager,
@@ -1135,7 +1213,7 @@ func (k *Kernel) RegisterWASMPluginAtScale(pluginID string, wasmBytes []byte, ma
 	}
 
 	k.RegisterPlugin(plugin)
-	return k.wasmManager.LoadPlugin(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless)
+	return k.wasmManager.LoadPluginEx(context.Background(), pluginID, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless, mounts)
 }
 
 // RegisterWASMPlugin registers a WASM plugin with default limits. (Phase 10)
@@ -1212,6 +1290,13 @@ func (k *Kernel) GetPlugin(id string) (api.Plugin, bool) {
 	defer k.mu.RUnlock()
 	p, ok := k.plugins[id]
 	return p, ok
+}
+
+func (k *Kernel) GetLoader(id string) (api.PluginLoader, bool) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	l, ok := k.loaders[id]
+	return l, ok
 }
 
 func (k *Kernel) RegisterInterceptor(i api.Interceptor) {

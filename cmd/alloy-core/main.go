@@ -156,6 +156,16 @@ func main() {
 		}
 	}
 
+	// Scan system plugins directory for registration (without loading)
+	if exe, err := os.Executable(); err == nil {
+		fhsPlugins := filepath.Join(filepath.Dir(exe), "..", "lib", "alloy", "plugins")
+		k.ScanPlugins(ctx, fhsPlugins)
+	}
+
+	// Scan common development plugin paths as well
+	cwd, _ := os.Getwd()
+	k.ScanPlugins(ctx, filepath.Join(cwd, "build", "dist", "usr", "lib", "alloy", "plugins"))
+
 	// Load provisioned plugins if found
 	if currentProvisionFile != "" {
 		data, err := os.ReadFile(currentProvisionFile)

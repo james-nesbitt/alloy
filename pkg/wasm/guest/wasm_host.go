@@ -201,6 +201,7 @@ func (w *wasmHost) toWitCap(c AlloyCapability) alloy.AlloyCapability {
 		Shortcut:    w.toWitOptionString(c.Shortcut),
 		Annotations: w.toWitOptionMetadata(c.Annotations),
 		Intents:     w.toWitOptionStringList(c.Intents),
+		Advertised:  c.Advertised,
 	}
 }
 
@@ -211,6 +212,7 @@ func (w *wasmHost) fromWitCap(c alloy.AlloyCapability) AlloyCapability {
 		Shortcut:    w.fromWitOptionString(c.Shortcut),
 		Annotations: w.fromWitOptionMetadata(c.Annotations),
 		Intents:     w.fromWitOptionStringList(c.Intents),
+		Advertised:  c.Advertised,
 	}
 }
 

@@ -1,5 +1,7 @@
 package guest
 
+import "encoding/json"
+
 // Option/Result types inspired by WIT-bindgen's output
 // but relocated here to be platform-independent.
 
@@ -96,6 +98,7 @@ type AlloyCapability struct {
 	Shortcut    Option[string]
 	Annotations Option[[]AlloyTuple2StringStringT]
 	Intents     Option[[]string] // Phase 10
+	Advertised  bool             // Phase 13
 }
 
 // AlloyBuffer represents a direct data buffer.
@@ -123,6 +126,11 @@ type AlloyIntent struct {
 	Sender    string
 	Payload   []byte
 	ContextID Option[string]
+}
+
+// BaseManifest defines the plugins and their configurations for a Base (Phase 13).
+type BaseManifest struct {
+	Plugins map[string]json.RawMessage `json:"plugins"` // Plugin ID -> Config
 }
 
 // Log levels

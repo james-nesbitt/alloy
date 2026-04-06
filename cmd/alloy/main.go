@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -52,6 +53,8 @@ func main() {
 		fmt.Println("Alloy Tool v0.1.0")
 	case "init":
 		initProject(args)
+	case "open":
+		openBase(args)
 	case "help":
 
 		usage()
@@ -133,23 +136,71 @@ func initProject(args []string) {
 	fmt.Printf("Initialized Alloy project in %s\n", path)
 }
 
-func findBinary(name string) (string, error) {
-	// 1. Check current executable's directory
-	exe, err := os.Executable()
-	if err == nil {
-		path := filepath.Join(filepath.Dir(exe), name)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
+func openBase(args []string) {
+	fs := flag.NewFlagSet("open", flag.ExitOnError)
+	socket := fs.String("socket", "", "Connect to existing core socket")
+	capability := fs.String("capability", "base:provider:path", "Discovery capability to request")
+	_ = cmdutil.RegisterSecurityFlags(fs)
+	fs.Parse(args)
 
-		// Look specifically for alloy-core in ../libexec/alloy/ (Standard installation layout)
-		if name == "alloy-core" {
-			instPath := filepath.Join(filepath.Dir(exe), "..", "libexec", "alloy", name)
-			if _, err := os.Stat(instPath); err == nil {
-				return instPath, nil
-			}
-		}
+	path := "."
+	if fs.NArg() > 0 {
+		path = fs.Arg(0)
 	}
+	absPath, _ := filepath.Abs(path)
+
+	// Determine socket
+	targetSocket := *socket
+	if targetSocket == "" {
+		targetSocket = "unix://" + filepath.Join(getAlloyRuntimeDir(), "default.sock")
+	}
+
+	// 1. Connect to Core
+	client, err := ipc.Dial(targetSocket, nil)
+	if err != nil {
+		fmt.Printf("Error: Could not connect to Alloy Core at %s: %v\n", targetSocket, err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// 2. Send activation request
+	activationReq := map[string]any{
+		"base_id":    filepath.Base(absPath),
+		"capability": *capability,
+		"metadata": map[string]any{
+			"project_path": absPath,
+		},
+	}
+	payload, _ := json.Marshal(activationReq)
+
+	msg := api.Message{
+		ID:        "cli-open-" + fmt.Sprint(time.Now().UnixNano()),
+		Type:      api.TypeRequest,
+		Sender:    "cli",
+		Target:    "kernel",
+		Method:    "base:activate",
+		Payload:   payload,
+		Timestamp: time.Now().Unix(),
+	}
+
+	fmt.Printf(">> Activating Base at %s (capability: %s)...\n", absPath, *capability)
+	resp, err := client.Call(ctx, msg)
+	if err != nil {
+		fmt.Printf("Error: Activation failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if strings.Contains(string(resp.Payload), "error") {
+		fmt.Printf("Error: %s\n", string(resp.Payload))
+		os.Exit(1)
+	}
+
+	fmt.Println(">> Base activated successfully.")
+}
+
+func findBinary(name string) (string, error) {
 
 	// 2. Check dev environment relative paths (build/dist/usr/bin)
 	cwd, _ := os.Getwd()

@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/james-nesbitt/alloy/api"
@@ -24,18 +22,29 @@ func (k *Kernel) handleKernelMessage(ctx context.Context, msg api.Message) (api.
 			return api.Message{}, fmt.Errorf("missing path in payload")
 		}
 
-		err := k.BootstrapPath(ctx, path)
-		if err != nil {
-			k.logger.Error("failed to bootstrap path", "path", path, "error", err)
-			return api.Message{}, err
-		}
+		// Phase 13: Refactor to Base-led activation via Capability
+		activationPayload, _ := json.Marshal(map[string]any{
+			"base_id":    "default-" + filepath.Base(path),
+			"capability": "base:provider:path",
+			"metadata": map[string]any{
+				"project_path": path,
+			},
+		})
+		k.RouteMessage(ctx, api.Message{
+			ID:      "bootstrap-base-" + fmt.Sprint(time.Now().UnixNano()),
+			Type:    api.TypeRequest,
+			Sender:  "kernel",
+			Target:  "base-manager",
+			Method:  "activate",
+			Payload: activationPayload,
+		})
 
 		return api.Message{
 			ID:        msg.ID + "-resp",
 			Type:      api.TypeResponse,
 			Sender:    "kernel",
 			Target:    msg.Sender,
-			Payload:   []byte(`{"status":"ok"}`),
+			Payload:   []byte(`{"status":"bootstrapping"}`),
 			Timestamp: time.Now().Unix(),
 		}, nil
 	default:
@@ -43,61 +52,22 @@ func (k *Kernel) handleKernelMessage(ctx context.Context, msg api.Message) (api.
 	}
 }
 
-// BootstrapPath performs discovery and activation on a given base path.
+// BootstrapPath is now a wrapper that emulates the legacy behavior using Base-led activation.
 func (k *Kernel) BootstrapPath(ctx context.Context, baseCtx string) error {
-	k.logger.Info("bootstrapping path", "path", baseCtx)
-	alloyDir := filepath.Join(baseCtx, ".alloy")
-	if _, err := os.Stat(alloyDir); os.IsNotExist(err) {
-		return fmt.Errorf(".alloy directory not found in %s", baseCtx)
-	}
-
-	// 1. Stable Socket Creation
-	sockAddr := "unix://" + filepath.Join(alloyDir, "alloy.sock")
-	k.mu.RLock()
-	onAddListener := k.onAddListener
-	k.mu.RUnlock()
-
-	if onAddListener != nil {
-		k.logger.Info("registering project socket", "path", sockAddr)
-		if err := onAddListener(sockAddr); err != nil {
-			k.logger.Warn("failed to register project socket", "path", sockAddr, "error", err)
-		}
-	}
-
-	// 2. Discovery & Activation
-	files, err := os.ReadDir(alloyDir)
-	if err != nil {
-		return err
-	}
-
-	for _, f := range files {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
-			continue
-		}
-
-		pluginID := strings.TrimSuffix(f.Name(), ".json")
-		configPath := filepath.Join(alloyDir, f.Name())
-
-		content, err := os.ReadFile(configPath)
-		if err != nil {
-			k.logger.Error("failed to read plugin config", "id", pluginID, "path", configPath, "error", err)
-			continue
-		}
-
-		// Routes content as a generic configuration message
-		k.RouteMessage(ctx, api.Message{
-			ID:        fmt.Sprintf("bootstrap-%s-%d", pluginID, time.Now().UnixNano()),
-			Type:      api.TypeRequest,
-			Sender:    "kernel",
-			Target:    pluginID,
-			Method:    "config:update",
-			Payload:   content,
-			Timestamp: time.Now().Unix(),
-			Metadata: map[string]any{
-				"project_path": baseCtx,
-			},
-		})
-	}
-
+	payload, _ := json.Marshal(map[string]any{
+		"base_id":    "legacy-" + filepath.Base(baseCtx),
+		"capability": "base:provider:path",
+		"metadata": map[string]any{
+			"project_path": baseCtx,
+		},
+	})
+	k.RouteMessage(ctx, api.Message{
+		ID:      "legacy-bootstrap-" + fmt.Sprint(time.Now().UnixNano()),
+		Type:    api.TypeRequest,
+		Sender:  "kernel",
+		Target:  "base-manager",
+		Method:  "activate",
+		Payload: payload,
+	})
 	return nil
 }

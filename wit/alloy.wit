@@ -22,6 +22,7 @@ world alloy {
             shortcut: option<string>,
             annotations: option<list<tuple<string, string>>>,
             intents: option<list<string>>,
+            advertised: bool,
         }
 
         // Buffer structure for high-performance direct data access

@@ -68,7 +68,16 @@ func (p *Plugin) WithCapability(method, description string) *Plugin {
 		Shortcut:    None[string](),
 		Annotations: None[[]AlloyTuple2StringStringT](),
 		Intents:     None[[]string](),
+		Advertised:  false,
 	})
+	return p
+}
+
+// WithAdvertisement marks the last added capability as advertised (Phase 13).
+func (p *Plugin) WithAdvertisement() *Plugin {
+	if len(p.capabilities) > 0 {
+		p.capabilities[len(p.capabilities)-1].Advertised = true
+	}
 	return p
 }
 

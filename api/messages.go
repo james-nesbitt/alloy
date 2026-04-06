@@ -29,6 +29,7 @@ type Message struct {
 	Metadata  map[string]any  `json:"metadata,omitempty"`
 	Actor     string          `json:"actor,omitempty"`      // The identity performing the action (e.g., user email)
 	SessionID string          `json:"session_id,omitempty"` // The unique session for the actor
+	BaseID    string          `json:"base_id,omitempty"`    // The unique Base this message belongs to (Phase 13)
 }
 
 // PluginLoadTime defines when a plugin should be loaded.
@@ -39,20 +40,31 @@ const (
 	LoadTimeLazy PluginLoadTime = "lazy"
 )
 
+// InstancePattern defines how a plugin is instantiated across Bases.
+type InstancePattern string
+
+const (
+	InstanceMono  InstancePattern = "mono"
+	InstanceMulti InstancePattern = "multi"
+)
+
 // PluginMetadata describes a plugin's identity and capabilities before it is fully loaded.
 type PluginMetadata struct {
-	ID           string         `json:"id"`
-	Capabilities []Capability   `json:"capabilities"`
-	LoadTime     PluginLoadTime `json:"load_time"`
-	Intents      []string       `json:"intents,omitempty"`    // Aggregated list of intents this plugin can handle (Phase 10)
-	Background   bool           `json:"background,omitempty"` // Whether this plugin runs as a background actor (Phase 10)
-	Sidecar      bool           `json:"sidecar,omitempty"`    // Whether this plugin is a global sidecar (Phase 10)
-	Headless     bool           `json:"headless,omitempty"`   // Whether this plugin/client is headless (Phase 12)
+	ID              string            `json:"id"`
+	Capabilities    []Capability      `json:"capabilities"`
+	LoadTime        PluginLoadTime    `json:"load_time"`
+	Mounts          map[string]string `json:"mounts,omitempty"`     // Host path -> Guest path
+	Intents         []string          `json:"intents,omitempty"`    // Aggregated list of intents this plugin can handle (Phase 10)
+	Background      bool              `json:"background,omitempty"` // Whether this plugin runs as a background actor (Phase 10)
+	Sidecar         bool              `json:"sidecar,omitempty"`    // Whether this plugin is a global sidecar (Phase 10)
+	Headless        bool              `json:"headless,omitempty"`   // Whether this plugin/client is headless (Phase 12)
+	InstancePattern InstancePattern   `json:"instance_pattern,omitempty"`
 }
 
 // PluginLoader is an interface for components that can load a plugin on demand.
 type PluginLoader interface {
 	LoadPlugin(ctx context.Context, id string) (Plugin, error)
+	LoadPluginWithMounts(ctx context.Context, id string, mounts map[string]string) (Plugin, error)
 }
 
 // Plugin defines the interface for components that can be registered with the kernel.
@@ -129,6 +141,7 @@ type Capability struct {
 	Shortcut    string            `json:"shortcut,omitempty"`    // Keyboard shortcut/mnemonic (e.g., "b l")
 	Annotations map[string]string `json:"annotations,omitempty"` // Additional metadata (e.g., {"group": "buffers"})
 	Intents     []string          `json:"intents,omitempty"`     // Intents satisfied by this method (Phase 10)
+	Advertised  bool              `json:"advertised,omitempty"`  // Whether this capability can be discovered without loading (Phase 13)
 }
 
 // Intent structure for goal-oriented routing (Phase 10)
@@ -154,14 +167,25 @@ type Proposal struct {
 
 // Registration defines a component's presence in the system.
 type Registration struct {
-	ID           string       `json:"id"`
-	Type         string       `json:"type"`
-	Status       string       `json:"status,omitempty"`
-	Capabilities []Capability `json:"capabilities,omitempty"`
-	Background   bool         `json:"background,omitempty"` // Phase 10
-	Sidecar      bool         `json:"sidecar,omitempty"`    // Phase 10
-	Intents      []string     `json:"intents,omitempty"`    // Phase 10
-	Headless     bool         `json:"headless,omitempty"`   // Phase 12
+	ID              string          `json:"id"`
+	Type            string          `json:"type"`
+	Status          string          `json:"status,omitempty"`
+	Capabilities    []Capability    `json:"capabilities,omitempty"`
+	Background      bool            `json:"background,omitempty"` // Phase 10
+	Sidecar         bool            `json:"sidecar,omitempty"`    // Phase 10
+	Intents         []string        `json:"intents,omitempty"`    // Phase 10
+	Headless        bool            `json:"headless,omitempty"`   // Phase 12
+	InstancePattern InstancePattern `json:"instance_pattern,omitempty"`
+}
+
+// BaseManifest defines the plugins and their configurations for a Base.
+type BaseManifest struct {
+	Plugins map[string]json.RawMessage `json:"plugins"` // Plugin ID -> Config
+}
+
+// BaseProvider defines the interface for components that can discover Bases.
+type BaseProvider interface {
+	Discover(ctx context.Context, baseID string, metadata map[string]any) (*BaseManifest, error)
 }
 
 // WidgetUpdate represents a content refresh for a specific widget.

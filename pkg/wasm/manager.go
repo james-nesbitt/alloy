@@ -69,8 +69,22 @@ func (m *Manager) LoadPlugin(
 	background bool,
 	headless bool,
 ) error {
+	return m.LoadPluginEx(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless, nil)
+}
+
+func (m *Manager) LoadPluginEx(
+	ctx context.Context,
+	id string,
+	wasmBytes []byte,
+	maxMemoryMB uint32,
+	msgPerSec int,
+	caps []api.Capability,
+	background bool,
+	headless bool,
+	mounts map[string]string,
+) error {
 	// Load the plugin in the runtime
-	instance, err := m.runtime.LoadPlugin(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless)
+	instance, err := m.runtime.LoadPluginEx(ctx, id, wasmBytes, maxMemoryMB, msgPerSec, caps, background, headless, mounts)
 	if err != nil {
 		return err
 	}

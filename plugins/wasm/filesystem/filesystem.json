@@ -1,0 +1,16 @@
+{
+  "id": "filesystem",
+  "load_time": "lazy",
+  "capabilities": [
+    {
+      "method": "base:provider:path",
+      "description": "Filesystem-based Base discovery provider",
+      "advertised": true
+    },
+    {
+      "method": "base:discover",
+      "description": "Discover Base configuration via filesystem scan"
+    }
+  ],
+  "instance_pattern": "mono"
+}
